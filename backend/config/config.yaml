@@ -1,0 +1,9 @@
+database:
+  engine: sqlite
+  name: devicevault.sqlite3
+local_admin:
+  username: admin
+  encrypted_password: ''
+new_database:
+  engine: ''
+  name: ''

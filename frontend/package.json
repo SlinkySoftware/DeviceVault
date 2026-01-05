@@ -1,0 +1,19 @@
+{
+  "name": "devicevault",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "quasar dev",
+    "build": "quasar build"
+  },
+  "dependencies": {
+    "quasar": "*",
+    "vue": "*",
+    "vue-router": "*",
+    "axios": "*",
+    "@quasar/extras": "*"
+  },
+  "devDependencies": {
+    "@quasar/app-vite": "*"
+  }
+}

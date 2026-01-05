@@ -1,0 +1,48 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+*.egg
+db.sqlite3
+devicevault.sqlite3
+
+# Django local settings / secrets
+.env
+.env.local
+.env.*
+
+# VS Code / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / PIDs
+*.log
+.pids/
+*.pid
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/.quasar/
+frontend/.cache/
+frontend/dist/
+frontend/.vite/
+
+# Quasar build
+.quasar/
+
+# OS files
+.DS_Store
+Thumbs.db

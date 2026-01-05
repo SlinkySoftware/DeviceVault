@@ -1,0 +1,34 @@
+
+I want an application to manage network device backups.  It should be called DeviceVault.
+It should have both a web interface for user and admin access and a backend component that will collect and recieve backups as required.
+This application should be written in Python using the Django framework.  Web frontend should use vue v3 with the quasar framework.
+
+The idea is that this application will be able to connect to devices via SSH or API and extract configuration by executing appropriate commands / api calls.
+It may also have the ability to accept TFTP connections from devices that "push" backups to this application.
+It should support all Manufacturers of network devices, including (but not limited to) Cisco, Fortigate, Dell, Sophos, Mikrotik etc.
+All backups should be stored in a defined location and kept for a defined retention period.  Backups should be timestamped.
+
+It should store the configuration for the application in a local SQLite database by default, but also offer the option to use Postgres, or MySQL.  Within the administration settings pages, It should have the ability to define a separate "New" configuration database in the config file and contain the logic to migrate configuration from the current database to a new database and then once confirmed as operational, to switch the config file and application to use the new config database.
+Database configuration and encrypted local application admin credentials should be stored in a local config file.  All other config should be stored in the config database.
+There should be appropriate administration web interface to manage all aspects of the application configuration.
+Initial run of the application (when configuration file is not present) should present the option to accept the default database location and credentials and set the local admin username and password.  Once this is confirmed, it should enter the application administration settings pages.  Admin settings for the application should only be visible to the local admin user or other users with the application admin RBAC permission.
+
+
+The application should have a clean dynamic web based user interface with the following:
+1) A menu on the left of each page, with links to the various user functions in the application.  Also a link to an "Admin Settings" section for users with an appropriate RBAC permission.
+2) A Dashboard page which is the default page for the application, showing number of devices of each type configured, Number of backups successfully completed in the last 24 hours, number of failed backups in the last 24 hours, average time for backup to complete and a chart showing backup success rate over the last week, with data points on each day of the week.  It should also have a panel for "Recent Activity" that shows an audit log of backup activity and application configuration activity.  Visibility of log entries should be subject to RBAC with only seeing log entries related to activity they have access to.
+3) A device management page with a table of all devices with the ability to filter the table by device type, device manufacturer, last backup time, number of backups retained and last backup status.  This page should have buttons to add a new device and to enable or disable backups, view backups etc for each of the devices and also to edit the configuration for each device.  Access to the add / edit / view functions should be subject to RBAC.
+4) An Edit Device page, called from the device management page with the ability to create new devices or edit existing devices. It should capture device type from a pre-existing list and record all details relevant to a network device including IP address, DNS name, device type, device manufacturer, backup location and credential set to connect to the device abd backup retention policy ( from pre-defined list).  It should allow tagging of devices with pre-defined labels that can be used to restrict visibility of certain devices or backups.  Users should only be able to select tags which their user has access to.  Should include the ability to select a pre-defined notification should the configuration change.
+5) A device type management page, with a table of all known device types (e.g. switches, routers, firewalls etc). and the ability to add / edit / delete these device types.  It should prevent deletion of a type that's in use.
+6) A Device Credential management page, where the pre-defined list of stored credentials to devices can be edited.  It should allow different credential types to be selected, including locally stored (e.g. username and password stored in the app database), cyberark, hashicorp etc)
+7) A page to manage the different credential types and url's (or other required configuration) for cyberark or hashicorp API's (or other credential providers)
+8) A backup location management page, with the ability to define backup locations.  You should include the ability to define various location types including Git Repository (default), local filesystem, S3 Bucket etc.  Think of any backup location types that might be requested and include these.  Assume you need to record credentials etc for these locations.
+9) A retention policy management page, with the ability to define a backup retention policy.  This should have similar options to other backup products e.g. number of backups, time to retain, total used space, and any other retention policy types that might be useful.
+10) A user management page, where a list of configured users and their associated permissions is visible.  Automatic user proviisoning (e.g. JIT) should be available.  No creation of local accounts (other than the initial local admin account) should be possible unless local auth is configured.
+11) A RBAC management page, linking groups / saml claims etc to application roles.  Application roles can be linked to labels that allow access to vertain dataq within other pages (e.g. devices, log entries etc)
+12) An authentication configuration page defining the user authentication type in use by the application.  It should support LDAP, SAML, Entra ID, Local Auth.  Local Auth should store encrypted credentials in the configuration database. 
+
+13) A view backups page which shows backups for a selected device (from the device management page).  It should show basic device information at the top of the page and then have a table listing all backups that exist for a device.  For text-based backups, it should have the abiility to select any 2 backups and "Compare" the 2 versions, highlighting the differences.
+
+
+Please write all the code to do this and provide me a set of instructions to install any dependencies on debian linux v13 running python 3.13, then provide a zip file to install the app.
