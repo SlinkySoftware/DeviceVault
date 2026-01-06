@@ -1,31 +1,16 @@
-
 from django.db import models
 from django.contrib.auth.models import User
+import json
 
-class Label(models.Model):
-    name = models.CharField(max_length=64, unique=True)
-    description = models.TextField(blank=True)
-    def __str__(self): return self.name
-
-class UserProfile(models.Model):
-    """Store user preferences"""
-    THEME_CHOICES = [
-        ('light', 'Light Mode'),
-        ('dark', 'Dark Mode'),
-    ]
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    theme = models.CharField(max_length=10, choices=THEME_CHOICES, default='dark')
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    def __str__(self):
-        return f"Profile for {self.user.username}"
 
 class DashboardLayout(models.Model):
     """Store dashboard widget configuration per user or as default"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='dashboard_layout', null=True, blank=True)
     is_default = models.BooleanField(default=False)
+    
+    # JSON structure: [{ x, y, w, h, i (widget_id) }, ...]
     layout = models.JSONField(default=list)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -36,4 +21,3 @@ class DashboardLayout(models.Model):
         if self.is_default:
             return f"Default Dashboard Layout"
         return f"Dashboard Layout for {self.user.username}"
-

@@ -25,6 +25,18 @@
       </q-card-section>
       <q-separator />
       <q-card-section>
+        <div class="text-subtitle1 q-mb-md">Theme Preference</div>
+        <q-select 
+          v-model="theme" 
+          :options="themeOptions" 
+          label="Theme" 
+          emit-value 
+          map-options
+          @update:model-value="saveTheme"
+        />
+      </q-card-section>
+      <q-separator />
+      <q-card-section>
         <div class="text-subtitle1 q-mb-md">Change Password</div>
         <q-form @submit="changePassword" class="q-gutter-md">
           <q-input v-model="pwd.current" type="password" label="Current Password" :disable="!editable" />
@@ -41,10 +53,16 @@
 
 <script>
 import { defineComponent } from 'vue'
+import { useQuasar } from 'quasar'
 import api from '../services/api'
 
 export default defineComponent({
   name: 'ProfilePage',
+  setup() {
+    return {
+      $q: useQuasar()
+    }
+  },
   data() {
     return {
       user: {
@@ -57,7 +75,12 @@ export default defineComponent({
       loading: false,
       pwd: { current: '', new1: '', new2: '' },
       pwdLoading: false,
-      error: null
+      error: null,
+      theme: 'dark',
+      themeOptions: [
+        { label: 'Dark Mode', value: 'dark' },
+        { label: 'Light Mode', value: 'light' }
+      ]
     }
   },
   computed: {
@@ -78,6 +101,10 @@ export default defineComponent({
         last_name: res.data.last_name
       }
       this.editable = !!res.data.editable
+      
+      // Load theme preference
+      const prefs = await api.get('/user/preferences/')
+      this.theme = prefs.data.theme || 'dark'
     } catch (e) {
       this.error = e.response?.data?.detail || 'Failed to load user details'
     } finally {
@@ -106,6 +133,17 @@ export default defineComponent({
         this.$q.notify({ type: 'negative', message: msg, position: 'top' })
       } finally {
         this.loading = false
+      }
+    },
+    async saveTheme() {
+      try {
+        await api.patch('/user/preferences/', { theme: this.theme })
+        localStorage.setItem('userTheme', this.theme)
+        this.$q.dark.set(this.theme === 'dark')
+        this.$q.notify({ type: 'positive', message: 'Theme updated', position: 'top' })
+      } catch (e) {
+        const msg = e.response?.data?.detail || 'Failed to update theme'
+        this.$q.notify({ type: 'negative', message: msg, position: 'top' })
       }
     },
     async changePassword() {

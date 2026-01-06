@@ -29,5 +29,8 @@ urlpatterns = [
     path('api/auth/login/', views.LoginView.as_view()), 
     path('api/auth/logout/', views.LogoutView.as_view()), 
     path('api/auth/user/', views.UserInfoView.as_view()),
-    path('api/auth/change-password/', views.ChangePasswordView.as_view())
+    path('api/auth/change-password/', views.ChangePasswordView.as_view()),
+    path('api/dashboard-layout/', views.DashboardLayoutView.as_view()),
+    path('api/dashboard-layout/default/', views.DashboardDefaultLayoutView.as_view()),
+    path('api/user/preferences/', views.UserPreferencesView.as_view()),
 ]

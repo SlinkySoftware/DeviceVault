@@ -93,3 +93,15 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({'new_password': 'New password must be at least 8 characters'})
         return data
 
+# Dashboard Layout Serializer
+from core.models import DashboardLayout, UserProfile
+
+class DashboardLayoutSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DashboardLayout
+        fields = ['id', 'user', 'is_default', 'layout', 'updated_at']
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['theme', 'created_at', 'updated_at']

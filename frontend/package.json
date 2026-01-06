@@ -7,11 +7,11 @@
     "build": "quasar build"
   },
   "dependencies": {
+    "@quasar/extras": "*",
+    "axios": "*",
     "quasar": "*",
     "vue": "*",
-    "vue-router": "*",
-    "axios": "*",
-    "@quasar/extras": "*"
+    "vue-router": "*"
   },
   "devDependencies": {
     "@quasar/app-vite": "*"

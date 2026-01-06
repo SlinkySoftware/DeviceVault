@@ -13,7 +13,7 @@ from backups.models import Backup
 from policies.models import RetentionPolicy
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
-from core.models import Label
+from core.models import Label, DashboardLayout
 from rbac.models import Role, Permission
 from audit.models import AuditLog
 from .serializers import (
@@ -21,7 +21,8 @@ from .serializers import (
     BackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
     CredentialSerializer, CredentialTypeSerializer, LabelSerializer,
     RoleSerializer, PermissionSerializer, UserSerializer, AuditLogSerializer,
-    LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer
+    LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
+    UserProfileSerializer
 )
 import difflib, os
 
@@ -197,6 +198,78 @@ class ChangePasswordView(APIView):
             request.user.save()
             return response.Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
         return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class DashboardLayoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Try to get user's layout, fall back to default
+        layout = DashboardLayout.objects.filter(user=request.user).first()
+        if not layout:
+            layout = DashboardLayout.objects.filter(is_default=True, user__isnull=True).first()
+        if not layout:
+            # Return empty default layout
+            return response.Response({'layout': [], 'is_default': False}, status=status.HTTP_200_OK)
+        serializer = DashboardLayoutSerializer(layout)
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        # Save or update user's layout
+        layout, created = DashboardLayout.objects.get_or_create(
+            user=request.user,
+            is_default=False
+        )
+        layout.layout = request.data.get('layout', [])
+        layout.save()
+        serializer = DashboardLayoutSerializer(layout)
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
+
+class DashboardDefaultLayoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Get default layout (admin only)
+        if not request.user.is_staff:
+            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        layout = DashboardLayout.objects.filter(is_default=True, user__isnull=True).first()
+        if not layout:
+            return response.Response({'layout': [], 'is_default': True}, status=status.HTTP_200_OK)
+        serializer = DashboardLayoutSerializer(layout)
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        # Save default layout (admin only)
+        if not request.user.is_staff:
+            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        layout, created = DashboardLayout.objects.get_or_create(
+            is_default=True,
+            user__isnull=True
+        )
+        layout.layout = request.data.get('layout', [])
+        layout.save()
+        serializer = DashboardLayoutSerializer(layout)
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
+
+class UserPreferencesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Get user preferences (theme)
+        from core.models import UserProfile
+        profile, created = UserProfile.objects.get_or_create(user=request.user)
+        serializer = UserProfileSerializer(profile)
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        # Update user preferences
+        from core.models import UserProfile
+        profile, created = UserProfile.objects.get_or_create(user=request.user)
+        serializer = UserProfileSerializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return response.Response(serializer.data, status=status.HTTP_200_OK)
+        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 @decorators.api_view(['POST'])
 def compare_backups(request):

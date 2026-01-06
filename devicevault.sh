@@ -52,10 +52,15 @@ function check_requirements() {
         exit 1
     fi
     
-    # Check quasar
-    if ! command -v quasar &> /dev/null; then
-        print_warning "Quasar CLI not installed globally. Installing..."
-        npm install -g @quasar/cli
+    # Check virtual environment
+    if [ ! -d "$SCRIPT_DIR/.venv" ]; then
+        print_warning "Python virtual environment not found. Creating one..."
+        cd "$BACKEND_DIR"
+        python3 -m venv "$SCRIPT_DIR/.venv"
+        "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip
+        if [ -f requirements.txt ]; then
+            "$SCRIPT_DIR/.venv/bin/pip" install -r requirements.txt
+        fi
     fi
     
     print_status "All requirements satisfied"
@@ -70,13 +75,15 @@ function start_backend() {
     print_status "Starting backend..."
     cd "$BACKEND_DIR"
     
-    # Activate virtual environment if it exists
-    if [ -d "$SCRIPT_DIR/.venv" ]; then
-        source "$SCRIPT_DIR/.venv/bin/activate"
+    # Use virtual environment Python directly
+    local PYTHON="$SCRIPT_DIR/.venv/bin/python"
+    if [ ! -f "$PYTHON" ]; then
+        print_error "Virtual environment not found at $SCRIPT_DIR/.venv"
+        return 1
     fi
     
     # Start Django server in background
-    nohup python manage.py runserver 0.0.0.0:8000 > "$PID_DIR/backend.log" 2>&1 &
+    nohup "$PYTHON" manage.py runserver 0.0.0.0:8000 > "$PID_DIR/backend.log" 2>&1 &
     echo $! > "$BACKEND_PID_FILE"
     
     sleep 2
@@ -99,8 +106,14 @@ function start_frontend() {
     print_status "Starting frontend..."
     cd "$FRONTEND_DIR"
     
-    # Start Quasar dev server in background
-    nohup quasar dev > "$PID_DIR/frontend.log" 2>&1 &
+    # Check if node_modules exists
+    if [ ! -d "node_modules" ]; then
+        print_status "Installing frontend dependencies..."
+        npm install
+    fi
+    
+    # Start Quasar dev server in background (using npm run dev)
+    nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID_FILE"
     
     sleep 3

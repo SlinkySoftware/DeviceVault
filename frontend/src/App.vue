@@ -159,6 +159,17 @@ const syncAuth = async () => {
       const res = await api.get('/auth/user/')
       user.value = res.data
       localStorage.setItem('user', JSON.stringify(res.data))
+      
+      // Fetch and apply user theme preference
+      try {
+        const prefs = await api.get('/user/preferences/')
+        const theme = prefs.data.theme || 'dark'
+        localStorage.setItem('userTheme', theme)
+        $q.dark.set(theme === 'dark')
+      } catch (e) {
+        // Default to dark mode if preference fetch fails
+        $q.dark.set(true)
+      }
     } catch (e) {
       // ignore, interceptor handles 401
     }
@@ -168,7 +179,12 @@ const syncAuth = async () => {
   }
 }
 
-onMounted(syncAuth)
+onMounted(() => {
+  // Initialize theme from localStorage or default to dark
+  const savedTheme = localStorage.getItem('userTheme') || 'dark'
+  $q.dark.set(savedTheme === 'dark')
+  syncAuth()
+})
 
 // Re-sync auth whenever route changes (after login redirect) to refresh dropdown state
 watch(() => route.fullPath, () => {
