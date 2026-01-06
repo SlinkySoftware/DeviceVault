@@ -30,7 +30,7 @@
         
         <q-item-label v-if="isAdmin" header class="text-grey-8">Admin Settings</q-item-label>
         
-        <q-item v-if="isAdmin" clickable to="/admin/device-types">
+        <q-item v-if="isAdmin" clickable to="/vaultadmin/device-types">
           <q-item-section avatar>
             <q-icon name="category" />
           </q-item-section>
@@ -39,7 +39,7 @@
           </q-item-section>
         </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/admin/manufacturers">
+        <q-item v-if="isAdmin" clickable to="/vaultadmin/manufacturers">
           <q-item-section avatar>
             <q-icon name="business" />
           </q-item-section>
@@ -48,7 +48,7 @@
           </q-item-section>
         </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/admin/credentials">
+        <q-item v-if="isAdmin" clickable to="/vaultadmin/credentials">
           <q-item-section avatar>
             <q-icon name="vpn_key" />
           </q-item-section>
@@ -57,7 +57,7 @@
           </q-item-section>
         </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/admin/backup-locations">
+        <q-item v-if="isAdmin" clickable to="/vaultadmin/backup-locations">
           <q-item-section avatar>
             <q-icon name="folder" />
           </q-item-section>
@@ -66,7 +66,7 @@
           </q-item-section>
         </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/admin/retention-policies">
+        <q-item v-if="isAdmin" clickable to="/vaultadmin/retention-policies">
           <q-item-section avatar>
             <q-icon name="schedule" />
           </q-item-section>

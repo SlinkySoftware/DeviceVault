@@ -16,10 +16,10 @@ export default createRouter({
     { path: '/devices', component: Devices },
     { path: '/devices/:id', component: EditDevice },
     { path: '/devices/:id/backups', component: ViewBackups },
-    { path: '/admin/device-types', component: DeviceTypes },
-    { path: '/admin/manufacturers', component: Manufacturers },
-    { path: '/admin/credentials', component: Credentials },
-    { path: '/admin/backup-locations', component: BackupLocations },
-    { path: '/admin/retention-policies', component: RetentionPolicies }
+    { path: '/vaultadmin/device-types', component: DeviceTypes },
+    { path: '/vaultadmin/manufacturers', component: Manufacturers },
+    { path: '/vaultadmin/credentials', component: Credentials },
+    { path: '/vaultadmin/backup-locations', component: BackupLocations },
+    { path: '/vaultadmin/retention-policies', component: RetentionPolicies }
   ] 
 })
