@@ -20,11 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir /app
 WORKDIR /app
 
-#RUN cp -r /app/repo/frontend/dist/spa/* /var/www/html/
 COPY --from=build-stage /app/repo/frontend/dist/spa /var/www/html/
-#COPY --from=build-stage /app/repo/frontend/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-#RUN chmod a+x /app/docker-entrypoint.sh
-
-#ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
