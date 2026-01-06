@@ -31,17 +31,26 @@ export default function (ctx) {
         'QToolbar',
         'QToolbarTitle',
         'QBtn',
+        'QBtnDropdown',
         'QIcon',
+        'QAvatar',
         'QList',
         'QItem',
         'QItemSection',
         'QItemLabel',
+        'QSeparator',
+        'QMenu',
+        'QSpace',
         'QCard',
         'QCardSection',
+        'QBanner',
         'QInput',
+        'QCheckbox',
         'QTable',
         'QTd',
-        'QForm'
+        'QForm',
+        'QDialog',
+        'QBadge'
       ]
     }
   }

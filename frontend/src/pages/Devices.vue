@@ -120,7 +120,7 @@ const filteredDevices = computed(() => {
 
 async function loadDevices() {
   try {
-    const response = await api.get('/api/devices/')
+    const response = await api.get('/devices/')
     devices.value = response.data
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to fetch devices' })
@@ -129,7 +129,7 @@ async function loadDevices() {
 
 async function toggleEnabled(device) {
   try {
-    await api.patch(`/api/devices/${device.id}/`, { enabled: !device.enabled })
+    await api.patch(`/devices/${device.id}/`, { enabled: !device.enabled })
     $q.notify({ 
       type: 'positive', 
       message: `Device ${device.enabled ? 'disabled' : 'enabled'}` 

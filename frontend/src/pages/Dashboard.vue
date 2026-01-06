@@ -4,29 +4,52 @@
     
     <div class="row q-col-gutter-md q-mb-md">
       <div class="col-12 col-md-3">
-        <q-card>
+        <q-card class="stat-card">
           <q-card-section>
-            <div class="text-h6">Devices by Type</div>
-            <div class="text-h4 text-primary">{{ Object.keys(stats.devicesByType || {}).length }}</div>
-            <div v-for="(count, type) in stats.devicesByType" :key="type" class="text-caption">
-              {{ type }}: {{ count }}
+            <div class="text-h6">Configured Devices</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-5">
+                <div class="nested-box strong-box">
+                  <div class="text-subtitle1 text-weight-medium">Total</div>
+                  <div class="text-h5 text-primary text-weight-medium">{{ totalDevices }}</div>
+                </div>
+              </div>
+              <div class="col-7">
+                <div class="nested-box" v-for="(count, type) in stats.devicesByType" :key="type">
+                  <div class="text-body1 text-weight-medium">{{ type }}</div>
+                  <div class="text-caption text-grey">{{ count }} devices</div>
+                </div>
+                <div v-if="Object.keys(stats.devicesByType || {}).length === 0" class="text-caption text-grey">No devices yet</div>
+              </div>
             </div>
           </q-card-section>
         </q-card>
       </div>
       
       <div class="col-12 col-md-3">
-        <q-card>
+        <q-card class="stat-card">
           <q-card-section>
             <div class="text-h6">Backups (24h)</div>
-            <div class="text-positive">Success: {{ stats.success24h }}</div>
-            <div class="text-negative">Failed: {{ stats.failed24h }}</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-6">
+                <div class="nested-box bg-green-1 text-positive">
+                  <div class="text-subtitle1 text-weight-medium">{{ stats.success24h }}</div>
+                  <div class="text-caption text-weight-medium">Success</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="nested-box bg-red-1 text-negative">
+                  <div class="text-subtitle1 text-weight-medium">{{ stats.failed24h }}</div>
+                  <div class="text-caption text-weight-medium">Failed</div>
+                </div>
+              </div>
+            </div>
           </q-card-section>
         </q-card>
       </div>
       
       <div class="col-12 col-md-3">
-        <q-card>
+        <q-card class="stat-card">
           <q-card-section>
             <div class="text-h6">Avg Backup Time</div>
             <div class="text-h4 text-primary">{{ stats.avgDuration }}s</div>
@@ -35,7 +58,7 @@
       </div>
 
       <div class="col-12 col-md-3">
-        <q-card>
+        <q-card class="stat-card">
           <q-card-section>
             <div class="text-h6">Success Rate</div>
             <div class="text-h4 text-positive">
@@ -103,6 +126,10 @@ const successRate = computed(() => {
   return total > 0 ? Math.round((stats.value.success24h / total) * 100) : 0
 })
 
+const totalDevices = computed(() => {
+  return Object.values(stats.value.devicesByType || {}).reduce((a, b) => a + b, 0)
+})
+
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const date = new Date(dateStr)
@@ -112,8 +139,8 @@ function formatDate(dateStr) {
 async function loadData() {
   try {
     const [statsResp, activityResp] = await Promise.all([
-      api.get('/api/dashboard-stats/'),
-      api.get('/api/audit-logs/?limit=10')
+      api.get('/dashboard-stats/'),
+      api.get('/audit-logs/?limit=10')
     ])
     stats.value = statsResp.data
     recentActivity.value = Array.isArray(activityResp.data) ? activityResp.data : activityResp.data.results || []
@@ -184,4 +211,21 @@ canvas {
   width: 100%;
   height: 100%;
 }
+.stat-card {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+.nested-box {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+.strong-box {
+  background: #eef3ff;
+  border-color: #c5d2ff;
+}
+.bg-green-1 { background-color: #e8f5e9; }
+.bg-red-1 { background-color: #ffebee; }
 </style>

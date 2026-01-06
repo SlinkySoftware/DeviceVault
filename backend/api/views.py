@@ -1,7 +1,10 @@
 
 from rest_framework import viewsets, decorators, response, status
 from rest_framework.views import APIView
+from rest_framework.authtoken.models import Token
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
 from django.db.models import Count, Avg
 from django.utils import timezone
 from datetime import timedelta
@@ -17,7 +20,8 @@ from .serializers import (
     DeviceTypeSerializer, ManufacturerSerializer, DeviceSerializer,
     BackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
     CredentialSerializer, CredentialTypeSerializer, LabelSerializer,
-    RoleSerializer, PermissionSerializer, UserSerializer, AuditLogSerializer
+    RoleSerializer, PermissionSerializer, UserSerializer, AuditLogSerializer,
+    LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer
 )
 import difflib, os
 
@@ -57,6 +61,27 @@ class PermissionViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
+    def _is_jit_provisioned(self, user):
+        try:
+            has_social = hasattr(user, 'social_auth') and user.social_auth.exists()
+        except Exception:
+            has_social = False
+        return (not user.has_usable_password()) or has_social
+
+    @decorators.action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated])
+    def update_details(self, request, pk=None):
+        # Only staff can edit other users
+        if not request.user.is_staff:
+            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        user = self.get_object()
+        if self._is_jit_provisioned(user):
+            return response.Response({'detail': 'Profile is managed by external identity provider and cannot be edited.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = UserUpdateSerializer(instance=user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return response.Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all().order_by('-created_at')
@@ -107,6 +132,72 @@ def dashboard_stats(request):
 class AuthConfigView(APIView):
     def get(self, request):
         return response.Response({'providers': ['LDAP','SAML','EntraID','Local']})
+
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            token, created = Token.objects.get_or_create(user=user)
+            user_serializer = UserSerializer(user)
+            return response.Response({
+                'token': token.key,
+                'user': user_serializer.data
+            }, status=status.HTTP_200_OK)
+        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        request.user.auth_token.delete()
+        return response.Response({'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
+
+class UserInfoView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def _is_jit_provisioned(self, user):
+        # Heuristic: users from SSO/LDAP typically have unusable passwords
+        # and may have social_auth relations. Local users have usable passwords.
+        try:
+            has_social = hasattr(user, 'social_auth') and user.social_auth.exists()
+        except Exception:
+            has_social = False
+        return (not user.has_usable_password()) or has_social
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        editable = not self._is_jit_provisioned(request.user)
+        return response.Response({
+            **serializer.data,
+            'editable': editable
+        }, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        if self._is_jit_provisioned(request.user):
+            return response.Response({'detail': 'Profile is managed by external identity provider and cannot be edited.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = UserUpdateSerializer(instance=request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            # Return updated details with editable flag
+            data = UserSerializer(request.user).data
+            data['editable'] = True
+            return response.Response(data, status=status.HTTP_200_OK)
+        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            request.user.set_password(serializer.validated_data['new_password'])
+            request.user.save()
+            return response.Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
+        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 @decorators.api_view(['POST'])
 def compare_backups(request):
     a = request.data.get('a_path'); b = request.data.get('b_path')

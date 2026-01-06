@@ -83,7 +83,7 @@ const columns = [
 
 async function loadData() {
   try {
-    const response = await api.get('/api/backup-locations/')
+    const response = await api.get('/backup-locations/')
     locations.value = response.data
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to load locations' })
@@ -105,9 +105,9 @@ function editItem(item) {
 async function save() {
   try {
     if (editMode.value) {
-      await api.put(`/api/backup-locations/${form.value.id}/`, form.value)
+      await api.put(`/backup-locations/${form.value.id}/`, form.value)
     } else {
-      await api.post('/api/backup-locations/', form.value)
+      await api.post('/backup-locations/', form.value)
     }
     $q.notify({ type: 'positive', message: 'Saved successfully' })
     dialog.value = false
@@ -124,7 +124,7 @@ async function deleteItem(item) {
     cancel: true
   }).onOk(async () => {
     try {
-      await api.delete(`/api/backup-locations/${item.id}/`)
+      await api.delete(`/backup-locations/${item.id}/`)
       $q.notify({ type: 'positive', message: 'Deleted successfully' })
       loadData()
     } catch (error) {

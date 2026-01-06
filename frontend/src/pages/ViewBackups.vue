@@ -55,7 +55,7 @@ const loading = ref(false)
 async function compare() {
   loading.value = true
   try {
-    const r = await api.post('/api/backups/compare/', { 
+    const r = await api.post('/backups/compare/', { 
       a_path: a.value, 
       b_path: b.value 
     })

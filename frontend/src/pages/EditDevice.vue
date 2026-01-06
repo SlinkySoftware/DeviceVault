@@ -171,12 +171,12 @@ const labels = ref([])
 async function loadData() {
   try {
     const [typesResp, mfgResp, credsResp, locsResp, polsResp, labelsResp] = await Promise.all([
-      api.get('/api/device-types/'),
-      api.get('/api/manufacturers/'),
-      api.get('/api/credentials/'),
-      api.get('/api/backup-locations/'),
-      api.get('/api/retention-policies/'),
-      api.get('/api/labels/')
+      api.get('/device-types/'),
+      api.get('/manufacturers/'),
+      api.get('/credentials/'),
+      api.get('/backup-locations/'),
+      api.get('/retention-policies/'),
+      api.get('/labels/')
     ])
     
     deviceTypes.value = typesResp.data
@@ -187,7 +187,7 @@ async function loadData() {
     labels.value = labelsResp.data
 
     if (isEdit.value) {
-      const response = await api.get(`/api/devices/${route.params.id}/`)
+      const response = await api.get(`/devices/${route.params.id}/`)
       form.value = response.data
     }
   } catch (error) {
@@ -198,9 +198,9 @@ async function loadData() {
 async function save() {
   try {
     if (isEdit.value) {
-      await api.put(`/api/devices/${route.params.id}/`, form.value)
+      await api.put(`/devices/${route.params.id}/`, form.value)
     } else {
-      await api.post('/api/devices/', form.value)
+      await api.post('/devices/', form.value)
     }
     $q.notify({
       type: 'positive',

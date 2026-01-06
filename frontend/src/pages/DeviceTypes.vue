@@ -55,7 +55,7 @@ const columns = [
 
 async function loadData() {
   try {
-    const response = await api.get('/api/device-types/')
+    const response = await api.get('/device-types/')
     deviceTypes.value = response.data
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to load device types' })
@@ -77,9 +77,9 @@ function editItem(item) {
 async function save() {
   try {
     if (editMode.value) {
-      await api.put(`/api/device-types/${form.value.id}/`, form.value)
+      await api.put(`/device-types/${form.value.id}/`, form.value)
     } else {
-      await api.post('/api/device-types/', form.value)
+      await api.post('/device-types/', form.value)
     }
     $q.notify({ type: 'positive', message: 'Saved successfully' })
     dialog.value = false
@@ -96,7 +96,7 @@ async function deleteItem(item) {
     cancel: true
   }).onOk(async () => {
     try {
-      await api.delete(`/api/device-types/${item.id}/`)
+      await api.delete(`/device-types/${item.id}/`)
       $q.notify({ type: 'positive', message: 'Deleted successfully' })
       loadData()
     } catch (error) {

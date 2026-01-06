@@ -25,5 +25,9 @@ urlpatterns = [
     path('api/onboarding/', views.onboarding), 
     path('api/dashboard-stats/', views.dashboard_stats),
     path('api/auth/config/', views.AuthConfigView.as_view()), 
-    path('api/backups/compare/', views.compare_backups)
+    path('api/backups/compare/', views.compare_backups),
+    path('api/auth/login/', views.LoginView.as_view()), 
+    path('api/auth/logout/', views.LogoutView.as_view()), 
+    path('api/auth/user/', views.UserInfoView.as_view()),
+    path('api/auth/change-password/', views.ChangePasswordView.as_view())
 ]
