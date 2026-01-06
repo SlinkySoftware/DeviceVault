@@ -1,0 +1,84 @@
+name: devicevault
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+      args:
+      - GIT_BRANCH=${GIT_BRANCH:-master}
+    ports:
+      - "80:80"
+    depends_on:
+      - django
+    restart: unless-stopped
+    env_file:
+    - ./config/nginx.env
+
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile.django
+      args:
+      - GIT_BRANCH=${GIT_BRANCH:-master}
+    expose:
+      - "8000"
+    env_file:
+    - ./config/django.env
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+#  celery:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.celery
+#      args:
+#      - GIT_BRANCH=${GIT_BRANCH:-master}
+#    env_file:
+#    - ./config/celery.env
+#    depends_on:
+#      - django
+#      - redis
+#    volumes:
+#      - backupstorage:/backupstorage
+#    restart: unless-stopped
+#    deploy:
+#      mode: replicated
+#      replicas: 3  # adjust or scale via `docker compose up --scale celery=5`
+
+  postgres:
+    image: postgres:17
+    env_file:
+    - ./config/postgres.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--bind", "0.0.0.0"]
+    volumes:
+      - redisdata:/data
+    expose:
+      - "6379"
+    restart: unless-stopped
+    env_file:
+    - ./config/redis.env
+
+
+  flower:  # optional but useful for Celery monitoring
+    image: mher/flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  backupstorage:

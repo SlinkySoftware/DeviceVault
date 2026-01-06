@@ -1,0 +1,27 @@
+FROM node:latest AS build-stage
+ARG GIT_BRANCH=master
+
+WORKDIR /app
+RUN git clone --single-branch --branch ${GIT_BRANCH} --depth 1 https://github.com/SlinkySoftware/DeviceVault.git repo
+
+
+RUN npm install -g @quasar/cli 
+
+WORKDIR /app/repo/frontend
+RUN npm install
+RUN quasar build
+
+FROM debian:trixie-slim AS prod-stage
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git nginx ca-certificates nodejs npm && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir /app
+WORKDIR /app
+
+COPY --from=build-stage /app/repo/frontend/dist/spa /var/www/html/
+COPY ./nginx/default.conf  /etc/nginx/sites-available/devicevault.conf
+RUN rm -f /etc/nginx/sites-enabled/default
+RUN ln -s /etc/nginx/sites-available/devicevault.conf /etc/nginx/sites-enabled/
+
+CMD ["nginx", "-g", "daemon off;"]
