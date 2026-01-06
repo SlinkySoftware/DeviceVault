@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile.nginx
       args:
-      - GIT_BRANCH=docker-build-scripts
+      - GIT_BRANCH=${GIT_BRANCH:-master}
     ports:
       - "80:80"
     depends_on:
@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile.django
       args:
-      - GIT_BRANCH=docker-build-scripts
+      - GIT_BRANCH=${GIT_BRANCH:-master}
     expose:
       - "8000"
     env_file:
@@ -35,7 +35,7 @@ services:
 #      context: .
 #      dockerfile: Dockerfile.celery
 #      args:
-#      - GIT_BRANCH=docker-build-scripts
+#      - GIT_BRANCH=${GIT_BRANCH:-master}
 #    env_file:
 #    - ./config/celery.env
 #    depends_on:

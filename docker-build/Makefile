@@ -4,24 +4,24 @@ GIT_BRANCH ?= master
 
 # Core orchestration
 build:
-	docker compose -f $(COMPOSE_FILE) build --pull
+	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) build --pull
 
 up:
-	docker compose -f $(COMPOSE_FILE) up -d
+	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down
 
 restart:
-	docker compose -f $(COMPOSE_FILE) down && docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) down && GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d
 
 # Celery scaling
 scale-celery:
-	docker compose -f $(COMPOSE_FILE) up -d --scale celery=$(n)
+	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d --scale celery=$(n)
 
 # Django utilities in containers
 migrate:
-	docker compose -f $(COMPOSE_FILE) run --rm django python3 manage.py migrate
+	docker compose -f $(COMPOSE_FILE) run --rm django python3 manage.py migrate --run-syncdb
 
 makemigrations:
 	docker compose -f $(COMPOSE_FILE) run --rm django python3 manage.py makemigrations
@@ -52,6 +52,9 @@ clean-volumes:
 
 prune:
 	docker system prune -af --volumes
+
+clean-build:
+	docker builder prune --all
 
 # Help (auto documents available commands)
 help:

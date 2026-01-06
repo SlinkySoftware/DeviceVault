@@ -16,5 +16,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir gunicorn
+RUN chmod a+x /app/repo/backend/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/repo/backend/docker-entrypoint.sh"]
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "devicevault.wsgi:application"]
