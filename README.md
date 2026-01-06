@@ -58,9 +58,16 @@ npm --version
 
 ### Application Setup
 
+0. **Clone the repository**
+```bash
+# clone into /opt/devicevault (requires sudo to write to /opt)
+sudo git clone https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault
+cd /opt/devicevault
+```
+
 1. **Set Up Python Virtual Environment**
 ```bash
-cd /home/jac/devicevault
+cd /opt/devicevault
 python3 -m venv .venv
 source .venv/bin/activate
 ```
@@ -86,6 +93,12 @@ python manage.py migrate --run-syncdb
 
 5. **Create Admin User**
 ```bash
+# Preferred: run the supplied idempotent helper (from repo root)
+chmod +x setup/create-initial-user.sh
+./setup/create-initial-user.sh
+
+# Alternatively (manual):
+cd backend
 python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser('admin', 'admin@example.com', 'admin') if not User.objects.filter(username='admin').exists() else print('Admin user already exists')"
 ```
 
@@ -94,7 +107,7 @@ python manage.py shell -c "from django.contrib.auth import get_user_model; User 
 ### Using the Management Script (Recommended)
 
 ```bash
-cd /home/jac/devicevault
+cd /opt/devicevault
 
 # Start both frontend and backend
 ./devicevault.sh start
@@ -116,7 +129,7 @@ cd /home/jac/devicevault
 
 ## Accessing the Application
 
-- **Frontend**: http://localhost:9000 or http://ansible.home.173crs.com:9000
+- **Frontend**: http://localhost:9000
 - **Backend API**: http://localhost:8000/api/
 - **Django Admin**: http://localhost:8000/admin/
 
@@ -156,3 +169,64 @@ python manage.py migrate --run-syncdb
 ```
 
 For more information, see the full documentation in this file.
+
+## Running in Production
+
+This project is developed for local and container-based development. For production deployments follow these concise notes:
+
+- Build the frontend with Quasar and serve the compiled files from nginx.
+	```bash
+	# from repo root
+	cd frontend
+	npm ci
+	npm run build
+	# Quasar produces a `dist/` tree (commonly `dist/spa` for SPA mode).
+	```
+
+- Build and run a WSGI server for Django (recommended: `gunicorn`) and ensure static files are collected.
+	```bash
+	# in a Python virtualenv on the host or container
+	pip install -r backend/requirements.txt gunicorn
+	cd backend
+	python manage.py collectstatic --noinput
+	gunicorn --bind 0.0.0.0:8000 devicevault.wsgi:application
+	```
+
+- Nginx should serve the frontend build directory as static files and reverse-proxy API and admin endpoints to the Django WSGI server.
+	Example (minimal) nginx site config:
+	```nginx
+	server {
+			listen 80;
+			server_name example.com;
+
+			root /opt/devicevault/frontend/dist/spa; # adjust to actual quasar dist path
+			index index.html;
+
+			location /api/ {
+					proxy_pass http://127.0.0.1:8000/api/;
+					proxy_set_header Host $host;
+					proxy_set_header X-Real-IP $remote_addr;
+					proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+					proxy_set_header X-Forwarded-Proto $scheme;
+			}
+
+			location /admin/ {
+					proxy_pass http://127.0.0.1:8000/admin/;
+					proxy_set_header Host $host;
+					proxy_set_header X-Real-IP $remote_addr;
+					proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+					proxy_set_header X-Forwarded-Proto $scheme;
+			}
+
+			# Serve the SPA (fallback to index.html for history mode)
+			location / {
+					try_files $uri $uri/ /index.html;
+			}
+	}
+	```
+
+- Notes and recommendations:
+	- Run Django behind a process manager (systemd, supervisord) or container orchestrator.
+	- Use HTTPS in front of nginx (Let's Encrypt + certbot recommended).
+	- If serving static media from object storage (S3/GCS), configure storage backends in `backend/config/config.yaml` and in `backend/settings.py` as needed.
+	- Verify `frontend/quasar.config.js` for router mode (`history`) — nginx fallback to `index.html` is required for SPA routes.
