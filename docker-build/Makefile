@@ -1,5 +1,6 @@
 # Project variables
 COMPOSE_FILE=docker-compose.yaml
+GIT_BRANCH ?= master
 
 # Core orchestration
 build:

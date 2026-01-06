@@ -11,7 +11,7 @@ export default function (ctx) {
         viteConf.server = viteConf.server || {};
         viteConf.server.port = 9000;
         viteConf.server.host = '0.0.0.0';
-        viteConf.server.allowedHosts = [PLACEHOLDER_ALLOWED_HOSTS];
+        viteConf.server.allowedHosts = true;
       }
     },
     devServer: {

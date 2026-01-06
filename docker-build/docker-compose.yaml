@@ -1,8 +1,12 @@
+name: devicevault
+
 services:
   nginx:
     build:
       context: .
       dockerfile: Dockerfile.nginx
+      args:
+      - GIT_BRANCH=docker-build-scripts
     ports:
       - "80:80"
     depends_on:
@@ -15,6 +19,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.django
+      args:
+      - GIT_BRANCH=docker-build-scripts
     expose:
       - "8000"
     env_file:
@@ -24,21 +30,23 @@ services:
       - redis
     restart: unless-stopped
 
-  celery:
-    build:
-      context: .
-      dockerfile: Dockerfile.celery
-    env_file:
-    - ./config/celery.env
-    depends_on:
-      - django
-      - redis
-    volumes:
-      - backupstorage:/backupstorage
-    restart: unless-stopped
-    deploy:
-      mode: replicated
-      replicas: 3  # adjust or scale via `docker compose up --scale celery=5`
+#  celery:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.celery
+#      args:
+#      - GIT_BRANCH=docker-build-scripts
+#    env_file:
+#    - ./config/celery.env
+#    depends_on:
+#      - django
+#      - redis
+#    volumes:
+#      - backupstorage:/backupstorage
+#    restart: unless-stopped
+#    deploy:
+#      mode: replicated
+#      replicas: 3  # adjust or scale via `docker compose up --scale celery=5`
 
   postgres:
     image: postgres:17

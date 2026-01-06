@@ -1,11 +1,14 @@
 FROM debian:trixie-slim
+ARG GIT_BRANCH=master
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git python3 python3-pip python3-venv libpq-dev gcc && \
+    git python3 python3-pip python3-venv libpq-dev gcc ca-certificates \
+    default-libmysqlclient-dev libpq-dev pkg-config python3-dev \
+    libldap2-dev libsasl2-dev libsasl2-2 &&  \ 
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN git clone --depth 1 https://github.com/SlinkySoftware/DeviceVault.git repo
+RUN git clone --single-branch --branch ${GIT_BRANCH} --depth 1 https://github.com/SlinkySoftware/DeviceVault.git repo
 
 WORKDIR /app/repo/backend
 RUN python3 -m venv /opt/venv
@@ -14,4 +17,4 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir gunicorn
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "devicevault.wsgi:application"]

@@ -1,14 +1,30 @@
-FROM debian:trixie-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git nginx && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+FROM node:latest AS build-stage
+ARG GIT_BRANCH=master
 
 WORKDIR /app
-RUN git clone --depth 1 https://github.com/SlinkySoftware/DeviceVault.git repo
+RUN git clone --single-branch --branch ${GIT_BRANCH} --depth 1 https://github.com/SlinkySoftware/DeviceVault.git repo
 
 COPY ./nginx/default.conf /etc/nginx/conf.d/default.conf
 
-RUN cp -r /app/repo/frontend/* /var/www/html/
-ENTRYPOINT ["/app/repo/frontend/docker-entrypoint.sh"]
+RUN npm install -g @quasar/cli 
+
+WORKDIR /app/repo/frontend
+RUN npm install
+RUN quasar build
+
+FROM debian:trixie-slim AS prod-stage
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git nginx ca-certificates nodejs npm && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir /app
+WORKDIR /app
+
+#RUN cp -r /app/repo/frontend/dist/spa/* /var/www/html/
+COPY --from=build-stage /app/repo/frontend/dist/spa /var/www/html/
+COPY --from=build-stage /app/repo/frontend/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN chmod a+x /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
