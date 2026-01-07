@@ -2,6 +2,12 @@
 
 A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
 
+## License
+
+This project is licensed under the terms of the **GNU General Public License v3.0** (GPLv3) or later version.
+
+You can find the full text of the license in the [LICENSE](LICENSE.md) file or read it online at the [GNU Operating System website](https://www.gnu.org/licenses/gpl-3.0.html).
+
 ## Features
 
 - **Plugin-Based Backup Methods**: Extensible architecture for supporting multiple device types

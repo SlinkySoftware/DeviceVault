@@ -1,12 +1,20 @@
-/**
- * Frontend Configuration Module
- * 
- * Provides centralized configuration for frontend application.
- * Environment variables are checked in order of preference:
- * 1. VITE_API_URL (Vite environment variable - preferred)
- * 2. VUE_APP_API_URL (Vue CLI environment variable - legacy)
- * 3. Default to http://localhost:8000/api for local development
- */
+/*
+* DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
+* Copyright (C) 2026, Slinky Software
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 /**
  * Determine API URL from environment configuration
