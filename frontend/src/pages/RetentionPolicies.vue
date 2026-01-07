@@ -79,7 +79,7 @@ const columns = [
 
 async function loadData() {
   try {
-    const response = await api.get('/api/retention-policies/')
+    const response = await api.get('/retention-policies/')
     policies.value = response.data
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to load policies' })
@@ -101,9 +101,9 @@ function editItem(item) {
 async function save() {
   try {
     if (editMode.value) {
-      await api.put(`/api/retention-policies/${form.value.id}/`, form.value)
+      await api.put(`/retention-policies/${form.value.id}/`, form.value)
     } else {
-      await api.post('/api/retention-policies/', form.value)
+      await api.post('/retention-policies/', form.value)
     }
     $q.notify({ type: 'positive', message: 'Saved successfully' })
     dialog.value = false
@@ -120,7 +120,7 @@ async function deleteItem(item) {
     cancel: true
   }).onOk(async () => {
     try {
-      await api.delete(`/api/retention-policies/${item.id}/`)
+      await api.delete(`/retention-policies/${item.id}/`)
       $q.notify({ type: 'positive', message: 'Deleted successfully' })
       loadData()
     } catch (error) {

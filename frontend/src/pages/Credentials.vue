@@ -89,8 +89,8 @@ const columns = [
 async function loadData() {
   try {
     const [credsResp, typesResp] = await Promise.all([
-      api.get('/api/credentials/'),
-      api.get('/api/credential-types/')
+      api.get('/credentials/'),
+      api.get('/credential-types/')
     ])
     credentials.value = credsResp.data
     credentialTypes.value = typesResp.data
@@ -114,9 +114,9 @@ function editItem(item) {
 async function save() {
   try {
     if (editMode.value) {
-      await api.put(`/api/credentials/${form.value.id}/`, form.value)
+      await api.put(`/credentials/${form.value.id}/`, form.value)
     } else {
-      await api.post('/api/credentials/', form.value)
+      await api.post('/credentials/', form.value)
     }
     $q.notify({ type: 'positive', message: 'Saved successfully' })
     dialog.value = false
@@ -133,7 +133,7 @@ async function deleteItem(item) {
     cancel: true
   }).onOk(async () => {
     try {
-      await api.delete(`/api/credentials/${item.id}/`)
+      await api.delete(`/credentials/${item.id}/`)
       $q.notify({ type: 'positive', message: 'Deleted successfully' })
       loadData()
     } catch (error) {

@@ -46,18 +46,30 @@
             </div>
             <div class="col-12 col-md-6">
               <q-select
-                v-model="form.manufacturer"
-                :options="manufacturers"
-                option-label="name"
-                option-value="id"
-                label="Manufacturer"
+                v-model="form.backup_method"
+                :options="backupMethods"
+                option-label="friendly_name"
+                option-value="key"
+                label="Backup Method"
                 outlined
                 emit-value
                 map-options
-                :rules="[val => !!val || 'Manufacturer is required']"
+                :rules="[val => !!val || 'Backup Method is required']"
               />
             </div>
           </div>
+
+          <q-select
+            v-model="form.device_group"
+            :options="deviceGroupOptions"
+            option-label="name"
+            option-value="id"
+            label="Device Group"
+            outlined
+            emit-value
+            map-options
+            :rules="[val => !!val || 'Device Group is required']"
+          />
 
           <div class="row q-col-gutter-md">
             <div class="col-12 col-md-4">
@@ -101,19 +113,6 @@
             </div>
           </div>
 
-          <q-select
-            v-model="form.labels"
-            :options="labels"
-            option-label="name"
-            option-value="id"
-            label="Labels"
-            outlined
-            multiple
-            emit-value
-            map-options
-            use-chips
-          />
-
           <q-toggle
             v-model="form.enabled"
             label="Backups Enabled"
@@ -153,42 +152,58 @@ const form = ref({
   ip_address: '', 
   dns_name: '',
   device_type: null,
-  manufacturer: null,
+  backup_method: 'noop',
   credential: null,
   backup_location: null,
   retention_policy: null,
-  labels: [],
+  device_group: null,
   enabled: true
 })
 
 const deviceTypes = ref([])
-const manufacturers = ref([])
+const backupMethods = ref([])
 const credentials = ref([])
 const backupLocations = ref([])
 const retentionPolicies = ref([])
-const labels = ref([])
+const deviceGroups = ref([])
+const deviceGroupOptions = ref([])
 
 async function loadData() {
   try {
-    const [typesResp, mfgResp, credsResp, locsResp, polsResp, labelsResp] = await Promise.all([
-      api.get('/api/device-types/'),
-      api.get('/api/manufacturers/'),
-      api.get('/api/credentials/'),
-      api.get('/api/backup-locations/'),
-      api.get('/api/retention-policies/'),
-      api.get('/api/labels/')
+    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp] = await Promise.all([
+      api.get('/device-types/'),
+      api.get('/backup-methods/'),
+      api.get('/credentials/'),
+      api.get('/backup-locations/'),
+      api.get('/retention-policies/'),
+      api.get('/device-groups/')
     ])
     
     deviceTypes.value = typesResp.data
-    manufacturers.value = mfgResp.data
+    backupMethods.value = methodsResp.data
     credentials.value = credsResp.data
     backupLocations.value = locsResp.data
     retentionPolicies.value = polsResp.data
-    labels.value = labelsResp.data
+    deviceGroups.value = groupsResp.data || []
+    deviceGroupOptions.value = deviceGroups.value
+      .filter(g => g.can_modify)
+      .sort((a, b) => a.name.localeCompare(b.name))
 
     if (isEdit.value) {
-      const response = await api.get(`/api/devices/${route.params.id}/`)
-      form.value = response.data
+      const response = await api.get(`/devices/${route.params.id}/`)
+      const data = response.data || {}
+      form.value = {
+        name: data.name || '',
+        ip_address: data.ip_address || '',
+        dns_name: data.dns_name || '',
+        device_type: data.device_type?.id ?? null,
+        backup_method: data.backup_method ?? 'noop',
+        credential: data.credential ?? null,
+        backup_location: data.backup_location ?? null,
+        retention_policy: data.retention_policy ?? null,
+        device_group: data.device_group?.id ?? null,
+        enabled: data.enabled ?? true
+      }
     }
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to load data' })
@@ -198,9 +213,9 @@ async function loadData() {
 async function save() {
   try {
     if (isEdit.value) {
-      await api.put(`/api/devices/${route.params.id}/`, form.value)
+      await api.put(`/devices/${route.params.id}/`, form.value)
     } else {
-      await api.post('/api/devices/', form.value)
+      await api.post('/devices/', form.value)
     }
     $q.notify({
       type: 'positive',

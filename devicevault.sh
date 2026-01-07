@@ -1,5 +1,23 @@
 #!/bin/bash
 
+/*
+* DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
+* Copyright (C) 2026, Slinky Software
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 # DeviceVault Management Script
 # Starts and stops both frontend and backend services
 
@@ -52,10 +70,15 @@ function check_requirements() {
         exit 1
     fi
     
-    # Check quasar
-    if ! command -v quasar &> /dev/null; then
-        print_warning "Quasar CLI not installed globally. Installing..."
-        npm install -g @quasar/cli
+    # Check virtual environment
+    if [ ! -d "$SCRIPT_DIR/.venv" ]; then
+        print_warning "Python virtual environment not found. Creating one..."
+        cd "$BACKEND_DIR"
+        python3 -m venv "$SCRIPT_DIR/.venv"
+        "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip
+        if [ -f requirements.txt ]; then
+            "$SCRIPT_DIR/.venv/bin/pip" install -r requirements.txt
+        fi
     fi
     
     print_status "All requirements satisfied"
@@ -70,13 +93,15 @@ function start_backend() {
     print_status "Starting backend..."
     cd "$BACKEND_DIR"
     
-    # Activate virtual environment if it exists
-    if [ -d "$SCRIPT_DIR/.venv" ]; then
-        source "$SCRIPT_DIR/.venv/bin/activate"
+    # Use virtual environment Python directly
+    local PYTHON="$SCRIPT_DIR/.venv/bin/python"
+    if [ ! -f "$PYTHON" ]; then
+        print_error "Virtual environment not found at $SCRIPT_DIR/.venv"
+        return 1
     fi
     
     # Start Django server in background
-    nohup python manage.py runserver 0.0.0.0:8000 > "$PID_DIR/backend.log" 2>&1 &
+    nohup "$PYTHON" manage.py runserver 0.0.0.0:8000 > "$PID_DIR/backend.log" 2>&1 &
     echo $! > "$BACKEND_PID_FILE"
     
     sleep 2
@@ -99,8 +124,14 @@ function start_frontend() {
     print_status "Starting frontend..."
     cd "$FRONTEND_DIR"
     
-    # Start Quasar dev server in background
-    nohup quasar dev > "$PID_DIR/frontend.log" 2>&1 &
+    # Check if node_modules exists
+    if [ ! -d "node_modules" ]; then
+        print_status "Installing frontend dependencies..."
+        npm install
+    fi
+    
+    # Start Quasar dev server in background (using npm run dev)
+    nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID_FILE"
     
     sleep 3
@@ -115,57 +146,54 @@ function start_frontend() {
 }
 
 function stop_backend() {
-    if [ ! -f "$BACKEND_PID_FILE" ]; then
-        print_warning "Backend PID file not found"
-        # Try to find and kill any running Django server
-        pkill -f "manage.py runserver" && print_status "Stopped running backend processes"
-        return 0
-    fi
+    print_status "Stopping backend..."
     
-    local PID=$(cat "$BACKEND_PID_FILE")
-    if kill -0 $PID 2>/dev/null; then
-        print_status "Stopping backend (PID: $PID)..."
-        kill $PID
-        sleep 2
-        
-        # Force kill if still running
+    # Kill by PID file if it exists
+    if [ -f "$BACKEND_PID_FILE" ]; then
+        local PID=$(cat "$BACKEND_PID_FILE")
         if kill -0 $PID 2>/dev/null; then
-            kill -9 $PID
+            # Kill process group (parent and all children)
+            kill -TERM -$PID 2>/dev/null || true
+            sleep 2
+            # Force kill if still running
+            kill -9 -$PID 2>/dev/null || true
         fi
-        
-        print_status "Backend stopped"
-    else
-        print_warning "Backend process not running"
+        rm -f "$BACKEND_PID_FILE"
     fi
     
-    rm -f "$BACKEND_PID_FILE"
+    # Kill all Django server processes as fallback
+    pkill -f "manage.py runserver" 2>/dev/null || true
+    pkill -f "python.*manage.py" 2>/dev/null || true
+    pkill -f "runserver" 2>/dev/null || true
+    
+    sleep 1
+    print_status "Backend stopped"
 }
 
 function stop_frontend() {
-    if [ ! -f "$FRONTEND_PID_FILE" ]; then
-        print_warning "Frontend PID file not found"
-        # Try to find and kill any running Quasar dev server
-        pkill -f "quasar dev" && print_status "Stopped running frontend processes"
-        return 0
-    fi
+    print_status "Stopping frontend..."
     
-    local PID=$(cat "$FRONTEND_PID_FILE")
-    if kill -0 $PID 2>/dev/null; then
-        print_status "Stopping frontend (PID: $PID)..."
-        kill $PID
-        sleep 2
-        
-        # Force kill if still running
+    # Kill by PID file if it exists
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        local PID=$(cat "$FRONTEND_PID_FILE")
         if kill -0 $PID 2>/dev/null; then
-            kill -9 $PID
+            # Kill process group (parent and all children)
+            kill -TERM -$PID 2>/dev/null || true
+            sleep 2
+            # Force kill if still running
+            kill -9 -$PID 2>/dev/null || true
         fi
-        
-        print_status "Frontend stopped"
-    else
-        print_warning "Frontend process not running"
+        rm -f "$FRONTEND_PID_FILE"
     fi
     
-    rm -f "$FRONTEND_PID_FILE"
+    # Kill all npm/Node.js processes related to frontend as fallback
+    pkill -f "npm run dev" 2>/dev/null || true
+    pkill -f "quasar dev" 2>/dev/null || true
+    pkill -f "node.*quasar" 2>/dev/null || true
+    lsof -ti:9000,9001 | xargs kill -9 2>/dev/null || true
+    
+    sleep 1
+    print_status "Frontend stopped"
 }
 
 function status() {
