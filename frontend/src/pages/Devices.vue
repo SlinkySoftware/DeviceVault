@@ -102,14 +102,53 @@
 </template>
 
 <script setup>
+/**
+ * Devices Page Component
+ * 
+ * Displays list of all network devices with filtering, sorting, and action buttons.
+ * Allows users to:
+ * - View all devices in tabular format
+ * - Filter by manufacturer, type, and backup status
+ * - Edit device details
+ * - View device backup history
+ * - Enable/disable devices for backups
+ */
+
 import { ref, onMounted, computed } from 'vue'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
 
+// ===== Component State =====
+
+/** Quasar dialog and notification service */
 const $q = useQuasar()
+
+/** Array of device objects from API, contains all device data */
 const devices = ref([])
+
+/** Filter state object for search/filtering
+ * Properties:
+ * - manufacturer: Filter by manufacturer name
+ * - type: Filter by device type name
+ * - status: Filter by last backup status (All, success, failed)
+ */
 const filter = ref({ manufacturer: '', type: '', status: 'All' })
 
+/**
+ * Table Column Configuration
+ * 
+ * Defines columns displayed in device table including:
+ * - name, ip_address, type, manufacturer
+ * - last_backup_time, status, is_example_data, enabled
+ * - actions (Edit, Backups, Enable/Disable)
+ * 
+ * Properties:
+ * - name: Unique column identifier
+ * - label: Display header text
+ * - field: Property path or function to extract data
+ * - align: Text alignment (left, center, right)
+ * - sortable: Whether column can be sorted
+ */
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
@@ -122,6 +161,19 @@ const columns = [
   { name: 'actions', label: 'Actions', align: 'center' }
 ]
 
+// ===== Computed Properties =====
+
+/**
+ * Computed: Filter devices based on current filter state
+ * 
+ * Filters applied in order:
+ * 1. Manufacturer name contains filter value
+ * 2. Device type name contains filter value
+ * 3. Backup status matches selected status
+ * 
+ * Returns:
+ * - Array of device objects matching all active filters
+ */
 const filteredDevices = computed(() => {
   return devices.value.filter(d => {
     if (filter.value.manufacturer && !d.manufacturer?.name?.toLowerCase().includes(filter.value.manufacturer.toLowerCase())) {
@@ -137,6 +189,20 @@ const filteredDevices = computed(() => {
   })
 })
 
+// ===== API Functions =====
+
+/**
+ * Load all devices from API
+ * 
+ * Fetches complete device list including:
+ * - Device names, IPs, DNS names
+ * - Device type and manufacturer references
+ * - Backup status and timestamps
+ * - Enabled/disabled state
+ * 
+ * Error handling:
+ * - Catches API errors and displays notification
+ */
 async function loadDevices() {
   try {
     const response = await api.get('/devices/')
@@ -146,6 +212,20 @@ async function loadDevices() {
   }
 }
 
+/**
+ * Toggle device enabled/disabled status
+ * 
+ * Input:
+ * - device (Object): Device object to toggle
+ * 
+ * Process:
+ * 1. Send PATCH request to API to toggle enabled flag
+ * 2. Show success notification
+ * 3. Reload devices list
+ * 
+ * Error handling:
+ * - Catches API errors and displays notification
+ */
 async function toggleEnabled(device) {
   try {
     await api.patch(`/devices/${device.id}/`, { enabled: !device.enabled })
@@ -159,6 +239,13 @@ async function toggleEnabled(device) {
   }
 }
 
+// ===== Lifecycle Hooks =====
+
+/**
+ * Component mounted lifecycle hook
+ * Executes once when component is mounted to DOM
+ * Loads initial device data
+ */
 onMounted(() => {
   loadDevices()
 })

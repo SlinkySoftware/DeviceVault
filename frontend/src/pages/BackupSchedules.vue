@@ -5,21 +5,6 @@
       <q-btn color="primary" label="Add Schedule" @click="showAddDialog" />
     </div>
 
-    <q-card class="q-mb-lg bg-blue-1">
-      <q-card-section>
-        <div class="text-subtitle2 text-primary q-mb-md"><strong>About Backup Schedules</strong></div>
-        <p class="q-my-sm">Backup tasks will be added to the Celery queue at the specified time and will be processed in order. This uses Celery Beat as the scheduling engine, with backup times and schedules stored in the configuration database.</p>
-        <p class="q-my-sm"><strong>Key Points:</strong></p>
-        <ul class="q-pl-md q-my-sm">
-          <li>Schedules are processed by Celery Beat, a distributed task scheduler</li>
-          <li>Multiple backups will be queued and processed sequentially</li>
-          <li>Times are in the server's timezone</li>
-          <li>Only enabled schedules will process backups</li>
-          <li>Devices marked as "Example Data" will be excluded from backup processing</li>
-        </ul>
-      </q-card-section>
-    </q-card>
-
     <q-table
       :rows="schedules"
       :columns="columns"
@@ -123,14 +108,49 @@
 </template>
 
 <script setup>
+/**
+ * Backup Schedules Admin Page Component
+ * 
+ * Provides interface to manage backup schedules used by Celery Beat.
+ * Administrators can:
+ * - Create daily, weekly, monthly, or custom cron schedules
+ * - Set schedule times (hour, minute, day of week/month)
+ * - Enable/disable schedules
+ * - Edit and delete existing schedules
+ */
+
 import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
 
+// ===== Component State =====
+
+/** Quasar dialog and notification service */
 const $q = useQuasar()
+
+/** Array of backup schedule objects from API */
 const schedules = ref([])
+
+/** Dialog visibility state for add/edit form */
 const dialog = ref(false)
+
+/** Whether dialog is in edit mode (true) or add mode (false) */
 const editMode = ref(false)
+
+/**
+ * Form data object for schedule creation/editing
+ * 
+ * Properties:
+ * - name (string): Display name for schedule
+ * - description (string): Purpose/notes about schedule
+ * - schedule_type (string): Type of schedule (daily, weekly, monthly, custom_cron)
+ * - hour (number): Hour in 24-hour format (0-23)
+ * - minute (number): Minute (0-59)
+ * - day_of_week (string): Day for weekly schedules (0=Sunday, 6=Saturday)
+ * - day_of_month (number): Day for monthly schedules (1-31)
+ * - cron_expression (string): Raw cron expression for custom schedules
+ * - enabled (boolean): Whether schedule is active
+ */
 const form = ref({
   name: '',
   description: '',
@@ -143,6 +163,10 @@ const form = ref({
   enabled: true
 })
 
+/**
+ * Day of week options for weekly schedule selector
+ * Values: 0=Sunday through 6=Saturday
+ */
 const days = [
   { label: 'Sunday', value: '0' },
   { label: 'Monday', value: '1' },
@@ -153,6 +177,15 @@ const days = [
   { label: 'Saturday', value: '6' }
 ]
 
+/**
+ * Table Column Configuration
+ * 
+ * Columns:
+ * - name: Schedule display name
+ * - schedule: Human-readable schedule description
+ * - enabled: Enabled/disabled status badge
+ * - actions: Edit and delete buttons
+ */
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'schedule', label: 'Schedule', field: 'schedule', align: 'left' },
@@ -160,11 +193,33 @@ const columns = [
   { name: 'actions', label: 'Actions', align: 'center' }
 ]
 
+// ===== Utility Functions =====
+
+/**
+ * Convert day of week number to name
+ * 
+ * Input:
+ * - dayNum (string|number): Day number (0=Sunday, 6=Saturday)
+ * 
+ * Returns:
+ * - string: Day name (e.g., "Monday") or empty string if invalid
+ */
 function getDayName(dayNum) {
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   return dayNames[parseInt(dayNum)] || ''
 }
 
+// ===== API Functions =====
+
+/**
+ * Load backup schedules from API
+ * 
+ * Fetches all backup schedules configured in the system.
+ * Used for initial page load and after save/delete operations.
+ * 
+ * Error handling:
+ * - Shows error notification if API fails
+ */
 async function loadData() {
   try {
     const response = await api.get('/backup-schedules/')
@@ -174,6 +229,12 @@ async function loadData() {
   }
 }
 
+/**
+ * Show add schedule dialog
+ * 
+ * Resets form to default values and opens dialog in "add mode"
+ * User can then fill in details and click Save to create new schedule
+ */
 function showAddDialog() {
   form.value = {
     name: '',
@@ -190,12 +251,35 @@ function showAddDialog() {
   dialog.value = true
 }
 
+/**
+ * Edit existing schedule
+ * 
+ * Input:
+ * - item (Object): Schedule object to edit
+ * 
+ * Process:
+ * 1. Copy schedule data into form
+ * 2. Set editMode to true
+ * 3. Open dialog for editing
+ */
 function editItem(item) {
   form.value = { ...item }
   editMode.value = true
   dialog.value = true
 }
 
+/**
+ * Save schedule (create or update)
+ * 
+ * Process:
+ * 1. Check if in edit or add mode
+ * 2. Send PUT request if editing, POST if creating
+ * 3. Show success notification
+ * 4. Close dialog and reload schedules
+ * 
+ * Error handling:
+ * - Shows error notification if API fails
+ */
 async function save() {
   try {
     if (editMode.value) {
@@ -211,6 +295,22 @@ async function save() {
   }
 }
 
+/**
+ * Delete schedule with confirmation
+ * 
+ * Input:
+ * - item (Object): Schedule to delete
+ * 
+ * Process:
+ * 1. Show confirmation dialog
+ * 2. If user confirms:
+ *    - Send DELETE request to API
+ *    - Show success notification
+ *    - Reload schedules
+ * 
+ * Error handling:
+ * - Shows error notification if API fails
+ */
 async function deleteItem(item) {
   $q.dialog({
     title: 'Confirm',
@@ -227,6 +327,12 @@ async function deleteItem(item) {
   })
 }
 
+// ===== Lifecycle Hooks =====
+
+/**
+ * Component mounted lifecycle hook
+ * Loads initial backup schedules data
+ */
 onMounted(() => {
   loadData()
 })
