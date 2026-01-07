@@ -94,8 +94,8 @@ python manage.py migrate --run-syncdb
 5. **Create Admin User**
 ```bash
 # Preferred: run the supplied idempotent helper (from repo root)
-chmod +x setup/create-initial-user.sh
-./setup/create-initial-user.sh
+chmod +x setup/create-initial-configuration.sh
+./setup/create-initial-configuration.sh
 
 # Alternatively (manual):
 cd backend
