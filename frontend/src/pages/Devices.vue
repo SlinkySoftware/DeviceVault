@@ -192,7 +192,7 @@ const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
-  { name: 'manufacturer', label: 'Manufacturer', field: row => row.manufacturer?.name || 'N/A', align: 'left' },
+  { name: 'backup_method', label: 'Backup Method', field: 'backup_method_display', align: 'left', sortable: true },
   { name: 'device_group', label: 'Device Group', field: row => row.device_group_name || row.device_group?.name || 'N/A', align: 'left', sortable: true },
   { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left' },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center' },

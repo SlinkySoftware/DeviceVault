@@ -10,7 +10,6 @@ from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
-from rbac.models import GroupLabelAssignment
 from devices.models import (
     DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
     UserDeviceGroupRole, GroupDeviceGroupRole
@@ -80,13 +79,14 @@ class DeviceSerializer(serializers.ModelSerializer):
     
     Nested Objects:
         - device_type (DeviceTypeSerializer): Includes icon and name
-        - manufacturer (ManufacturerSerializer): Full manufacturer details
+        - manufacturer (ManufacturerSerializer): Full manufacturer details (optional)
         - user_permissions (SerializerMethodField): User's permissions for device's group
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     device_group_name = serializers.CharField(source='device_group.name', read_only=True)
+    backup_method_display = serializers.SerializerMethodField()
     
     class Meta:
         model = Device
@@ -94,7 +94,7 @@ class DeviceSerializer(serializers.ModelSerializer):
     
     def get_user_permissions(self, obj):
         """Get permissions for the requesting user for this device's group"""
-        from rbac.permissions import user_get_device_group_permissions
+        from devices.permissions import user_get_device_group_permissions
         
         request = self.context.get('request')
         if not request or not request.user:
@@ -105,6 +105,18 @@ class DeviceSerializer(serializers.ModelSerializer):
         
         permissions = user_get_device_group_permissions(request.user, obj.device_group)
         return list(permissions)
+    
+    def get_backup_method_display(self, obj):
+        """Get friendly name of backup method plugin"""
+        from backups.plugins import get_plugin
+        plugin = get_plugin(obj.backup_method)
+        return plugin.friendly_name if plugin else obj.backup_method
+    
+    def get_backup_method_display(self, obj):
+        """Get friendly name of backup method plugin"""
+        from backups.plugins import get_plugin
+        plugin = get_plugin(obj.backup_method)
+        return plugin.friendly_name if plugin else obj.backup_method
 
 
 class BackupSerializer(serializers.ModelSerializer):
@@ -437,11 +449,13 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     manufacturer = ManufacturerSerializer(read_only=True)
     device_group = DeviceGroupSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
+    backup_method_display = serializers.SerializerMethodField()
     
     class Meta:
         model = Device
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
+            'backup_method', 'backup_method_display',
             'device_group', 'enabled', 'is_example_data', 'last_backup_time',
             'last_backup_status', 'retention_policy', 'backup_location', 'credential',
             'user_permissions'
@@ -449,7 +463,7 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     
     def get_user_permissions(self, obj):
         """Get permissions for the requesting user for this device's group"""
-        from rbac.permissions import user_get_device_group_permissions
+        from devices.permissions import user_get_device_group_permissions
         
         request = self.context.get('request')
         if not request or not request.user:

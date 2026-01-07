@@ -12,15 +12,9 @@ class Migration(migrations.Migration):
         ('devices', '0003_device_is_example_data'),
         ('locations', '0002_alter_backuplocation_config_and_more'),
         ('policies', '0002_alter_backupschedule_created_at_and_more'),
-        ('rbac', '0005_devicegroup_devicegrouppermission_devicegrouprole_and_more'),
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='device',
-            name='device_group',
-            field=models.ForeignKey(blank=True, help_text='Device group for RBAC access control', null=True, on_delete=django.db.models.deletion.PROTECT, to='rbac.devicegroup'),
-        ),
         migrations.AlterField(
             model_name='device',
             name='backup_location',
@@ -55,11 +49,6 @@ class Migration(migrations.Migration):
             model_name='device',
             name='is_example_data',
             field=models.BooleanField(default=False, help_text='Mark as example/demo data to exclude from backups'),
-        ),
-        migrations.AlterField(
-            model_name='device',
-            name='labels',
-            field=models.ManyToManyField(blank=True, help_text='Tags for organization (deprecated, kept for migration)', to='core.label'),
         ),
         migrations.AlterField(
             model_name='device',

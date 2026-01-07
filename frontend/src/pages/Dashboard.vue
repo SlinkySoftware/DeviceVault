@@ -208,7 +208,8 @@ const ChartWidget = defineComponent({
   props: ['stats'],
   data() {
     return {
-      observer: null
+      observer: null,
+      resizeObserver: null
     }
   },
   mounted() {
@@ -221,10 +222,20 @@ const ChartWidget = defineComponent({
       attributes: true,
       attributeFilter: ['class']
     })
+    // Watch for container resize
+    if (this.$refs.chartCanvas) {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.renderChart()
+      })
+      this.resizeObserver.observe(this.$refs.chartCanvas.parentElement)
+    }
   },
   beforeUnmount() {
     if (this.observer) {
       this.observer.disconnect()
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect()
     }
   },
   updated() {
@@ -238,8 +249,17 @@ const ChartWidget = defineComponent({
       if (!this.$refs.chartCanvas) return
       const ctx = this.$refs.chartCanvas.getContext('2d')
       const container = this.$refs.chartCanvas.parentElement
-      const width = this.$refs.chartCanvas.width = container.offsetWidth
-      const height = this.$refs.chartCanvas.height = container.offsetHeight
+      // Get actual container dimensions
+      const containerRect = container.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
+      const width = containerRect.width
+      const height = containerRect.height
+      // Set canvas size with device pixel ratio for crisp rendering
+      this.$refs.chartCanvas.width = width * dpr
+      this.$refs.chartCanvas.height = height * dpr
+      this.$refs.chartCanvas.style.width = width + 'px'
+      this.$refs.chartCanvas.style.height = height + 'px'
+      ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, width, height)
       const dailyStats = this.stats.dailyStats || []
       if (dailyStats.length === 0) return

@@ -1,36 +1,13 @@
 """
 Core Application Models
-Defines labels for device organization, user preferences, and dashboard layout configuration.
+Defines user preferences and dashboard layout configuration.
 """
 
 from django.db import models
 from django.contrib.auth.models import User
 
 
-class Label(models.Model):
-    """
-    Label Model: Tags for organizing and categorizing devices
-    
-    Fields:
-        - name (CharField): Unique label name (e.g., "Production", "DMZ", "Critical")
-        - description (TextField): Optional explanation of label purpose
-    
-    Methods:
-        - __str__(): Returns the label name
-    
-    Usage:
-        Devices can have multiple labels to categorize them by:
-        - Environment: Production, Development, Testing
-        - Location: DMZ, Internal, Remote
-        - Priority: Critical, Non-critical
-        - Function: Router, Firewall, etc.
-    """
-    name = models.CharField(max_length=64, unique=True, help_text='Label name (Production, DMZ, etc.)')
-    description = models.TextField(blank=True, help_text='Optional description of label purpose')
-    
-    def __str__(self):
-        """Return the label name for admin display"""
-        return self.name
+# Label model removed - Device Groups replaced the label-based organization system
 
 
 class UserProfile(models.Model):

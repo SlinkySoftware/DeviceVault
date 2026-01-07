@@ -46,15 +46,15 @@
             </div>
             <div class="col-12 col-md-6">
               <q-select
-                v-model="form.manufacturer"
-                :options="manufacturers"
-                option-label="name"
-                option-value="id"
-                label="Manufacturer"
+                v-model="form.backup_method"
+                :options="backupMethods"
+                option-label="friendly_name"
+                option-value="key"
+                label="Backup Method"
                 outlined
                 emit-value
                 map-options
-                :rules="[val => !!val || 'Manufacturer is required']"
+                :rules="[val => !!val || 'Backup Method is required']"
               />
             </div>
           </div>
@@ -152,7 +152,7 @@ const form = ref({
   ip_address: '', 
   dns_name: '',
   device_type: null,
-  manufacturer: null,
+  backup_method: 'noop',
   credential: null,
   backup_location: null,
   retention_policy: null,
@@ -161,7 +161,7 @@ const form = ref({
 })
 
 const deviceTypes = ref([])
-const manufacturers = ref([])
+const backupMethods = ref([])
 const credentials = ref([])
 const backupLocations = ref([])
 const retentionPolicies = ref([])
@@ -170,9 +170,9 @@ const deviceGroupOptions = ref([])
 
 async function loadData() {
   try {
-    const [typesResp, mfgResp, credsResp, locsResp, polsResp, groupsResp] = await Promise.all([
+    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp] = await Promise.all([
       api.get('/device-types/'),
-      api.get('/manufacturers/'),
+      api.get('/backup-methods/'),
       api.get('/credentials/'),
       api.get('/backup-locations/'),
       api.get('/retention-policies/'),
@@ -180,7 +180,7 @@ async function loadData() {
     ])
     
     deviceTypes.value = typesResp.data
-    manufacturers.value = mfgResp.data
+    backupMethods.value = methodsResp.data
     credentials.value = credsResp.data
     backupLocations.value = locsResp.data
     retentionPolicies.value = polsResp.data
@@ -197,7 +197,7 @@ async function loadData() {
         ip_address: data.ip_address || '',
         dns_name: data.dns_name || '',
         device_type: data.device_type?.id ?? null,
-        manufacturer: data.manufacturer?.id ?? null,
+        backup_method: data.backup_method ?? 'noop',
         credential: data.credential ?? null,
         backup_location: data.backup_location ?? null,
         retention_policy: data.retention_policy ?? null,

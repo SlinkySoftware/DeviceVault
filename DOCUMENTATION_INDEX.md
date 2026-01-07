@@ -5,6 +5,7 @@
 ### Getting Started
 - [README.md](README.md) - Project overview and setup instructions
 - [AUTHENTICATION.md](AUTHENTICATION.md) - Authentication system documentation
+- [BACKUP_METHODS.md](BACKUP_METHODS.md) - Backup plugin system and device support
 
 ### Group Management Feature (NEW)
 - [GROUPS_QUICK_START.md](GROUPS_QUICK_START.md) - **START HERE** for administrators
@@ -50,6 +51,9 @@
 
 ### I need authentication info
 → Check [AUTHENTICATION.md](AUTHENTICATION.md)
+
+### I need backup method/plugin info
+→ See [BACKUP_METHODS.md](BACKUP_METHODS.md)
 
 ### I want code documentation
 → See [DOCUMENTATION_SUMMARY.md](DOCUMENTATION_SUMMARY.md)

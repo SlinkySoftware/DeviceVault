@@ -4,10 +4,10 @@ A comprehensive network device backup management application with web interface 
 
 ## Features
 
-- **Multi-Manufacturer Support**: Cisco, Fortigate, Dell, Sophos, Mikrotik, and more
+- **Plugin-Based Backup Methods**: Extensible architecture for supporting multiple device types
 - **Flexible Connectivity**: SSH, API, and TFTP backup reception
 - **Multiple Storage Backends**: Git (default), Local Filesystem, S3, Azure, GCS
-- **RBAC**: Role-based access control with label-based visibility
+- **RBAC**: Role-based access control with device group-based visibility
 - **Authentication**: LDAP, SAML, Entra ID, and Local Auth support
 - **Retention Policies**: Configurable backup retention by count, time, or size
 - **Audit Logging**: Complete audit trail of all activities
@@ -142,7 +142,7 @@ cd /opt/devicevault
 1. **Dashboard** - Statistics, charts, and recent activity
 2. **Devices** - Device management with filtering
 3. **Device Types** - Manage device type categories
-4. **Manufacturers** - Manage device manufacturers
+4. **Backup Methods** - View available backup method plugins
 5. **Credentials** - Credential storage and management
 6. **Backup Locations** - Configure storage backends
 7. **Retention Policies** - Define backup retention rules

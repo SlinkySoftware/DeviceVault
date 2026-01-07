@@ -13,14 +13,13 @@ from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
 from core.models import DashboardLayout
-from rbac.models import GroupLabelAssignment
 from devices.models import (
     DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
     UserDeviceGroupRole, GroupDeviceGroupRole
 )
 from django.contrib.auth.models import Group
 from audit.models import AuditLog
-from rbac.permissions import user_has_device_group_permission, user_get_device_group_permissions
+from devices.permissions import user_has_device_group_permission, user_get_device_group_permissions
 from .serializers import (
     DeviceTypeSerializer, ManufacturerSerializer, DeviceSerializer,
     BackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
@@ -39,6 +38,31 @@ class DeviceTypeViewSet(viewsets.ModelViewSet):
 class ManufacturerViewSet(viewsets.ModelViewSet):
     queryset = Manufacturer.objects.all()
     serializer_class = ManufacturerSerializer
+
+
+class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only ViewSet for listing available backup method plugins
+    
+    Returns all plugins discovered under backups.plugins with their
+    friendly_name and description.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def list(self, request):
+        from backups.plugins import list_plugins
+        plugins = list_plugins()
+        data = [
+            {
+                'key': p.key,
+                'friendly_name': p.friendly_name,
+                'description': p.description
+            }
+            for p in plugins
+        ]
+        return response.Response(data, status=status.HTTP_200_OK)
+
+
 class DeviceViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing devices with RBAC support
@@ -60,7 +84,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filter devices based on user's device group access"""
-        from rbac.permissions import user_get_accessible_device_groups
+        from devices.permissions import user_get_accessible_device_groups
         
         user = self.request.user
         
@@ -73,7 +97,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
     
     def perform_destroy(self, instance):
         """Check delete permission before deleting"""
-        from rbac.permissions import user_has_device_group_permission
+        from devices.permissions import user_has_device_group_permission
         
         if not self.request.user.is_staff and not self.request.user.is_superuser:
             if not instance.device_group:
@@ -115,10 +139,6 @@ class GroupViewSet(viewsets.ModelViewSet):
     serializer_class = GroupSerializer
 
     def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        # Prevent deletion if any tags are assigned to this group
-        if GroupLabelAssignment.objects.filter(group=instance).exists():
-            return response.Response({'detail': 'Cannot delete a group that has tags assigned. Remove tags first.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -451,7 +471,7 @@ class DeviceGroupViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Only return device groups the user has access to"""
-        from rbac.permissions import user_get_accessible_device_groups
+        from devices.permissions import user_get_accessible_device_groups
         
         if self.request.user.is_staff or self.request.user.is_superuser:
             return DeviceGroup.objects.all()
@@ -500,7 +520,7 @@ class DeviceGroupRoleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Only return roles for device groups the user has access to"""
-        from rbac.permissions import user_get_accessible_device_groups
+        from devices.permissions import user_get_accessible_device_groups
         
         if self.request.user.is_staff or self.request.user.is_superuser:
             return DeviceGroupRole.objects.all()

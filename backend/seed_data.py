@@ -13,11 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'devicevault.settings')
 django.setup()
 
-from devices.models import DeviceType, Manufacturer, Device
+from devices.models import DeviceType, Manufacturer, Device, DeviceGroup
 from credentials.models import CredentialType, Credential
 from locations.models import BackupLocation
 from policies.models import RetentionPolicy, BackupSchedule
-from core.models import Label
 from django.contrib.auth.models import User
 
 def create_sample_data():
@@ -114,12 +113,6 @@ def create_sample_data():
         )
     print(f"✓ Created {len(schedules)} backup schedules")
     
-    # Labels
-    labels = ['Production', 'Development', 'DMZ', 'Internal', 'Critical', 'Non-Critical']
-    for label in labels:
-        Label.objects.get_or_create(name=label)
-    print(f"✓ Created {len(labels)} labels")
-    
     # Sample Devices (only if we have required data)
     if DeviceType.objects.exists() and Manufacturer.objects.exists():
         router_type = DeviceType.objects.get(name='Router')
@@ -162,6 +155,7 @@ def create_sample_data():
                     'dns_name': dns,
                     'device_type': dtype,
                     'manufacturer': mfg,
+                    'backup_method': 'noop',
                     'credential': default_cred,
                     'backup_location': default_location,
                     'retention_policy': default_policy,
@@ -169,17 +163,43 @@ def create_sample_data():
                     'enabled': True
                 }
             )
-            if created:
-                # Add production label to production devices, Development to example devices
-                if is_example:
-                    dev_label = Label.objects.get(name='Development')
-                    device.labels.add(dev_label)
-                else:
-                    prod_label = Label.objects.get(name='Production')
-                    critical_label = Label.objects.get(name='Critical')
-                    device.labels.add(prod_label, critical_label)
         
         print(f"✓ Created {len(production_devices)} production devices and {len(example_devices)} example devices")
+    
+    # Device Groups
+    device_groups = [
+        ('Core Network', 'Critical core network infrastructure'),
+        ('Edge Network', 'Edge routers and firewalls'),
+        ('Lab Equipment', 'Test and demo devices'),
+        ('Access Layer', 'Access switches and wireless APs'),
+    ]
+    
+    created_groups = {}
+    for group_name, description in device_groups:
+        group, _ = DeviceGroup.objects.get_or_create(
+            name=group_name,
+            defaults={'description': description}
+        )
+        created_groups[group_name] = group
+    print(f"✓ Created {len(device_groups)} device groups")
+    
+    # Assign devices to groups
+    core_routers = Device.objects.filter(name__icontains='Core-Router')
+    core_switches = Device.objects.filter(name__icontains='Core-Switch')
+    edge_devices = Device.objects.filter(name__icontains='Firewall')
+    lab_devices = Device.objects.filter(name__icontains='Demo')
+    access_devices = Device.objects.filter(name__icontains='AP')
+    
+    if created_groups.get('Core Network'):
+        created_groups['Core Network'].device_set.set(list(core_routers) + list(core_switches))
+    if created_groups.get('Edge Network'):
+        created_groups['Edge Network'].device_set.set(edge_devices)
+    if created_groups.get('Lab Equipment'):
+        created_groups['Lab Equipment'].device_set.set(lab_devices)
+    if created_groups.get('Access Layer'):
+        created_groups['Access Layer'].device_set.set(access_devices)
+    
+    print(f"✓ Assigned devices to groups")
     
     print("\n✅ Sample data created successfully!")
     print("\nProduction devices (will be backed up):")

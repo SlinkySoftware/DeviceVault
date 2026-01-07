@@ -7,6 +7,7 @@ from api import views
 router = routers.DefaultRouter()
 router.register(r'device-types', views.DeviceTypeViewSet)
 router.register(r'manufacturers', views.ManufacturerViewSet)
+router.register(r'backup-methods', views.BackupMethodViewSet, basename='backup-methods')
 router.register(r'devices', views.DeviceViewSet)
 router.register(r'backups', views.BackupViewSet)
 router.register(r'retention-policies', views.RetentionPolicyViewSet)

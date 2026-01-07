@@ -88,12 +88,12 @@
                   </q-item-section>
                 </q-item>
 
-                <q-item clickable to="/vaultadmin/manufacturers" class="submenu-item">
+                <q-item clickable to="/vaultadmin/backup-methods" class="submenu-item">
                   <q-item-section avatar>
-                    <q-icon name="business" size="xs" />
+                    <q-icon name="extension" size="xs" />
                   </q-item-section>
                   <q-item-section>
-                    <q-item-label>Manufacturers</q-item-label>
+                    <q-item-label>Backup Methods</q-item-label>
                   </q-item-section>
                 </q-item>
 

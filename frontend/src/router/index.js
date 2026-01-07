@@ -15,7 +15,7 @@ import Devices from '../pages/Devices.vue'
 import EditDevice from '../pages/EditDevice.vue'
 import ViewBackups from '../pages/ViewBackups.vue'
 import DeviceTypes from '../pages/DeviceTypes.vue'
-import Manufacturers from '../pages/Manufacturers.vue'
+import BackupMethods from '../pages/BackupMethods.vue'
 import Credentials from '../pages/Credentials.vue'
 import BackupLocations from '../pages/BackupLocations.vue'
 import BackupSchedules from '../pages/BackupSchedules.vue'
@@ -52,7 +52,7 @@ const routes = [
   
   // ===== Admin Routes (/vaultadmin) =====
   { path: '/vaultadmin/device-types', component: DeviceTypes, meta: { requiresAuth: true } },
-  { path: '/vaultadmin/manufacturers', component: Manufacturers, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/backup-methods', component: BackupMethods, meta: { requiresAuth: true } },
   { path: '/vaultadmin/credentials', component: Credentials, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-locations', component: BackupLocations, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-schedules', component: BackupSchedules, meta: { requiresAuth: true } },

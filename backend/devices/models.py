@@ -5,6 +5,7 @@ Includes device types, manufacturers, device inventory management, and device gr
 """
 
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.models import User, Group as AuthGroup, Permission as AuthPermission
 from django.contrib.contenttypes.models import ContentType
 from django.db.models.signals import post_save, pre_delete
@@ -56,7 +57,8 @@ class Device(models.Model):
         - ip_address (GenericIPAddressField): IPv4 address for SSH/telnet connection
         - dns_name (CharField): FQDN for device resolution (optional)
         - device_type (ForeignKey): Type of device (Router, Switch, Firewall, etc.)
-        - manufacturer (ForeignKey): Hardware manufacturer
+        - manufacturer (ForeignKey): Hardware manufacturer (optional)
+        - backup_method (CharField): Backup plugin key to use (e.g. mikrotik_ssh_export, noop, etc.)
         - device_group (ForeignKey): Device group for RBAC access control
         - enabled (BooleanField): Whether device is active for backups (default: True)
         - is_example_data (BooleanField): If True, device is excluded from backup processing (default: False)
@@ -78,7 +80,8 @@ class Device(models.Model):
     ip_address = models.GenericIPAddressField(protocol='IPv4', help_text='IPv4 address for SSH/Telnet connection')
     dns_name = models.CharField(max_length=128, blank=True, help_text='FQDN for DNS resolution (optional)')
     device_type = models.ForeignKey(DeviceType, on_delete=models.PROTECT, help_text='Type of device (Router, Switch, etc.)')
-    manufacturer = models.ForeignKey(Manufacturer, on_delete=models.PROTECT, help_text='Hardware manufacturer')
+    manufacturer = models.ForeignKey(Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)')
+    backup_method = models.CharField(max_length=128, default='noop', help_text='Backup plugin key to use for this device')
     device_group = models.ForeignKey('DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
     is_example_data = models.BooleanField(default=False, help_text='Mark as example/demo data to exclude from backups')
@@ -139,9 +142,30 @@ class DeviceGroupDjangoPermissions(models.Model):
     - Device Group - {name} - Can View Backups
     """
     device_group = models.OneToOneField(DeviceGroup, on_delete=models.CASCADE, related_name='django_permissions')
-    perm_view = models.ForeignKey(AuthPermission, on_delete=models.CASCADE, related_name='dg_perm_view')
-    perm_modify = models.ForeignKey(AuthPermission, on_delete=models.CASCADE, related_name='dg_perm_modify')
-    perm_view_backups = models.ForeignKey(AuthPermission, on_delete=models.CASCADE, related_name='dg_perm_view_backups')
+    perm_view = models.ForeignKey(
+        AuthPermission,
+        on_delete=models.CASCADE,
+        related_name='dg_perm_view',
+        null=True,
+        blank=True,
+        default=None,
+    )
+    perm_modify = models.ForeignKey(
+        AuthPermission,
+        on_delete=models.CASCADE,
+        related_name='dg_perm_modify',
+        null=True,
+        blank=True,
+        default=None,
+    )
+    perm_view_backups = models.ForeignKey(
+        AuthPermission,
+        on_delete=models.CASCADE,
+        related_name='dg_perm_view_backups',
+        null=True,
+        blank=True,
+        default=None,
+    )
 
     def __str__(self):
         return f"RBAC|DG_{self.device_group.name}"
@@ -268,7 +292,7 @@ class DeviceGroupRole(models.Model):
     name = models.CharField(max_length=128, help_text='Role name within the device group')
     device_group = models.ForeignKey(DeviceGroup, on_delete=models.CASCADE, related_name='roles', help_text='Device group this role applies to')
     permissions = models.ManyToManyField(DeviceGroupPermission, blank=True, help_text='Permissions granted by this role')
-    created_at = models.DateTimeField(auto_now_add=True, help_text='When role was created')
+    created_at = models.DateTimeField(default=timezone.now, blank=True, null=True, help_text='When role was created')
     
     class Meta:
         unique_together = ('name', 'device_group')
