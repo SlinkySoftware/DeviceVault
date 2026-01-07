@@ -59,6 +59,18 @@
             </div>
           </div>
 
+          <q-select
+            v-model="form.device_group"
+            :options="deviceGroupOptions"
+            option-label="name"
+            option-value="id"
+            label="Device Group"
+            outlined
+            emit-value
+            map-options
+            :rules="[val => !!val || 'Device Group is required']"
+          />
+
           <div class="row q-col-gutter-md">
             <div class="col-12 col-md-4">
               <q-select
@@ -100,20 +112,6 @@
               />
             </div>
           </div>
-
-          <q-select
-            v-model="form.labels"
-            :options="labels"
-            option-label="name"
-            option-value="id"
-            label="Labels"
-            outlined
-            multiple
-            emit-value
-            map-options
-            use-chips
-            :disable="ignoreTags"
-          />
 
           <q-toggle
             v-model="form.enabled"
@@ -158,7 +156,7 @@ const form = ref({
   credential: null,
   backup_location: null,
   retention_policy: null,
-  labels: [],
+  device_group: null,
   enabled: true
 })
 
@@ -167,23 +165,18 @@ const manufacturers = ref([])
 const credentials = ref([])
 const backupLocations = ref([])
 const retentionPolicies = ref([])
-const labels = ref([])
-const ignoreTags = ref(false)
+const deviceGroups = ref([])
+const deviceGroupOptions = ref([])
 
 async function loadData() {
   try {
-    // Read global ignoreTags flag from localStorage
-    ignoreTags.value = localStorage.getItem('ignoreTags') === 'true'
-    if (ignoreTags.value) {
-      form.value.labels = []
-    }
-    const [typesResp, mfgResp, credsResp, locsResp, polsResp, labelsResp] = await Promise.all([
+    const [typesResp, mfgResp, credsResp, locsResp, polsResp, groupsResp] = await Promise.all([
       api.get('/device-types/'),
       api.get('/manufacturers/'),
       api.get('/credentials/'),
       api.get('/backup-locations/'),
       api.get('/retention-policies/'),
-      api.get('/labels/')
+      api.get('/device-groups/')
     ])
     
     deviceTypes.value = typesResp.data
@@ -191,13 +184,25 @@ async function loadData() {
     credentials.value = credsResp.data
     backupLocations.value = locsResp.data
     retentionPolicies.value = polsResp.data
-    labels.value = labelsResp.data
+    deviceGroups.value = groupsResp.data || []
+    deviceGroupOptions.value = deviceGroups.value
+      .filter(g => g.can_modify)
+      .sort((a, b) => a.name.localeCompare(b.name))
 
     if (isEdit.value) {
       const response = await api.get(`/devices/${route.params.id}/`)
-      form.value = response.data
-      if (ignoreTags.value) {
-        form.value.labels = []
+      const data = response.data || {}
+      form.value = {
+        name: data.name || '',
+        ip_address: data.ip_address || '',
+        dns_name: data.dns_name || '',
+        device_type: data.device_type?.id ?? null,
+        manufacturer: data.manufacturer?.id ?? null,
+        credential: data.credential ?? null,
+        backup_location: data.backup_location ?? null,
+        retention_policy: data.retention_policy ?? null,
+        device_group: data.device_group?.id ?? null,
+        enabled: data.enabled ?? true
       }
     }
   } catch (error) {

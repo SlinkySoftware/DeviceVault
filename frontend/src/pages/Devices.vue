@@ -20,11 +20,16 @@
         />
       </div>
       <div class="col-12 col-md-3">
-        <q-input 
-          v-model="filter.type" 
-          outlined 
+        <q-select
+          v-model="filter.type"
+          :options="deviceTypes"
+          option-value="id"
+          option-label="name"
+          outlined
           label="Device Type"
           clearable
+          emit-value
+          map-options
         />
       </div>
       <div class="col-12 col-md-3">
@@ -68,7 +73,7 @@
       <template v-slot:body-cell-device_group="props">
         <q-td :props="props">
           <q-badge color="info" outline>
-            {{ props.row.device_group?.name || 'Unassigned' }}
+            {{ props.row.device_group_name || props.row.device_group?.name || 'Unassigned' }}
           </q-badge>
         </q-td>
       </template>
@@ -157,6 +162,7 @@ const devices = ref([])
 
 /** Array of device group objects for filter dropdown */
 const deviceGroups = ref([])
+const deviceTypes = ref([])
 
 /** Filter state object for search/filtering
  * Properties:
@@ -165,7 +171,7 @@ const deviceGroups = ref([])
  * - device_group: Filter by device group name
  * - status: Filter by last backup status (All, success, failed)
  */
-const filter = ref({ name: '', type: '', device_group: '', status: 'All' })
+const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
 
 /**
  * Table Column Configuration
@@ -187,7 +193,7 @@ const columns = [
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'manufacturer', label: 'Manufacturer', field: row => row.manufacturer?.name || 'N/A', align: 'left' },
-  { name: 'device_group', label: 'Device Group', field: row => row.device_group?.name || 'N/A', align: 'left', sortable: true },
+  { name: 'device_group', label: 'Device Group', field: row => row.device_group_name || row.device_group?.name || 'N/A', align: 'left', sortable: true },
   { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left' },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center' },
   { name: 'is_example_data', label: 'Example', field: 'is_example_data', align: 'center' },
@@ -221,11 +227,17 @@ const filteredDevices = computed(() => {
     if (filter.value.name && !d.name?.toLowerCase().includes(filter.value.name.toLowerCase())) {
       return false
     }
-    if (filter.value.type && !d.device_type?.name?.toLowerCase().includes(filter.value.type.toLowerCase())) {
-      return false
+    if (filter.value.type) {
+      const deviceTypeId = typeof d.device_type === 'object' ? d.device_type?.id : d.device_type
+      if (deviceTypeId !== filter.value.type) {
+        return false
+      }
     }
-    if (filter.value.device_group && d.device_group?.id !== filter.value.device_group) {
-      return false
+    if (filter.value.device_group) {
+      const deviceGroupId = typeof d.device_group === 'object' ? d.device_group?.id : d.device_group
+      if (deviceGroupId !== filter.value.device_group) {
+        return false
+      }
     }
     if (filter.value.status && filter.value.status !== 'All' && d.last_backup_status !== filter.value.status) {
       return false
@@ -291,6 +303,18 @@ async function loadDeviceGroups() {
 }
 
 /**
+ * Load device types for the type filter dropdown
+ */
+async function loadDeviceTypes() {
+  try {
+    const response = await api.get('/device-types/')
+    deviceTypes.value = (response.data || []).sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    $q.notify({ type: 'negative', message: 'Failed to fetch device types' })
+  }
+}
+
+/**
  * Load all accessible devices from API
  * 
  * API automatically filters to only accessible device groups
@@ -351,6 +375,7 @@ async function toggleEnabled(device) {
  */
 onMounted(() => {
   loadDeviceGroups()
+  loadDeviceTypes()
   loadDevices()
 })
 </script>

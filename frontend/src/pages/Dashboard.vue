@@ -338,7 +338,7 @@ export default defineComponent({
         { id: 'devices', width: 3, height: 220 },
         { id: 'backups', width: 3, height: 220 },
         { id: 'avgtime', width: 3, height: 220 },
-        { id: 'successrate', width: 3, height: 220 },
+        { id: 'successrate', width: 3, height: 440 },
         { id: 'chart', width: 12, height: 300 },
         { id: 'activity', width: 12, height: 300 }
       ],
@@ -346,7 +346,7 @@ export default defineComponent({
         { id: 'devices', width: 3, height: 220 },
         { id: 'backups', width: 3, height: 220 },
         { id: 'avgtime', width: 3, height: 220 },
-        { id: 'successrate', width: 3, height: 220 },
+        { id: 'successrate', width: 3, height: 440 },
         { id: 'chart', width: 12, height: 300 },
         { id: 'activity', width: 12, height: 300 }
       ],
@@ -369,9 +369,16 @@ export default defineComponent({
         .map(widget => {
           const widgetConfig = widgetMap[widget.id]
           if (!widgetConfig) return null
+          const defaultHeight =
+            widget.id === 'chart' || widget.id === 'activity'
+              ? 300
+              : widget.id === 'successrate'
+              ? 440
+              : 220
           return {
             ...widgetConfig,
-            width: widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3)
+            width: widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3),
+            height: widget.height || defaultHeight
           }
         })
         .filter(w => w)
@@ -434,9 +441,21 @@ export default defineComponent({
         // Check if layout exists AND has items
         const layoutData = layoutRes.data?.layout || layoutRes.data
         if (layoutData && Array.isArray(layoutData) && layoutData.length > 0) {
-          this.widgetOrder = layoutData.map(item => 
-            typeof item === 'string' ? { id: item, width: (item === 'chart' || item === 'activity' ? 12 : 3) } : item
-          )
+          this.widgetOrder = layoutData.map(item => {
+            const normalized = typeof item === 'string' ? { id: item } : { ...item }
+            // Apply defaults for width/height if missing
+            if (!normalized.width) {
+              normalized.width = normalized.id === 'chart' || normalized.id === 'activity' ? 12 : 3
+            }
+            if (!normalized.height) {
+              normalized.height = normalized.id === 'successrate'
+                ? 440
+                : normalized.id === 'chart' || normalized.id === 'activity'
+                ? 300
+                : 220
+            }
+            return normalized
+          })
         } else {
           this.widgetOrder = [...this.defaultOrder]
         }

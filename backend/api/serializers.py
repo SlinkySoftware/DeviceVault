@@ -86,6 +86,7 @@ class DeviceSerializer(serializers.ModelSerializer):
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
+    device_group_name = serializers.CharField(source='device_group.name', read_only=True)
     
     class Meta:
         model = Device
@@ -376,12 +377,31 @@ class DeviceGroupRoleSerializer(serializers.ModelSerializer):
 
 
 class DeviceGroupSerializer(serializers.ModelSerializer):
-    """Serializes DeviceGroup model with nested roles"""
+    """Serializes DeviceGroup model with nested roles and user-level modify flag"""
     roles = DeviceGroupRoleSerializer(many=True, read_only=True)
-    
+    can_modify = serializers.SerializerMethodField()
+
     class Meta:
         model = DeviceGroup
-        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at', 'can_modify']
+
+    def get_can_modify(self, obj):
+        """Return True if the requesting user has the group's Django modify permission"""
+        request = self.context.get('request')
+        if not request:
+            return False
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff or user.is_superuser:
+            return True
+        try:
+            link = obj.django_permissions
+        except Exception:
+            return False
+        perm = link.perm_modify
+        perm_code = f"{perm.content_type.app_label}.{perm.codename}"
+        return user.has_perm(perm_code)
 
 
 class UserDeviceGroupRoleSerializer(serializers.ModelSerializer):
