@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from devices.models import DeviceType, Manufacturer, Device
 from backups.models import Backup
-from policies.models import RetentionPolicy
+from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
 from core.models import Label
@@ -20,6 +20,8 @@ class LabelSerializer(serializers.ModelSerializer):
     class Meta: model = Label; fields='__all__'
 class RetentionPolicySerializer(serializers.ModelSerializer):
     class Meta: model = RetentionPolicy; fields='__all__'
+class BackupScheduleSerializer(serializers.ModelSerializer):
+    class Meta: model = BackupSchedule; fields='__all__'
 class BackupLocationSerializer(serializers.ModelSerializer):
     class Meta: model = BackupLocation; fields='__all__'
 class CredentialTypeSerializer(serializers.ModelSerializer):
@@ -27,6 +29,8 @@ class CredentialTypeSerializer(serializers.ModelSerializer):
 class CredentialSerializer(serializers.ModelSerializer):
     class Meta: model = Credential; fields='__all__'
 class DeviceSerializer(serializers.ModelSerializer):
+    device_type = DeviceTypeSerializer(read_only=True)
+    manufacturer = ManufacturerSerializer(read_only=True)
     class Meta: model = Device; fields='__all__'
 class BackupSerializer(serializers.ModelSerializer):
     class Meta: model = Backup; fields='__all__'

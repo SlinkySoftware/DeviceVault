@@ -10,7 +10,7 @@ from django.utils import timezone
 from datetime import timedelta
 from devices.models import DeviceType, Manufacturer, Device
 from backups.models import Backup
-from policies.models import RetentionPolicy
+from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
 from core.models import Label, DashboardLayout
@@ -22,7 +22,7 @@ from .serializers import (
     CredentialSerializer, CredentialTypeSerializer, LabelSerializer,
     RoleSerializer, PermissionSerializer, UserSerializer, AuditLogSerializer,
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
-    UserProfileSerializer
+    UserProfileSerializer, BackupScheduleSerializer
 )
 import difflib, os
 
@@ -41,6 +41,9 @@ class BackupViewSet(viewsets.ModelViewSet):
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
     queryset = RetentionPolicy.objects.all()
     serializer_class = RetentionPolicySerializer
+class BackupScheduleViewSet(viewsets.ModelViewSet):
+    queryset = BackupSchedule.objects.all()
+    serializer_class = BackupScheduleSerializer
 class BackupLocationViewSet(viewsets.ModelViewSet):
     queryset = BackupLocation.objects.all()
     serializer_class = BackupLocationSerializer

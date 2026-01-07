@@ -12,6 +12,11 @@
       flat
       bordered
     >
+      <template v-slot:body-cell-icon="props">
+        <q-td :props="props">
+          <q-icon :name="props.row.icon || 'router'" size="lg" color="primary" />
+        </q-td>
+      </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
           <q-btn flat dense color="primary" icon="edit" @click="editItem(props.row)" />
@@ -26,7 +31,32 @@
           <div class="text-h6">{{ editMode ? 'Edit' : 'Add' }} Device Type</div>
         </q-card-section>
         <q-card-section>
-          <q-input v-model="form.name" label="Name" outlined />
+          <q-input v-model="form.name" label="Name" outlined class="q-mb-md" />
+          <div class="row items-center q-mb-md">
+            <q-select
+              v-model="form.icon"
+              label="Icon"
+              :options="commonIcons"
+              outlined
+              class="col"
+              emit-value
+              map-options
+            >
+              <template v-slot:prepend>
+                <q-icon :name="form.icon || 'router'" />
+              </template>
+              <template v-slot:option="scope">
+                <q-item v-bind="scope.itemProps">
+                  <q-item-section avatar>
+                    <q-icon :name="scope.opt" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>{{ scope.opt }}</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </template>
+            </q-select>
+          </div>
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
@@ -49,8 +79,21 @@ const editMode = ref(false)
 const form = ref({ name: '' })
 
 const columns = [
+  { name: 'icon', label: 'Icon', field: 'icon', align: 'center' },
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'actions', label: 'Actions', align: 'center' }
+]
+
+const commonIcons = [
+  'cloud',
+  'computer',
+  'dns',
+  'router',
+  'security',
+  'shield',
+  'storage',
+  'vpn_lock',
+  'wifi'
 ]
 
 async function loadData() {
@@ -63,7 +106,7 @@ async function loadData() {
 }
 
 function showAddDialog() {
-  form.value = { name: '' }
+  form.value = { name: '', icon: 'router' }
   editMode.value = false
   dialog.value = true
 }

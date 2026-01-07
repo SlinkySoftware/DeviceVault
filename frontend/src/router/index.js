@@ -7,6 +7,7 @@ import DeviceTypes from '../pages/DeviceTypes.vue'
 import Manufacturers from '../pages/Manufacturers.vue'
 import Credentials from '../pages/Credentials.vue'
 import BackupLocations from '../pages/BackupLocations.vue'
+import BackupSchedules from '../pages/BackupSchedules.vue'
 import RetentionPolicies from '../pages/RetentionPolicies.vue'
 import Profile from '../pages/Profile.vue'
 import Users from '../pages/Users.vue'
@@ -22,6 +23,7 @@ const routes = [
   { path: '/vaultadmin/manufacturers', component: Manufacturers, meta: { requiresAuth: true } },
   { path: '/vaultadmin/credentials', component: Credentials, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-locations', component: BackupLocations, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/backup-schedules', component: BackupSchedules, meta: { requiresAuth: true } },
   { path: '/vaultadmin/retention-policies', component: RetentionPolicies, meta: { requiresAuth: true } },
   { path: '/profile', component: Profile, meta: { requiresAuth: true } },
   { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } }

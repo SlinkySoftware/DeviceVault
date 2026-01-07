@@ -128,57 +128,54 @@ function start_frontend() {
 }
 
 function stop_backend() {
-    if [ ! -f "$BACKEND_PID_FILE" ]; then
-        print_warning "Backend PID file not found"
-        # Try to find and kill any running Django server
-        pkill -f "manage.py runserver" && print_status "Stopped running backend processes"
-        return 0
-    fi
+    print_status "Stopping backend..."
     
-    local PID=$(cat "$BACKEND_PID_FILE")
-    if kill -0 $PID 2>/dev/null; then
-        print_status "Stopping backend (PID: $PID)..."
-        kill $PID
-        sleep 2
-        
-        # Force kill if still running
+    # Kill by PID file if it exists
+    if [ -f "$BACKEND_PID_FILE" ]; then
+        local PID=$(cat "$BACKEND_PID_FILE")
         if kill -0 $PID 2>/dev/null; then
-            kill -9 $PID
+            # Kill process group (parent and all children)
+            kill -TERM -$PID 2>/dev/null || true
+            sleep 2
+            # Force kill if still running
+            kill -9 -$PID 2>/dev/null || true
         fi
-        
-        print_status "Backend stopped"
-    else
-        print_warning "Backend process not running"
+        rm -f "$BACKEND_PID_FILE"
     fi
     
-    rm -f "$BACKEND_PID_FILE"
+    # Kill all Django server processes as fallback
+    pkill -f "manage.py runserver" 2>/dev/null || true
+    pkill -f "python.*manage.py" 2>/dev/null || true
+    pkill -f "runserver" 2>/dev/null || true
+    
+    sleep 1
+    print_status "Backend stopped"
 }
 
 function stop_frontend() {
-    if [ ! -f "$FRONTEND_PID_FILE" ]; then
-        print_warning "Frontend PID file not found"
-        # Try to find and kill any running Quasar dev server
-        pkill -f "quasar dev" && print_status "Stopped running frontend processes"
-        return 0
-    fi
+    print_status "Stopping frontend..."
     
-    local PID=$(cat "$FRONTEND_PID_FILE")
-    if kill -0 $PID 2>/dev/null; then
-        print_status "Stopping frontend (PID: $PID)..."
-        kill $PID
-        sleep 2
-        
-        # Force kill if still running
+    # Kill by PID file if it exists
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        local PID=$(cat "$FRONTEND_PID_FILE")
         if kill -0 $PID 2>/dev/null; then
-            kill -9 $PID
+            # Kill process group (parent and all children)
+            kill -TERM -$PID 2>/dev/null || true
+            sleep 2
+            # Force kill if still running
+            kill -9 -$PID 2>/dev/null || true
         fi
-        
-        print_status "Frontend stopped"
-    else
-        print_warning "Frontend process not running"
+        rm -f "$FRONTEND_PID_FILE"
     fi
     
-    rm -f "$FRONTEND_PID_FILE"
+    # Kill all npm/Node.js processes related to frontend as fallback
+    pkill -f "npm run dev" 2>/dev/null || true
+    pkill -f "quasar dev" 2>/dev/null || true
+    pkill -f "node.*quasar" 2>/dev/null || true
+    lsof -ti:9000,9001 | xargs kill -9 2>/dev/null || true
+    
+    sleep 1
+    print_status "Frontend stopped"
 }
 
 function status() {

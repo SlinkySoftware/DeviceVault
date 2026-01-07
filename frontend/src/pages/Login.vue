@@ -178,6 +178,68 @@ export default {
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   padding: 40px;
+  color: #333;
+}
+
+:deep(.body--dark) .login-card {
+  background: #1e1e1e;
+  color: #fff;
+}
+
+:deep(.body--dark) .login-card .logo-section h1 {
+  color: #fff;
+}
+
+:deep(.body--dark) .login-card .logo-section .subtitle {
+  color: #b0b0b0;
+}
+
+:deep(.body--dark) .login-card .footer {
+  color: #808080;
+  border-top-color: #333;
+}
+
+/* Force light styling for form inputs */
+.login-form :deep(.q-field__control) {
+  background-color: #fff !important;
+  color: #333 !important;
+}
+
+.login-form :deep(.q-field__label) {
+  color: #666 !important;
+}
+
+.login-form :deep(.q-field--outlined .q-field__control::before) {
+  border-color: #2196f3 !important;
+}
+
+.login-form :deep(.q-field--outlined.q-field--focused .q-field__control::before) {
+  border-color: #1976d2 !important;
+}
+
+.login-form :deep(.q-field__native),
+.login-form :deep(.q-field__input) {
+  color: #333 !important;
+  caret-color: #333 !important;
+}
+
+/* Checkbox styling */
+.login-form :deep(.q-checkbox__inner) {
+  color: #2196f3 !important;
+}
+
+.login-form :deep(.q-checkbox__label) {
+  color: #333 !important;
+}
+
+/* Input icon colors */
+.login-form :deep(.q-icon) {
+  color: #666 !important;
+}
+
+/* Placeholder text */
+.login-form :deep(.q-field__input::placeholder) {
+  color: #999 !important;
 }
 
 .logo-section {

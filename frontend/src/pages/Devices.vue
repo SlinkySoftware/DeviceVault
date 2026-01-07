@@ -40,6 +40,12 @@
       flat
       bordered
     >
+      <template v-slot:body-cell-type="props">
+        <q-td :props="props">
+          <q-icon :name="props.row.device_type?.icon || 'router'" size="md" color="primary" class="q-mr-sm" />
+          <span>{{ props.row.device_type?.name || 'N/A' }}</span>
+        </q-td>
+      </template>
       <template v-slot:body-cell-enabled="props">
         <q-td :props="props">
           <q-badge :color="props.row.enabled ? 'positive' : 'grey'">
@@ -54,26 +60,38 @@
           </q-badge>
         </q-td>
       </template>
+      <template v-slot:body-cell-is_example_data="props">
+        <q-td :props="props">
+          <q-badge :color="props.row.is_example_data ? 'warning' : 'grey'">
+            {{ props.row.is_example_data ? 'Yes' : 'No' }}
+          </q-badge>
+        </q-td>
+      </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
           <q-btn 
             flat 
             dense 
             color="primary" 
-            label="Edit" 
+            icon="edit"
+            label="Edit"
             :to="`/devices/${props.row.id}`"
+            class="q-mr-sm"
           />
           <q-btn 
             flat 
             dense 
             color="primary" 
-            label="Backups" 
+            icon="visibility"
+            label="Backups"
             :to="`/devices/${props.row.id}/backups`"
+            class="q-mr-sm"
           />
           <q-btn 
             flat 
             dense 
             :color="props.row.enabled ? 'negative' : 'positive'"
+            :icon="props.row.enabled ? 'toggle_on' : 'toggle_off'"
             :label="props.row.enabled ? 'Disable' : 'Enable'"
             @click="toggleEnabled(props.row)"
           />
@@ -95,10 +113,11 @@ const filter = ref({ manufacturer: '', type: '', status: 'All' })
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
-  { name: 'type', label: 'Type', field: row => row.device_type?.name || 'N/A', align: 'left' },
+  { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'manufacturer', label: 'Manufacturer', field: row => row.manufacturer?.name || 'N/A', align: 'left' },
   { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left' },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center' },
+  { name: 'is_example_data', label: 'Example', field: 'is_example_data', align: 'center' },
   { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center' },
   { name: 'actions', label: 'Actions', align: 'center' }
 ]

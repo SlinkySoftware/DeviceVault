@@ -51,63 +51,72 @@
           </q-item-section>
         </q-item>
 
-        <q-separator v-if="isAdmin" class="q-my-sm" />
-        
-        <q-item-label v-if="isAdmin" header class="text-grey-8">Admin Settings</q-item-label>
-        
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/device-types">
-          <q-item-section avatar>
-            <q-icon name="category" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Device Types</q-item-label>
-          </q-item-section>
-        </q-item>
+        <q-expansion-item v-if="isAdmin" icon="admin_panel_settings" label="Admin Settings" header-class="text-primary">
+          <q-list>
+            <q-item clickable to="/vaultadmin/device-types">
+              <q-item-section avatar>
+                <q-icon name="category" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Device Types</q-item-label>
+              </q-item-section>
+            </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/manufacturers">
-          <q-item-section avatar>
-            <q-icon name="business" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Manufacturers</q-item-label>
-          </q-item-section>
-        </q-item>
+            <q-item clickable to="/vaultadmin/manufacturers">
+              <q-item-section avatar>
+                <q-icon name="business" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Manufacturers</q-item-label>
+              </q-item-section>
+            </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/credentials">
-          <q-item-section avatar>
-            <q-icon name="vpn_key" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Credentials</q-item-label>
-          </q-item-section>
-        </q-item>
+            <q-item clickable to="/vaultadmin/credentials">
+              <q-item-section avatar>
+                <q-icon name="vpn_key" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Credentials</q-item-label>
+              </q-item-section>
+            </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/backup-locations">
-          <q-item-section avatar>
-            <q-icon name="folder" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Backup Locations</q-item-label>
-          </q-item-section>
-        </q-item>
+            <q-item clickable to="/vaultadmin/backup-locations">
+              <q-item-section avatar>
+                <q-icon name="folder" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Backup Locations</q-item-label>
+              </q-item-section>
+            </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/retention-policies">
-          <q-item-section avatar>
-            <q-icon name="schedule" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Retention Policies</q-item-label>
-          </q-item-section>
-        </q-item>
+            <q-item clickable to="/vaultadmin/backup-schedules">
+              <q-item-section avatar>
+                <q-icon name="schedule" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Backup Schedules</q-item-label>
+              </q-item-section>
+            </q-item>
 
-        <q-item v-if="isAdmin" clickable to="/vaultadmin/users">
-          <q-item-section avatar>
-            <q-icon name="people" />
-          </q-item-section>
-          <q-item-section>
-            <q-item-label>Users</q-item-label>
-          </q-item-section>
-        </q-item>
+            <q-item clickable to="/vaultadmin/retention-policies">
+              <q-item-section avatar>
+                <q-icon name="schedule" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Retention Policies</q-item-label>
+              </q-item-section>
+            </q-item>
+
+            <q-item clickable to="/vaultadmin/users">
+              <q-item-section avatar>
+                <q-icon name="people" />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>Users</q-item-label>
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-expansion-item>
       </q-list>
     </q-drawer>
 
