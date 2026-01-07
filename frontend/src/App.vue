@@ -53,68 +53,101 @@
 
         <q-expansion-item v-if="isAdmin" icon="admin_panel_settings" label="Admin Settings" header-class="text-primary">
           <q-list>
-            <q-item clickable to="/vaultadmin/device-types">
-              <q-item-section avatar>
-                <q-icon name="category" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Device Types</q-item-label>
-              </q-item-section>
-            </q-item>
+            <!-- User Settings submenu -->
+            <q-expansion-item icon="people" label="User Settings" dense dense-toggle class="submenu-level-1">
+              <q-list class="submenu-items">
+                <q-item clickable to="/vaultadmin/users" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="person" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Users</q-item-label>
+                  </q-item-section>
+                </q-item>
 
-            <q-item clickable to="/vaultadmin/manufacturers">
-              <q-item-section avatar>
-                <q-icon name="business" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Manufacturers</q-item-label>
-              </q-item-section>
-            </q-item>
+                <q-item clickable to="/vaultadmin/groups" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="group" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Groups</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-expansion-item>
 
-            <q-item clickable to="/vaultadmin/credentials">
-              <q-item-section avatar>
-                <q-icon name="vpn_key" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Credentials</q-item-label>
-              </q-item-section>
-            </q-item>
+            <!-- Device Settings submenu -->
+            <q-expansion-item icon="devices" label="Device Settings" dense dense-toggle class="submenu-level-1">
+              <q-list class="submenu-items">
+                <q-item clickable to="/vaultadmin/device-types" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="category" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Device Types</q-item-label>
+                  </q-item-section>
+                </q-item>
 
-            <q-item clickable to="/vaultadmin/backup-locations">
-              <q-item-section avatar>
-                <q-icon name="folder" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Backup Locations</q-item-label>
-              </q-item-section>
-            </q-item>
+                <q-item clickable to="/vaultadmin/manufacturers" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="business" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Manufacturers</q-item-label>
+                  </q-item-section>
+                </q-item>
 
-            <q-item clickable to="/vaultadmin/backup-schedules">
-              <q-item-section avatar>
-                <q-icon name="schedule" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Backup Schedules</q-item-label>
-              </q-item-section>
-            </q-item>
+                <q-item clickable to="/vaultadmin/device-groups" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="workspaces" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Device Groups</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-expansion-item>
 
-            <q-item clickable to="/vaultadmin/retention-policies">
-              <q-item-section avatar>
-                <q-icon name="schedule" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Retention Policies</q-item-label>
-              </q-item-section>
-            </q-item>
+            <!-- Backup Settings submenu -->
+            <q-expansion-item icon="backup" label="Backup Settings" dense dense-toggle class="submenu-level-1">
+              <q-list class="submenu-items">
+                <q-item clickable to="/vaultadmin/credentials" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="vpn_key" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Credentials</q-item-label>
+                  </q-item-section>
+                </q-item>
 
-            <q-item clickable to="/vaultadmin/users">
-              <q-item-section avatar>
-                <q-icon name="people" />
-              </q-item-section>
-              <q-item-section>
-                <q-item-label>Users</q-item-label>
-              </q-item-section>
-            </q-item>
+                <q-item clickable to="/vaultadmin/backup-locations" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="folder" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Backup Locations</q-item-label>
+                  </q-item-section>
+                </q-item>
+
+                <q-item clickable to="/vaultadmin/backup-schedules" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="schedule" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Backup Schedules</q-item-label>
+                  </q-item-section>
+                </q-item>
+
+                <q-item clickable to="/vaultadmin/retention-policies" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="history" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Retention Policies</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-expansion-item>
           </q-list>
         </q-expansion-item>
       </q-list>
@@ -137,7 +170,8 @@ const $q = useQuasar()
 const router = useRouter()
 const route = useRoute()
 
-const isAdmin = ref(true)
+// Consider both staff and superuser as admin for UI visibility
+const isAdmin = computed(() => !!(user.value && (user.value.is_staff || user.value.is_superuser)))
 const isAuthenticated = ref(!!localStorage.getItem('authToken'))
 const user = ref(null)
 const userLabel = computed(() => user.value?.username || 'Account')
@@ -168,6 +202,10 @@ const syncAuth = async () => {
       const res = await api.get('/auth/user/')
       user.value = res.data
       localStorage.setItem('user', JSON.stringify(res.data))
+      // Persist flags for other components that might rely on them
+      const isAdminFlag = !!(res.data.is_staff || res.data.is_superuser)
+      localStorage.setItem('isAdmin', String(isAdminFlag))
+      localStorage.setItem('ignoreTags', String(!!res.data.ignore_tags))
       
       // Fetch and apply user theme preference
       try {
@@ -185,6 +223,8 @@ const syncAuth = async () => {
   } else {
     user.value = null
     localStorage.removeItem('user')
+    localStorage.removeItem('isAdmin')
+    localStorage.removeItem('ignoreTags')
   }
 }
 
@@ -205,5 +245,24 @@ watch(() => route.fullPath, () => {
 .logo-mini {
   height: 28px;
   width: auto;
+}
+
+/* Tree view indentation for nested submenus */
+.submenu-level-1 {
+  padding-left: 8px;
+}
+
+.submenu-items {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.submenu-item {
+  padding-left: 32px;
+  min-height: 40px;
+}
+
+/* Dark mode adjustments */
+body.body--dark .submenu-items {
+  background-color: rgba(255, 255, 255, 0.03);
 }
 </style>

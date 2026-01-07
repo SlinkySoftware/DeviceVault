@@ -4,6 +4,9 @@ database:
 local_admin:
   username: admin
   encrypted_password: ''
+auth:
+  type: Local
+  local_enabled: true
 new_database:
   engine: ''
   name: ''

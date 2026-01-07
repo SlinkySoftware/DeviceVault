@@ -112,6 +112,7 @@
             emit-value
             map-options
             use-chips
+            :disable="ignoreTags"
           />
 
           <q-toggle
@@ -167,9 +168,15 @@ const credentials = ref([])
 const backupLocations = ref([])
 const retentionPolicies = ref([])
 const labels = ref([])
+const ignoreTags = ref(false)
 
 async function loadData() {
   try {
+    // Read global ignoreTags flag from localStorage
+    ignoreTags.value = localStorage.getItem('ignoreTags') === 'true'
+    if (ignoreTags.value) {
+      form.value.labels = []
+    }
     const [typesResp, mfgResp, credsResp, locsResp, polsResp, labelsResp] = await Promise.all([
       api.get('/device-types/'),
       api.get('/manufacturers/'),
@@ -189,6 +196,9 @@ async function loadData() {
     if (isEdit.value) {
       const response = await api.get(`/devices/${route.params.id}/`)
       form.value = response.data
+      if (ignoreTags.value) {
+        form.value.labels = []
+      }
     }
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to load data' })

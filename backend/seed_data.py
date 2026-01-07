@@ -18,7 +18,6 @@ from credentials.models import CredentialType, Credential
 from locations.models import BackupLocation
 from policies.models import RetentionPolicy, BackupSchedule
 from core.models import Label
-from rbac.models import Permission, Role
 from django.contrib.auth.models import User
 
 def create_sample_data():
@@ -120,30 +119,6 @@ def create_sample_data():
     for label in labels:
         Label.objects.get_or_create(name=label)
     print(f"✓ Created {len(labels)} labels")
-    
-    # Permissions
-    permissions = [
-        ('view_devices', 'Can view devices'),
-        ('edit_devices', 'Can edit devices'),
-        ('delete_devices', 'Can delete devices'),
-        ('view_backups', 'Can view backups'),
-        ('manage_credentials', 'Can manage credentials'),
-        ('admin_access', 'Full admin access'),
-    ]
-    for code, desc in permissions:
-        Permission.objects.get_or_create(code=code, defaults={'description': desc})
-    print(f"✓ Created {len(permissions)} permissions")
-    
-    # Roles
-    admin_role, _ = Role.objects.get_or_create(name='Administrator')
-    admin_role.permissions.set(Permission.objects.all())
-    admin_role.labels.set(Label.objects.all())
-    
-    operator_role, _ = Role.objects.get_or_create(name='Operator')
-    operator_perms = Permission.objects.filter(code__in=['view_devices', 'view_backups'])
-    operator_role.permissions.set(operator_perms)
-    
-    print("✓ Created roles")
     
     # Sample Devices (only if we have required data)
     if DeviceType.objects.exists() and Manufacturer.objects.exists():

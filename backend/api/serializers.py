@@ -10,10 +10,13 @@ from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
-from core.models import Label
-from rbac.models import Role, Permission
+from rbac.models import GroupLabelAssignment
+from devices.models import (
+    DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
+    UserDeviceGroupRole, GroupDeviceGroupRole
+)
 from audit.models import AuditLog
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, Group
 from django.contrib.auth import authenticate
 
 
@@ -30,13 +33,6 @@ class ManufacturerSerializer(serializers.ModelSerializer):
     """Serializes Manufacturer model for API responses"""
     class Meta:
         model = Manufacturer
-        fields = '__all__'
-
-
-class LabelSerializer(serializers.ModelSerializer):
-    """Serializes Label model for API responses"""
-    class Meta:
-        model = Label
         fields = '__all__'
 
 
@@ -85,33 +81,35 @@ class DeviceSerializer(serializers.ModelSerializer):
     Nested Objects:
         - device_type (DeviceTypeSerializer): Includes icon and name
         - manufacturer (ManufacturerSerializer): Full manufacturer details
+        - user_permissions (SerializerMethodField): User's permissions for device's group
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
+    user_permissions = serializers.SerializerMethodField()
     
     class Meta:
         model = Device
         fields = '__all__'
+    
+    def get_user_permissions(self, obj):
+        """Get permissions for the requesting user for this device's group"""
+        from rbac.permissions import user_get_device_group_permissions
+        
+        request = self.context.get('request')
+        if not request or not request.user:
+            return []
+        
+        if not obj.device_group:
+            return []
+        
+        permissions = user_get_device_group_permissions(request.user, obj.device_group)
+        return list(permissions)
 
 
 class BackupSerializer(serializers.ModelSerializer):
     """Serializes Backup model for API responses"""
     class Meta:
         model = Backup
-        fields = '__all__'
-
-
-class PermissionSerializer(serializers.ModelSerializer):
-    """Serializes Permission model for API responses"""
-    class Meta:
-        model = Permission
-        fields = '__all__'
-
-
-class RoleSerializer(serializers.ModelSerializer):
-    """Serializes Role model for API responses"""
-    class Meta:
-        model = Role
         fields = '__all__'
 
 
@@ -127,10 +125,11 @@ class UserSerializer(serializers.ModelSerializer):
         - get_is_jit(obj): Determines if user is from external identity provider
     """
     is_jit = serializers.SerializerMethodField(read_only=True)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_jit']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser', 'is_jit', 'password']
 
     def get_is_jit(self, obj):
         """
@@ -147,6 +146,83 @@ class UserSerializer(serializers.ModelSerializer):
         except Exception:
             has_social = False
         return (not obj.has_usable_password()) or has_social
+    
+    def create(self, validated_data):
+        """Create a new user with password"""
+        password = validated_data.pop('password', None)
+        user = User.objects.create(**validated_data)
+        if password:
+            user.set_password(password)
+            user.save()
+        return user
+
+
+class GroupSerializer(serializers.ModelSerializer):
+    """
+    Serializes Django auth Group with user membership and device group role assignments.
+
+    Read-only:
+        - users: Users in this group
+        - device_group_roles: Device group roles assigned to this group
+
+    Write-only:
+        - user_ids: List of user IDs to set as group members
+        - device_group_role_ids: List of device group role IDs to assign
+    """
+    users = serializers.SerializerMethodField(read_only=True)
+    device_group_roles = serializers.SerializerMethodField(read_only=True)
+    user_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    device_group_role_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'users', 'device_group_roles', 'user_ids', 'device_group_role_ids']
+
+    def get_users(self, obj):
+        return UserSerializer(obj.user_set.all(), many=True).data
+
+    def get_device_group_roles(self, obj):
+        qs = GroupDeviceGroupRole.objects.filter(auth_group=obj).select_related('role')
+        roles = [g.role for g in qs]
+        return DeviceGroupRoleSerializer(roles, many=True).data
+
+    def create(self, validated_data):
+        user_ids = validated_data.pop('user_ids', [])
+        device_group_role_ids = validated_data.pop('device_group_role_ids', [])
+        group = Group.objects.create(name=validated_data.get('name'))
+        self._set_users(group, user_ids)
+        self._set_device_group_roles(group, device_group_role_ids)
+        return group
+
+    def update(self, instance, validated_data):
+        user_ids = validated_data.pop('user_ids', None)
+        device_group_role_ids = validated_data.pop('device_group_role_ids', None)
+        name = validated_data.get('name')
+        if name is not None:
+            instance.name = name
+            instance.save()
+        if user_ids is not None:
+            instance.user_set.clear()
+            if user_ids:
+                users = User.objects.filter(id__in=user_ids)
+                for u in users:
+                    u.groups.add(instance)
+        if device_group_role_ids is not None:
+            GroupDeviceGroupRole.objects.filter(auth_group=instance).delete()
+            self._set_device_group_roles(instance, device_group_role_ids)
+        return instance
+
+    def _set_users(self, group, user_ids):
+        if user_ids:
+            users = User.objects.filter(id__in=user_ids)
+            for u in users:
+                u.groups.add(group)
+
+    def _set_device_group_roles(self, group, role_ids):
+        if role_ids:
+            roles = DeviceGroupRole.objects.filter(id__in=role_ids)
+            for role in roles:
+                GroupDeviceGroupRole.objects.get_or_create(auth_group=group, role=role)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -279,3 +355,88 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = ['theme', 'created_at', 'updated_at']
+
+# ===== Device Group RBAC Serializers =====
+
+class DeviceGroupPermissionSerializer(serializers.ModelSerializer):
+    """Serializes DeviceGroupPermission model for API responses"""
+    class Meta:
+        model = DeviceGroupPermission
+        fields = ['id', 'code', 'description']
+
+
+class DeviceGroupRoleSerializer(serializers.ModelSerializer):
+    """Serializes DeviceGroupRole model with nested permissions"""
+    permissions = DeviceGroupPermissionSerializer(many=True, read_only=True)
+    device_group_name = serializers.CharField(source='device_group.name', read_only=True)
+    
+    class Meta:
+        model = DeviceGroupRole
+        fields = ['id', 'name', 'device_group', 'device_group_name', 'permissions', 'created_at']
+
+
+class DeviceGroupSerializer(serializers.ModelSerializer):
+    """Serializes DeviceGroup model with nested roles"""
+    roles = DeviceGroupRoleSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = DeviceGroup
+        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at']
+
+
+class UserDeviceGroupRoleSerializer(serializers.ModelSerializer):
+    """Serializes user-device group role assignments"""
+    role = DeviceGroupRoleSerializer(read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    
+    class Meta:
+        model = UserDeviceGroupRole
+        fields = ['id', 'user', 'username', 'role']
+
+
+class GroupDeviceGroupRoleSerializer(serializers.ModelSerializer):
+    """Serializes auth group-device group role assignments"""
+    role = DeviceGroupRoleSerializer(read_only=True)
+    auth_group_name = serializers.CharField(source='auth_group.name', read_only=True)
+    
+    class Meta:
+        model = GroupDeviceGroupRole
+        fields = ['id', 'auth_group', 'auth_group_name', 'role']
+
+
+class DeviceDetailedSerializer(serializers.ModelSerializer):
+    """
+    Serializes Device model with nested related objects and RBAC info
+    
+    Nested Objects:
+        - device_type (DeviceTypeSerializer): Includes icon and name
+        - manufacturer (ManufacturerSerializer): Full manufacturer details
+        - device_group (DeviceGroupSerializer): Device group with roles
+    """
+    device_type = DeviceTypeSerializer(read_only=True)
+    manufacturer = ManufacturerSerializer(read_only=True)
+    device_group = DeviceGroupSerializer(read_only=True)
+    user_permissions = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Device
+        fields = [
+            'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
+            'device_group', 'enabled', 'is_example_data', 'last_backup_time',
+            'last_backup_status', 'retention_policy', 'backup_location', 'credential',
+            'user_permissions'
+        ]
+    
+    def get_user_permissions(self, obj):
+        """Get permissions for the requesting user for this device's group"""
+        from rbac.permissions import user_get_device_group_permissions
+        
+        request = self.context.get('request')
+        if not request or not request.user:
+            return []
+        
+        if not obj.device_group:
+            return []
+        
+        permissions = user_get_device_group_permissions(request.user, obj.device_group)
+        return list(permissions)

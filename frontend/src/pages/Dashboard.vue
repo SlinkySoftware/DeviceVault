@@ -103,10 +103,11 @@
 
 <script>
 import { defineComponent, h } from 'vue'
+import { QList, QItem, QItemSection, QItemLabel } from 'quasar'
 import api from '../services/api'
 
 // Widget components - using render functions instead of templates
-const ConfiguredDevicesWidget = {
+const ConfiguredDevicesWidget = defineComponent({
   props: ['stats'],
   computed: {
     totalDevices() {
@@ -139,9 +140,9 @@ const ConfiguredDevicesWidget = {
       ])
     ])
   }
-}
+})
 
-const BackupsWidget = {
+const BackupsWidget = defineComponent({
   props: ['stats'],
   render() {
     return h('div', { class: 'row q-col-gutter-md q-pa-sm' }, [
@@ -165,9 +166,9 @@ const BackupsWidget = {
       ])
     ])
   }
-}
+})
 
-const AvgTimeWidget = {
+const AvgTimeWidget = defineComponent({
   props: ['stats'],
   render() {
     return h('div', { 
@@ -180,9 +181,9 @@ const AvgTimeWidget = {
       }, (this.stats?.avgDuration || 0) + 's')
     ])
   }
-}
+})
 
-const SuccessRateWidget = {
+const SuccessRateWidget = defineComponent({
   props: ['stats'],
   computed: {
     rate() {
@@ -201,9 +202,9 @@ const SuccessRateWidget = {
       }, this.rate + '%')
     ])
   }
-}
+})
 
-const ChartWidget = {
+const ChartWidget = defineComponent({
   props: ['stats'],
   data() {
     return {
@@ -274,9 +275,9 @@ const ChartWidget = {
       h('canvas', { ref: 'chartCanvas', style: { display: 'block', width: '100%', height: '100%' } })
     ])
   }
-}
+})
 
-const ActivityWidget = {
+const ActivityWidget = defineComponent({
   props: ['stats'],
   data() {
     return { recentActivity: [] }
@@ -299,25 +300,24 @@ const ActivityWidget = {
     }
   },
   render() {
-    const { QList, QItem, QItemSection, QItemLabel } = this.$q
-    return h('q-list', { separator: true, style: 'max-height: 300px; overflow-y: auto' }, [
+    return h(QList, { separator: true, style: 'max-height: 300px; overflow-y: auto' }, () => [
       this.recentActivity.length > 0
         ? this.recentActivity.map(item =>
-            h(QItem, { key: item.id }, [
-              h(QItemSection, [
-                h(QItemLabel, { class: 'text-caption' }, item.action),
-                h(QItemLabel, { caption: true }, this.formatDate(item.created_at))
+            h(QItem, { key: item.id }, () => [
+              h(QItemSection, () => [
+                h(QItemLabel, { class: 'text-caption' }, () => item.action),
+                h(QItemLabel, { caption: true }, () => this.formatDate(item.created_at))
               ])
             ])
           )
-        : h(QItem, [
-            h(QItemSection, [
-              h(QItemLabel, { caption: true }, 'No recent activity')
+        : h(QItem, () => [
+            h(QItemSection, () => [
+              h(QItemLabel, { caption: true }, () => 'No recent activity')
             ])
           ])
     ])
   }
-}
+})
 
 export default defineComponent({
   name: 'DashboardPage',
@@ -358,17 +358,23 @@ export default defineComponent({
   computed: {
     orderedWidgets() {
       const widgetMap = {
-        devices: { id: 'devices', title: 'Configured Devices', component: 'ConfiguredDevicesWidget' },
-        backups: { id: 'backups', title: 'Backups (24h)', component: 'BackupsWidget' },
-        avgtime: { id: 'avgtime', title: 'Avg Backup Time', component: 'AvgTimeWidget' },
-        successrate: { id: 'successrate', title: 'Success Rate', component: 'SuccessRateWidget' },
-        chart: { id: 'chart', title: 'Backup Success Rate (Last 7 Days)', component: 'ChartWidget' },
-        activity: { id: 'activity', title: 'Recent Activity', component: 'ActivityWidget' }
+        devices: { id: 'devices', title: 'Configured Devices', component: ConfiguredDevicesWidget },
+        backups: { id: 'backups', title: 'Backups (24h)', component: BackupsWidget },
+        avgtime: { id: 'avgtime', title: 'Avg Backup Time', component: AvgTimeWidget },
+        successrate: { id: 'successrate', title: 'Success Rate', component: SuccessRateWidget },
+        chart: { id: 'chart', title: 'Backup Success Rate (Last 7 Days)', component: ChartWidget },
+        activity: { id: 'activity', title: 'Recent Activity', component: ActivityWidget }
       }
-      return this.widgetOrder.map(widget => ({
-        ...widgetMap[widget.id],
-        width: widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3)
-      })).filter(w => w)
+      return this.widgetOrder
+        .map(widget => {
+          const widgetConfig = widgetMap[widget.id]
+          if (!widgetConfig) return null
+          return {
+            ...widgetConfig,
+            width: widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3)
+          }
+        })
+        .filter(w => w)
     }
   },
   methods: {
@@ -425,8 +431,10 @@ export default defineComponent({
           api.get('/dashboard-layout/')
         ])
         this.stats = statsRes.data
-        if (layoutRes.data.layout && Array.isArray(layoutRes.data.layout)) {
-          this.widgetOrder = layoutRes.data.layout.map(item => 
+        // Check if layout exists AND has items
+        const layoutData = layoutRes.data?.layout || layoutRes.data
+        if (layoutData && Array.isArray(layoutData) && layoutData.length > 0) {
+          this.widgetOrder = layoutData.map(item => 
             typeof item === 'string' ? { id: item, width: (item === 'chart' || item === 'activity' ? 12 : 3) } : item
           )
         } else {

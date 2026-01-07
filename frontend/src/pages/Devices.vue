@@ -2,27 +2,45 @@
   <q-page class="q-pa-md">
     <div class="row justify-between items-center q-mb-md">
       <div class="text-h4">Devices</div>
-      <q-btn color="primary" label="Add Device" @click="$router.push('/devices/new')" />
+      <q-btn 
+        v-if="canAddDevice" 
+        color="primary" 
+        label="Add Device" 
+        @click="$router.push('/devices/new')" 
+      />
     </div>
     
     <div class="row q-col-gutter-md q-mb-md">
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
         <q-input 
-          v-model="filter.manufacturer" 
+          v-model="filter.name" 
           outlined 
-          label="Manufacturer"
+          label="Name"
           clearable
         />
       </div>
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
         <q-input 
           v-model="filter.type" 
           outlined 
-          label="Type"
+          label="Device Type"
           clearable
         />
       </div>
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
+        <q-select
+          v-model="filter.device_group"
+          :options="deviceGroups"
+          option-value="id"
+          option-label="name"
+          outlined
+          label="Device Group"
+          clearable
+          emit-value
+          map-options
+        />
+      </div>
+      <div class="col-12 col-md-3">
         <q-select
           v-model="filter.status"
           :options="['All', 'success', 'failed']"
@@ -39,11 +57,19 @@
       row-key="id"
       flat
       bordered
+      class="device-table"
     >
       <template v-slot:body-cell-type="props">
         <q-td :props="props">
           <q-icon :name="props.row.device_type?.icon || 'router'" size="md" color="primary" class="q-mr-sm" />
           <span>{{ props.row.device_type?.name || 'N/A' }}</span>
+        </q-td>
+      </template>
+      <template v-slot:body-cell-device_group="props">
+        <q-td :props="props">
+          <q-badge color="info" outline>
+            {{ props.row.device_group?.name || 'Unassigned' }}
+          </q-badge>
         </q-td>
       </template>
       <template v-slot:body-cell-enabled="props">
@@ -70,6 +96,7 @@
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
           <q-btn 
+            v-if="canEditDevice(props.row)"
             flat 
             dense 
             color="primary" 
@@ -79,6 +106,7 @@
             class="q-mr-sm"
           />
           <q-btn 
+            v-if="canViewBackups(props.row)"
             flat 
             dense 
             color="primary" 
@@ -88,6 +116,7 @@
             class="q-mr-sm"
           />
           <q-btn 
+            v-if="canEnableDevice(props.row)"
             flat 
             dense 
             :color="props.row.enabled ? 'negative' : 'positive'"
@@ -103,15 +132,15 @@
 
 <script setup>
 /**
- * Devices Page Component
+ * Devices Page Component with RBAC Support
  * 
- * Displays list of all network devices with filtering, sorting, and action buttons.
- * Allows users to:
- * - View all devices in tabular format
- * - Filter by manufacturer, type, and backup status
- * - Edit device details
- * - View device backup history
- * - Enable/disable devices for backups
+ * Displays list of devices with permission-based action visibility.
+ * Users only see devices in device groups they have access to.
+ * Action buttons are shown based on device group permissions:
+ * - Add Device: Shown if user has 'add_device' in any group
+ * - Edit: Shown if user has 'edit_configuration' for device's group
+ * - View Backups: Shown if user has 'view_backups' for device's group
+ * - Enable/Disable: Shown if user has 'enable_device' for device's group
  */
 
 import { ref, onMounted, computed } from 'vue'
@@ -123,16 +152,20 @@ import api from '../services/api'
 /** Quasar dialog and notification service */
 const $q = useQuasar()
 
-/** Array of device objects from API, contains all device data */
+/** Array of device objects from API, includes user_permissions for each device */
 const devices = ref([])
+
+/** Array of device group objects for filter dropdown */
+const deviceGroups = ref([])
 
 /** Filter state object for search/filtering
  * Properties:
- * - manufacturer: Filter by manufacturer name
+ * - name: Filter by device name
  * - type: Filter by device type name
+ * - device_group: Filter by device group name
  * - status: Filter by last backup status (All, success, failed)
  */
-const filter = ref({ manufacturer: '', type: '', status: 'All' })
+const filter = ref({ name: '', type: '', device_group: '', status: 'All' })
 
 /**
  * Table Column Configuration
@@ -154,6 +187,7 @@ const columns = [
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'manufacturer', label: 'Manufacturer', field: row => row.manufacturer?.name || 'N/A', align: 'left' },
+  { name: 'device_group', label: 'Device Group', field: row => row.device_group?.name || 'N/A', align: 'left', sortable: true },
   { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left' },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center' },
   { name: 'is_example_data', label: 'Example', field: 'is_example_data', align: 'center' },
@@ -162,6 +196,14 @@ const columns = [
 ]
 
 // ===== Computed Properties =====
+
+/**
+ * Check if user can add devices
+ * Shown if user has 'add_device' permission in at least one device group
+ */
+const canAddDevice = computed(() => {
+  return devices.value.some(d => d.user_permissions && d.user_permissions.includes('add_device'))
+})
 
 /**
  * Computed: Filter devices based on current filter state
@@ -176,10 +218,13 @@ const columns = [
  */
 const filteredDevices = computed(() => {
   return devices.value.filter(d => {
-    if (filter.value.manufacturer && !d.manufacturer?.name?.toLowerCase().includes(filter.value.manufacturer.toLowerCase())) {
+    if (filter.value.name && !d.name?.toLowerCase().includes(filter.value.name.toLowerCase())) {
       return false
     }
     if (filter.value.type && !d.device_type?.name?.toLowerCase().includes(filter.value.type.toLowerCase())) {
+      return false
+    }
+    if (filter.value.device_group && d.device_group?.id !== filter.value.device_group) {
       return false
     }
     if (filter.value.status && filter.value.status !== 'All' && d.last_backup_status !== filter.value.status) {
@@ -189,16 +234,74 @@ const filteredDevices = computed(() => {
   })
 })
 
+// ===== Permission Check Methods =====
+
+/**
+ * Check if user can edit a device based on device group permissions
+ * 
+ * Input:
+ * - device (Object): Device object with user_permissions array
+ * 
+ * Returns:
+ * - true if user has 'edit_configuration' permission for device's group
+ */
+function canEditDevice(device) {
+  return device.user_permissions && device.user_permissions.includes('edit_configuration')
+}
+
+/**
+ * Check if user can view backups for a device
+ * 
+ * Input:
+ * - device (Object): Device object with user_permissions array
+ * 
+ * Returns:
+ * - true if user has 'view_backups' permission for device's group
+ */
+function canViewBackups(device) {
+  return device.user_permissions && device.user_permissions.includes('view_backups')
+}
+
+/**
+ * Check if user can enable/disable a device
+ * 
+ * Input:
+ * - device (Object): Device object with user_permissions array
+ * 
+ * Returns:
+ * - true if user has 'enable_device' permission for device's group
+ */
+function canEnableDevice(device) {
+  return device.user_permissions && device.user_permissions.includes('enable_device')
+}
+
 // ===== API Functions =====
 
 /**
- * Load all devices from API
+ * Load device groups for filter dropdown
+ * Fetches all device groups and sorts them alphabetically
+ */
+async function loadDeviceGroups() {
+  try {
+    const response = await api.get('/device-groups/')
+    deviceGroups.value = response.data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    $q.notify({ type: 'negative', message: 'Failed to fetch device groups' })
+  }
+}
+
+/**
+ * Load all accessible devices from API
+ * 
+ * API automatically filters to only accessible device groups
+ * and includes user_permissions for each device
  * 
  * Fetches complete device list including:
  * - Device names, IPs, DNS names
  * - Device type and manufacturer references
  * - Backup status and timestamps
  * - Enabled/disabled state
+ * - user_permissions array with permission codes
  * 
  * Error handling:
  * - Catches API errors and displays notification
@@ -247,6 +350,23 @@ async function toggleEnabled(device) {
  * Loads initial device data
  */
 onMounted(() => {
+  loadDeviceGroups()
   loadDevices()
 })
 </script>
+
+<style scoped>
+.device-table {
+  font-size: 1.1rem;
+}
+
+:deep(.device-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.05rem;
+}
+
+:deep(.device-table thead th) {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+</style>
