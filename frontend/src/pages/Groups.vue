@@ -16,17 +16,17 @@ Features:
 - Real-time updates through Django REST API endpoints
 
 API Integration:
-- GET /api/groups/ - Fetch all groups with nested device group roles and users
+- GET /api/groups/ - Fetch all groups with nested device group permissions and users
 - POST /api/groups/ - Create new group
-- PATCH /api/groups/{id}/ - Update group including user and role assignments
+- PATCH /api/groups/{id}/ - Update group including user and permission assignments
 - DELETE /api/groups/{id}/ - Delete group
-- GET /api/device-group-roles/ - Fetch available device group roles
+- GET /api/device-group-permissions/ - Fetch available device group permissions
 - GET /api/users/ - Fetch available users for group membership
 
 User Workflow:
 1. View all groups in table format
 2. Click "Add Group" button to create new group
-3. Fill in group name, select users, and select device group roles
+3. Fill in group name, select users, and select device group permissions
 4. Save group or cancel
 5. Click edit icon to modify existing group
 6. Click delete icon to remove group (with confirmation)
@@ -47,37 +47,43 @@ Related Components:
 
 <template>
   <q-page class="q-pa-md">
-    <!-- Page Header -->
-    <div class="row items-center q-mb-lg">
-      <div class="col">
-        <h4 class="q-my-none">Groups</h4>
-        <p class="text-caption text-grey-7">Manage user groups and assign device group roles</p>
-      </div>
-      <div class="col-auto">
-        <q-btn
-          color="primary"
-          label="Add Group"
-          icon="add"
-          @click="openAddDialog"
-          unelevated
-        />
-      </div>
-    </div>
-
-    <!-- Groups Data Table -->
     <q-card>
-      <q-linear-progress
-        v-if="loading"
-        indeterminate
-        color="primary"
-      />
-      
-      <q-table
+      <!-- Page Header -->
+      <q-card-section>
+        <div class="row items-center q-mb-sm">
+          <div class="col">
+            <div class="text-h4">Groups</div>
+          </div>
+          <div class="col-auto">
+            <q-btn
+              color="primary"
+              label="Add Group"
+              icon="add"
+              @click="openAddDialog"
+            />
+          </div>
+        </div>
+        <div class="row justify-end">
+          <div class="text-caption text-grey">
+            Manage user groups and assign device group permissions
+          </div>
+        </div>
+      </q-card-section>
+      <q-separator />
+
+      <!-- Groups Data Table -->
+      <q-card-section>
+        <q-linear-progress
+          v-if="loading"
+          indeterminate
+          color="primary"
+        />
+        
+        <q-table
         :rows="groups"
         :columns="columns"
         row-key="id"
         flat
-        bordered
       >
         <!-- Name Column -->
         <template #body-cell-name="props">
@@ -89,32 +95,33 @@ Related Components:
         <!-- Members Count Column -->
         <template #body-cell-members="props">
           <q-td :props="props" class="text-center">
-            <q-chip
-              dense
-              square
-              color="blue-2"
-              text-color="blue-9"
+            <q-badge
+              color="primary"
+              text-color="white"
+              class="q-px-md q-py-xs text-subtitle2"
             >
               {{ props.row.users.length }}
-            </q-chip>
+            </q-badge>
           </q-td>
         </template>
 
-        <!-- Device Group Roles Column -->
+        <!-- Device Group Permissions Column -->
         <template #body-cell-roles="props">
           <q-td :props="props">
-            <div class="row items-center q-gutter-xs">
-              <q-chip
-                v-for="role in props.row.device_group_roles"
-                :key="role.id"
+            <div class="column q-gutter-xs">
+              <q-btn
+                v-for="perm in normalizePermissions(props.row)"
+                :key="perm.id"
+                :label="perm.name"
+                rounded
+                outline
                 dense
-                size="sm"
+                no-caps
                 color="primary"
-                text-color="white"
-              >
-                {{ role.name }}
-              </q-chip>
-              <span v-if="!props.row.device_group_roles || props.row.device_group_roles.length === 0" class="text-grey-6 italic">No roles</span>
+                size="md"
+                style="font-size: 1.1rem"
+              />
+              <span v-if="normalizePermissions(props.row).length === 0" class="text-grey-6 italic">No permissions</span>
             </div>
           </q-td>
         </template>
@@ -123,24 +130,20 @@ Related Components:
         <template #body-cell-actions="props">
           <q-td :props="props" class="text-center">
             <q-btn
-              round
-              flat
-              dense
-              size="sm"
               icon="edit"
+              label="Edit"
               color="primary"
               @click="openEditDialog(props.row)"
+              class="q-mr-sm"
             >
               <q-tooltip>Edit Group</q-tooltip>
             </q-btn>
             <q-btn
-              round
-              flat
-              dense
-              size="sm"
               icon="delete"
+              label="Delete"
               color="negative"
               @click="confirmDelete(props.row)"
+              class="q-mr-sm"
             >
               <q-tooltip>Delete Group</q-tooltip>
             </q-btn>
@@ -157,6 +160,7 @@ Related Components:
           </div>
         </template>
       </q-table>
+      </q-card-section>
     </q-card>
 
     <!-- Add/Edit Group Dialog -->
@@ -248,15 +252,15 @@ Related Components:
             </div>
           </div>
 
-          <!-- Device Group Roles Assignment -->
+          <!-- Device Group Permissions Assignment -->
           <div>
-            <label class="text-subtitle2 q-mb-sm">Assign Device Group Roles</label>
+            <label class="text-subtitle2 q-mb-sm">Assign Device Group Permissions</label>
             <p class="text-caption text-grey-6 q-ma-none q-mb-md">
-              Select device group roles to assign to this group. Members will inherit these roles and permissions.
+              Select device group permissions to assign to this group. Members will inherit these permissions.
             </p>
             <q-select
-              v-model="formData.selectedRoles"
-              :options="availableRoles"
+              v-model="formData.selectedPermissions"
+              :options="availablePermissions"
               option-value="id"
               option-label="name"
               multiple
@@ -280,7 +284,7 @@ Related Components:
                 </q-item>
               </template>
 
-              <!-- Selected Role Display -->
+              <!-- Selected Permission Display -->
               <template #selected-item="scope">
                 <q-chip
                   v-if="scope.opt"
@@ -295,10 +299,10 @@ Related Components:
               </template>
             </q-select>
 
-            <!-- Selected Roles Count -->
-            <div v-if="formData.selectedRoles.length > 0" class="q-mt-sm">
+            <!-- Selected Permissions Count -->
+            <div v-if="formData.selectedPermissions.length > 0" class="q-mt-sm">
               <p class="text-caption text-grey-7">
-                {{ formData.selectedRoles.length }} role(s) selected
+                {{ formData.selectedPermissions.length }} permission(s) selected
               </p>
             </div>
           </div>
@@ -374,7 +378,7 @@ export default {
     // Data collections
     const groups = ref([])
     const availableUsers = ref([])
-    const availableRoles = ref([])
+    const availablePermissions = ref([])
     
     // UI state
     const loading = ref(false)
@@ -391,8 +395,15 @@ export default {
     const formData = ref({
       name: '',
       selectedUsers: [],
-      selectedRoles: []
+      selectedPermissions: []
     })
+
+    // Normalize permissions for display: only show device group permissions
+    // Groups page is superuser-only, so show all device group permissions without filtering
+    const normalizePermissions = (row) => {
+      const list = Array.isArray(row?.device_group_permissions) ? row.device_group_permissions : []
+      return list.filter(Boolean)
+    }
     
     // Table columns definition
     const columns = [
@@ -411,7 +422,7 @@ export default {
       },
       {
         name: 'roles',
-        label: 'Device Group Roles',
+        label: 'Device Group Permissions',
         field: 'roles',
         align: 'left'
       },
@@ -419,7 +430,7 @@ export default {
         name: 'actions',
         label: 'Actions',
         field: 'actions',
-        align: 'center'
+        align: 'right'
       }
     ]
     
@@ -460,14 +471,15 @@ export default {
     }
 
     /**
-     * Fetch all available device group roles
+
+     * Fetch all available device group permissions
      */
-    const fetchRoles = async () => {
+    const fetchPermissions = async () => {
       try {
-        const response = await API.get('/device-group-roles/')
-        availableRoles.value = response.data
+        const response = await API.get('/device-group-permissions/')
+        availablePermissions.value = response.data
       } catch (error) {
-        console.error('Error fetching roles:', error)
+        console.error('Error fetching permissions:', error)
       }
     }
     
@@ -480,7 +492,7 @@ export default {
         const payload = {
           name: formData.value.name,
           user_ids: formData.value.selectedUsers,
-          device_group_role_ids: formData.value.selectedRoles
+          permission_ids: formData.value.selectedPermissions
         }
         await API.post('/groups/', payload)
         
@@ -514,7 +526,7 @@ export default {
         const payload = {
           name: formData.value.name,
           user_ids: formData.value.selectedUsers,
-          device_group_role_ids: formData.value.selectedRoles
+          permission_ids: formData.value.selectedPermissions
         }
         await API.patch(`/groups/${selectedGroup.value.id}/`, payload)
         
@@ -591,7 +603,7 @@ export default {
       // Populate form with existing data
       formData.value.name = group.name
       formData.value.selectedUsers = group.users.map(u => u.id)
-      formData.value.selectedRoles = group.device_group_roles.map(r => r.id)
+      formData.value.selectedPermissions = group.device_group_permissions.map(p => p.id)
       
       dialogOpen.value = true
     }
@@ -603,7 +615,7 @@ export default {
       formData.value = {
         name: '',
         selectedUsers: [],
-        selectedRoles: []
+        selectedPermissions: []
       }
     }
     
@@ -645,7 +657,7 @@ export default {
       await Promise.all([
         fetchGroups(),
         fetchUsers(),
-        fetchRoles()
+        fetchPermissions()
       ])
     })
     
@@ -653,10 +665,11 @@ export default {
       // Data
       groups,
       availableUsers,
-      availableRoles,
+      availablePermissions,
       columns,
       formData,
       selectedGroup,
+      normalizePermissions,
       
       // UI State
       loading,
@@ -680,4 +693,27 @@ export default {
 
 <style scoped>
 /* Component Styles */
+
+:deep(.q-table) {
+  font-size: 1.5rem;
+}
+
+:deep(.q-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.4rem;
+}
+
+:deep(.q-table thead th) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+:deep(.q-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 </style>

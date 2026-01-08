@@ -32,6 +32,7 @@ import DeviceGroups from '../pages/DeviceGroups.vue'
 import Profile from '../pages/Profile.vue'
 import Users from '../pages/Users.vue'
 import Login from '../pages/Login.vue'
+import Theme from '../pages/Theme.vue'
 
 /**
  * Application Routes Configuration
@@ -66,7 +67,8 @@ const routes = [
   { path: '/vaultadmin/retention-policies', component: RetentionPolicies, meta: { requiresAuth: true } },
   { path: '/vaultadmin/groups', component: Groups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/device-groups', component: DeviceGroups, meta: { requiresAuth: true } },
-  { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } }
+  { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/theme', component: Theme, meta: { requiresAuth: true } }
 ]
 
 /**

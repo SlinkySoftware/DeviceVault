@@ -21,6 +21,7 @@ Defines user preferences and dashboard layout configuration.
 
 from django.db import models
 from django.contrib.auth.models import User
+from .theme_settings import ThemeSettings
 
 
 # Label model removed - Device Groups replaced the label-based organization system

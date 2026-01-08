@@ -10,12 +10,11 @@
       :columns="columns"
       row-key="id"
       flat
-      bordered
     >
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
-          <q-btn flat dense color="primary" icon="edit" @click="editItem(props.row)" />
-          <q-btn flat dense color="negative" icon="delete" @click="deleteItem(props.row)" />
+          <q-btn color="primary" icon="edit" label="Edit" @click="editItem(props.row)" class="q-mr-sm" />
+          <q-btn color="negative" icon="delete" label="Delete" @click="deleteItem(props.row)" class="q-mr-sm" />
         </q-td>
       </template>
     </q-table>
@@ -50,7 +49,7 @@ const form = ref({ name: '' })
 
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
-  { name: 'actions', label: 'Actions', align: 'center' }
+  { name: 'actions', label: 'Actions', align: 'right' }
 ]
 
 async function loadData() {
@@ -109,3 +108,28 @@ onMounted(() => {
   loadData()
 })
 </script>
+
+<style scoped>
+:deep(.q-table) {
+  font-size: 1.5rem;
+}
+
+:deep(.q-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.4rem;
+}
+
+:deep(.q-table thead th) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+:deep(.q-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>

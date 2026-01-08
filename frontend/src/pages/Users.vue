@@ -2,9 +2,9 @@
   <q-page class="q-pa-md">
     <q-card>
       <q-card-section>
-        <div class="row items-center">
+        <div class="row items-center q-mb-sm">
           <div class="col">
-            <div class="text-h6">Users</div>
+            <div class="text-h4">Users</div>
           </div>
           <div class="col-auto">
             <q-btn 
@@ -27,9 +27,11 @@
             </q-btn>
           </div>
         </div>
-        <div class="text-caption text-grey q-mt-xs">
-          Local and Provisioned Users
-          <span v-if="!localAuthEnabled" class="text-orange"> • Local auth disabled - only SSO/LDAP users allowed</span>
+        <div class="row justify-end">
+          <div class="text-caption text-grey">
+            Local and Provisioned Users
+            <span v-if="!localAuthEnabled" class="text-orange"> • Local auth disabled - only SSO/LDAP users allowed</span>
+          </div>
         </div>
       </q-card-section>
       <q-separator />
@@ -43,9 +45,9 @@
         >
           <template v-slot:body-cell-actions="props">
             <q-td :props="props">
-              <q-btn dense flat icon="visibility" @click="viewUser(props.row)" />
-              <q-btn dense flat icon="edit" :disable="props.row.is_jit" @click="editUser(props.row)" />
-              <q-btn dense flat icon="security" @click="manageDeviceGroupRoles(props.row)" />
+              <q-btn color="primary" icon="visibility" label="View" @click="viewUser(props.row)" class="q-mr-sm" />
+              <q-btn color="primary" icon="edit" label="Edit" :disable="props.row.is_jit" @click="editUser(props.row)" class="q-mr-sm" />
+              <q-btn color="primary" icon="security" label="Roles" @click="manageDeviceGroupRoles(props.row)" class="q-mr-sm" />
             </q-td>
           </template>
           <template v-slot:body-cell-name="props">
@@ -405,4 +407,26 @@ export default defineComponent({
 </script>
 
 <style scoped>
+:deep(.q-table) {
+  font-size: 1.5rem;
+}
+
+:deep(.q-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.4rem;
+}
+
+:deep(.q-table thead th) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+:deep(.q-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 </style>

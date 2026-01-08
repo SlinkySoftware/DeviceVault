@@ -174,7 +174,6 @@ def create_sample_data():
                     'credential': default_cred,
                     'backup_location': default_location,
                     'retention_policy': default_policy,
-                    'is_example_data': is_example,
                     'enabled': True
                 }
             )

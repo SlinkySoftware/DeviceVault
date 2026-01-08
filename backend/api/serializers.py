@@ -26,6 +26,7 @@ from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
+from core.theme_settings import ThemeSettings
 from devices.models import (
     DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
     UserDeviceGroupRole, GroupDeviceGroupRole
@@ -106,21 +107,20 @@ class DeviceSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Device
-        fields = '__all__'
+        fields = [
+            'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
+            'backup_method', 'backup_method_display', 'device_group', 'device_group_name',
+            'enabled', 'last_backup_time', 'last_backup_status',
+            'retention_policy', 'backup_location', 'credential', 'user_permissions'
+        ]
     
     def get_user_permissions(self, obj):
-        """Get permissions for the requesting user for this device's group"""
-        from devices.permissions import user_get_device_group_permissions
-        
+        """Return Django permission codes for this device's group: view, modify, view_backups, backup_now"""
+        from devices.permissions import user_get_device_group_django_permissions
         request = self.context.get('request')
-        if not request or not request.user:
+        if not request or not request.user or not obj.device_group:
             return []
-        
-        if not obj.device_group:
-            return []
-        
-        permissions = user_get_device_group_permissions(request.user, obj.device_group)
-        return list(permissions)
+        return list(user_get_device_group_django_permissions(request.user, obj.device_group))
     
     def get_backup_method_display(self, obj):
         """Get friendly name of backup method plugin"""
@@ -188,44 +188,44 @@ class UserSerializer(serializers.ModelSerializer):
 
 class GroupSerializer(serializers.ModelSerializer):
     """
-    Serializes Django auth Group with user membership and device group role assignments.
+    Serializes Django auth Group with user membership and device group permissions.
 
     Read-only:
         - users: Users in this group
-        - device_group_roles: Device group roles assigned to this group
+        - device_group_permissions: Device group Django permissions (view, modify, view_backups, backup_now)
 
     Write-only:
         - user_ids: List of user IDs to set as group members
-        - device_group_role_ids: List of device group role IDs to assign
+        - permission_ids: List of permission IDs to assign (device group permissions)
     """
     users = serializers.SerializerMethodField(read_only=True)
-    device_group_roles = serializers.SerializerMethodField(read_only=True)
+    device_group_permissions = serializers.SerializerMethodField(read_only=True)
     user_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
-    device_group_role_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    permission_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
 
     class Meta:
         model = Group
-        fields = ['id', 'name', 'users', 'device_group_roles', 'user_ids', 'device_group_role_ids']
+        fields = ['id', 'name', 'users', 'device_group_permissions', 'user_ids', 'permission_ids']
 
     def get_users(self, obj):
         return UserSerializer(obj.user_set.all(), many=True).data
 
-    def get_device_group_roles(self, obj):
-        qs = GroupDeviceGroupRole.objects.filter(auth_group=obj).select_related('role')
-        roles = [g.role for g in qs]
-        return DeviceGroupRoleSerializer(roles, many=True).data
+    def get_device_group_permissions(self, obj):
+        """Return only device group related Django permissions (those starting with dg_)"""
+        perms = obj.permissions.filter(codename__startswith='dg_').select_related('content_type')
+        return [{'id': p.id, 'codename': p.codename, 'name': p.name} for p in perms]
 
     def create(self, validated_data):
         user_ids = validated_data.pop('user_ids', [])
-        device_group_role_ids = validated_data.pop('device_group_role_ids', [])
+        permission_ids = validated_data.pop('permission_ids', [])
         group = Group.objects.create(name=validated_data.get('name'))
         self._set_users(group, user_ids)
-        self._set_device_group_roles(group, device_group_role_ids)
+        self._set_permissions(group, permission_ids)
         return group
 
     def update(self, instance, validated_data):
         user_ids = validated_data.pop('user_ids', None)
-        device_group_role_ids = validated_data.pop('device_group_role_ids', None)
+        permission_ids = validated_data.pop('permission_ids', None)
         name = validated_data.get('name')
         if name is not None:
             instance.name = name
@@ -236,9 +236,9 @@ class GroupSerializer(serializers.ModelSerializer):
                 users = User.objects.filter(id__in=user_ids)
                 for u in users:
                     u.groups.add(instance)
-        if device_group_role_ids is not None:
-            GroupDeviceGroupRole.objects.filter(auth_group=instance).delete()
-            self._set_device_group_roles(instance, device_group_role_ids)
+        if permission_ids is not None:
+            instance.permissions.clear()
+            self._set_permissions(instance, permission_ids)
         return instance
 
     def _set_users(self, group, user_ids):
@@ -247,11 +247,11 @@ class GroupSerializer(serializers.ModelSerializer):
             for u in users:
                 u.groups.add(group)
 
-    def _set_device_group_roles(self, group, role_ids):
-        if role_ids:
-            roles = DeviceGroupRole.objects.filter(id__in=role_ids)
-            for role in roles:
-                GroupDeviceGroupRole.objects.get_or_create(auth_group=group, role=role)
+    def _set_permissions(self, group, permission_ids):
+        if permission_ids:
+            from django.contrib.auth.models import Permission
+            perms = Permission.objects.filter(id__in=permission_ids, codename__startswith='dg_')
+            group.permissions.set(perms)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
@@ -408,10 +408,11 @@ class DeviceGroupSerializer(serializers.ModelSerializer):
     """Serializes DeviceGroup model with nested roles and user-level modify flag"""
     roles = DeviceGroupRoleSerializer(many=True, read_only=True)
     can_modify = serializers.SerializerMethodField()
+    user_permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = DeviceGroup
-        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at', 'can_modify']
+        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at', 'can_modify', 'user_permissions']
 
     def get_can_modify(self, obj):
         """Return True if the requesting user has the group's Django modify permission"""
@@ -430,6 +431,14 @@ class DeviceGroupSerializer(serializers.ModelSerializer):
         perm = link.perm_modify
         perm_code = f"{perm.content_type.app_label}.{perm.codename}"
         return user.has_perm(perm_code)
+    
+    def get_user_permissions(self, obj):
+        """Return Django permission codes for this device group: view, modify, view_backups, backup_now"""
+        from devices.permissions import user_get_device_group_django_permissions
+        request = self.context.get('request')
+        if not request or not request.user:
+            return []
+        return list(user_get_device_group_django_permissions(request.user, obj))
 
 
 class UserDeviceGroupRoleSerializer(serializers.ModelSerializer):
@@ -472,21 +481,28 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display',
-            'device_group', 'enabled', 'is_example_data', 'last_backup_time',
+            'device_group', 'enabled', 'last_backup_time',
             'last_backup_status', 'retention_policy', 'backup_location', 'credential',
             'user_permissions'
         ]
     
     def get_user_permissions(self, obj):
-        """Get permissions for the requesting user for this device's group"""
-        from devices.permissions import user_get_device_group_permissions
-        
+        """Return Django permission codes for this device's group: view, modify, view_backups, backup_now"""
+        from devices.permissions import user_get_device_group_django_permissions
         request = self.context.get('request')
-        if not request or not request.user:
+        if not request or not request.user or not obj.device_group:
             return []
-        
-        if not obj.device_group:
-            return []
-        
-        permissions = user_get_device_group_permissions(request.user, obj.device_group)
-        return list(permissions)
+        return list(user_get_device_group_django_permissions(request.user, obj.device_group))
+    
+    def get_backup_method_display(self, obj):
+        """Get friendly name of backup method plugin"""
+        from backups.plugins import get_plugin
+        plugin = get_plugin(obj.backup_method)
+        return plugin.friendly_name if plugin else obj.backup_method
+
+class ThemeSettingsSerializer(serializers.ModelSerializer):
+    """Serializes ThemeSettings model for API responses"""
+    class Meta:
+        model = ThemeSettings
+        fields = ['id', 'title_bar_color', 'dashboard_box_color', 'dashboard_nested_box_color', 'updated_at']
+        read_only_fields = ['id', 'updated_at']

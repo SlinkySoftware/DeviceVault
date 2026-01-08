@@ -23,6 +23,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE','devicevault.settings')
 application = get_wsgi_application()
 from devices.models import Device
 from backups.models import Backup
+from django.utils import timezone
 from storage.fs import FileSystemStorage
 from backups.plugins import get_plugin
 
@@ -37,29 +38,33 @@ def run_backup(device):
         print(f"No credentials configured for device {device.name}")
         return
     
+    # Create initial backup record with in_progress status
+    backup = Backup.objects.create(
+        device=device,
+        location=device.backup_location,
+        status='in_progress',
+        artifact_path='',
+        size_bytes=0,
+        requested_at=timezone.now(),
+        started_at=timezone.now()
+    )
     try:
         content = plugin.run(device.ip_address, cred.data)
         storage = FileSystemStorage(base_path=os.environ.get('DEVICEVAULT_BACKUPS','backups'))
         # Use backup method instead of manufacturer in path
         rel_path = f"{device.name}/{device.backup_method}/{device.device_type.name}/{device.id}.cfg"
         saved = storage.save(rel_path, content)
-        Backup.objects.create(
-            device=device, 
-            location=device.backup_location, 
-            status='success', 
-            artifact_path=saved, 
-            size_bytes=len(content)
-        )
+        backup.artifact_path = saved
+        backup.size_bytes = len(content)
+        backup.status = 'success'
+        backup.completed_at = timezone.now()
+        backup.save(update_fields=['artifact_path','size_bytes','status','completed_at'])
         print(f"Backup successful for {device.name}")
     except Exception as e:
         print(f"Backup failed for {device.name}: {e}")
-        Backup.objects.create(
-            device=device,
-            location=device.backup_location,
-            status='failed',
-            artifact_path='',
-            size_bytes=0
-        )
+        backup.status = 'failed'
+        backup.completed_at = timezone.now()
+        backup.save(update_fields=['status','completed_at'])
 
 scheduler = BackgroundScheduler()
 

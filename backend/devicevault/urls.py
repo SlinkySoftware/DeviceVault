@@ -47,13 +47,13 @@ urlpatterns = [
     path('api/', include(router.urls)), 
     path('api/onboarding/', views.onboarding), 
     path('api/dashboard-stats/', views.dashboard_stats),
+    path('api/recent-backup-activity/', views.recent_backup_activity),
     path('api/auth/config/', views.AuthConfigView.as_view()), 
     path('api/backups/compare/', views.compare_backups),
     path('api/auth/login/', views.LoginView.as_view()), 
     path('api/auth/logout/', views.LogoutView.as_view()), 
     path('api/auth/user/', views.UserInfoView.as_view()),
     path('api/auth/change-password/', views.ChangePasswordView.as_view()),
-    path('api/dashboard-layout/', views.DashboardLayoutView.as_view()),
-    path('api/dashboard-layout/default/', views.DashboardDefaultLayoutView.as_view()),
-    path('api/user/preferences/', views.UserPreferencesView.as_view()),
+    path('api/theme-settings/', views.ThemeSettingsView.as_view()),
+    # Dashboard layout/customization disabled; fixed layout only
 ]

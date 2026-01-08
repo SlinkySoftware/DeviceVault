@@ -2,99 +2,23 @@
   <q-page class="q-pa-sm dashboard-page">
     <div class="row items-center q-mb-md">
       <div class="col text-h4">Dashboard</div>
-      <div class="col-auto q-gutter-sm">
-        <q-banner v-if="isEditing" class="bg-info text-white q-mb-sm">
-          <template v-slot:avatar>
-            <q-icon name="info" />
-          </template>
-          Drag widgets to reorder • Drag right edge to resize width • Drag bottom edge to resize height
-        </q-banner>
-        <q-btn 
-          v-if="isEditing" 
-          color="positive" 
-          label="Save Layout" 
-          icon="save"
-          @click="saveLayout"
-          size="sm"
-        />
-        <q-btn 
-          v-if="isEditing" 
-          color="negative" 
-          label="Cancel" 
-          icon="close"
-          @click="cancelEdit"
-          size="sm"
-        />
-        <q-btn 
-          v-if="!isEditing" 
-          color="primary" 
-          label="Edit Layout" 
-          icon="edit"
-          @click="startEdit"
-          size="sm"
-        />
-        <q-btn 
-          v-if="isAdmin && isEditing" 
-          color="info" 
-          label="Set as Default" 
-          icon="check_circle"
-          @click="setAsDefault"
-          size="sm"
-        />
-        <q-btn 
-          v-if="!isEditing" 
-          flat 
-          dense
-          icon="more_vert"
-        >
-          <q-menu>
-            <q-list style="min-width: 200px">
-              <q-item clickable @click="resetLayout">
-                <q-item-section>
-                  <q-item-label>Reset to Default</q-item-label>
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </q-menu>
-        </q-btn>
-      </div>
     </div>
 
     <div class="dashboard-grid">
       <div 
-        v-for="(widget, index) in orderedWidgets" 
+        v-for="widget in orderedWidgets" 
         :key="widget.id" 
         :class="getWidgetClass(widget)"
         :style="getWidgetStyle(widget)"
-        :draggable="isEditing"
-        @dragstart="onDragStart($event, index)"
-        @dragover="onDragOver"
-        @drop="onDrop($event, index)"
-        @dragend="onDragEnd"
-        @dragenter="onDragEnter($event, index)"
-        @dragleave="onDragLeave"
       >
         <q-card class="full-height widget-card">
           <q-card-section class="q-py-sm widget-title">
-            <div class="text-subtitle2 text-weight-bold">{{ widget.title }}</div>
-            <q-icon v-if="isEditing" name="drag_handle" class="drag-handle" />
+            <div class="text-h6 text-weight-bold">{{ widget.title }}</div>
           </q-card-section>
           <q-separator />
           <q-card-section class="q-pa-sm widget-content">
             <component :is="widget.component" :stats="stats" />
           </q-card-section>
-          <div 
-            v-if="isEditing" 
-            class="widget-resize-handle widget-resize-width"
-            @mousedown="startResize($event, index, 'width')"
-            title="Drag to resize width"
-          ></div>
-          <div 
-            v-if="isEditing" 
-            class="widget-resize-handle widget-resize-height"
-            @mousedown="startResize($event, index, 'height')"
-            title="Drag to resize height"
-          ></div>
         </q-card>
       </div>
     </div>
@@ -103,7 +27,7 @@
 
 <script>
 import { defineComponent, h } from 'vue'
-import { QList, QItem, QItemSection, QItemLabel } from 'quasar'
+import { QIcon } from 'quasar'
 import api from '../services/api'
 
 // Widget components - using render functions instead of templates
@@ -111,28 +35,33 @@ const ConfiguredDevicesWidget = defineComponent({
   props: ['stats'],
   computed: {
     totalDevices() {
-      return Object.values(this.stats?.devicesByType || {}).reduce((a, b) => a + b, 0)
+      return Object.values(this.stats?.devicesByType || {}).reduce((a, b) => a + (b.count || b), 0)
     }
   },
   render() {
-    return h('div', { class: 'q-gutter-md q-pa-sm' }, [
-      h('div', { class: 'row q-col-gutter-md' }, [
-        h('div', { class: 'col-5' }, [
-          h('div', { class: 'nested-box strong-box flex flex-center column', style: { minHeight: '100%' } }, [
+    return h('div', { class: 'q-gutter-md q-pa-sm', style: { height: '100%', display: 'flex', flexDirection: 'column' } }, [
+      h('div', { class: 'row q-col-gutter-md', style: { flex: 1 } }, [
+        h('div', { class: 'col-5', style: { display: 'flex' } }, [
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
             h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '8px' } }, 'Total'),
             h('div', { 
               class: 'text-primary text-weight-bold',
-              style: { fontSize: 'clamp(2rem, 6vw, 4rem)', lineHeight: '1' }
+              style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
             }, this.totalDevices.toString())
           ])
         ]),
-        h('div', { class: 'col-7' }, [
-          ...Object.entries(this.stats?.devicesByType || {}).map(([type, count]) =>
-            h('div', { class: 'nested-box', key: type }, [
-              h('div', { class: 'text-subtitle2 text-grey' }, type),
-              h('div', { class: 'text-h5 text-weight-medium text-primary' }, count.toString())
+        h('div', { class: 'col-7', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, [
+          ...Object.entries(this.stats?.devicesByType || {}).map(([type, data]) => {
+            const count = data.count || data
+            const icon = data.icon || 'router'
+            return h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px' }, key: type }, [
+              h(QIcon, { name: icon, size: 'md', color: 'primary' }),
+              h('div', { class: 'flex-1' }, [
+                h('div', { class: 'text-subtitle2 text-grey' }, type),
+                h('div', { class: 'text-h5 text-weight-medium text-primary' }, count.toString())
+              ])
             ])
-          ),
+          }),
           Object.keys(this.stats?.devicesByType || {}).length === 0
             ? h('div', { class: 'text-caption text-grey' }, 'No devices')
             : null
@@ -145,22 +74,22 @@ const ConfiguredDevicesWidget = defineComponent({
 const BackupsWidget = defineComponent({
   props: ['stats'],
   render() {
-    return h('div', { class: 'row q-col-gutter-md q-pa-sm' }, [
-      h('div', { class: 'col-6' }, [
-        h('div', { class: 'nested-box flex flex-center column', style: { minHeight: '100%' } }, [
+    return h('div', { class: 'row q-col-gutter-md q-pa-sm', style: { height: '100%' } }, [
+      h('div', { class: 'col-6', style: { display: 'flex' } }, [
+        h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
           h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '1rem', marginBottom: '8px' } }, 'Success'),
           h('div', { 
             class: 'text-positive text-weight-bold',
-            style: { fontSize: 'clamp(2rem, 6vw, 4rem)', lineHeight: '1' }
+            style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
           }, (this.stats?.success24h || 0).toString())
         ])
       ]),
-      h('div', { class: 'col-6' }, [
-        h('div', { class: 'nested-box flex flex-center column', style: { minHeight: '100%' } }, [
+      h('div', { class: 'col-6', style: { display: 'flex' } }, [
+        h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
           h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '1rem', marginBottom: '8px' } }, 'Failed'),
           h('div', { 
             class: 'text-negative text-weight-bold',
-            style: { fontSize: 'clamp(2rem, 6vw, 4rem)', lineHeight: '1' }
+            style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
           }, (this.stats?.failed24h || 0).toString())
         ])
       ])
@@ -177,7 +106,7 @@ const AvgTimeWidget = defineComponent({
     }, [
       h('div', { 
         class: 'text-primary text-weight-bold dynamic-text',
-        style: { fontSize: 'clamp(2rem, 8vw, 5rem)', lineHeight: '1.2' }
+        style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
       }, (this.stats?.avgDuration || 0) + 's')
     ])
   }
@@ -198,7 +127,7 @@ const SuccessRateWidget = defineComponent({
     }, [
       h('div', { 
         class: 'text-positive text-weight-bold dynamic-text',
-        style: { fontSize: 'clamp(2rem, 8vw, 5rem)', lineHeight: '1.2' }
+        style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
       }, this.rate + '%')
     ])
   }
@@ -263,31 +192,88 @@ const ChartWidget = defineComponent({
       ctx.clearRect(0, 0, width, height)
       const dailyStats = this.stats.dailyStats || []
       if (dailyStats.length === 0) return
-      const padding = 40
-      const chartWidth = width - padding * 2
-      const chartHeight = height - padding * 2
-      const barWidth = chartWidth / dailyStats.length
+      const padding = { left: 40, right: 40, top: 40, bottom: 40 }
+      const chartWidth = width - padding.left - padding.right
+      const chartHeight = height - padding.top - padding.bottom
+      const xStep = chartWidth / (dailyStats.length - 1)
       const textColor = this.isDarkMode() ? '#fff' : '#000'
-      dailyStats.forEach((day, index) => {
-        const x = padding + index * barWidth
-        const barH = (day.rate / 100) * chartHeight
-        const y = height - padding - barH
-        ctx.fillStyle = day.rate >= 80 ? '#21BA45' : day.rate >= 50 ? '#F2C037' : '#C10015'
-        ctx.fillRect(x + 5, y, barWidth - 10, barH)
-        ctx.fillStyle = textColor
-        ctx.font = '10px sans-serif'
-        ctx.textAlign = 'center'
-        const label = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })
-        ctx.fillText(label, x + barWidth / 2, height - padding + 20)
-        ctx.fillText(`${Math.round(day.rate)}%`, x + barWidth / 2, y - 5)
+      const lineColor = this.isDarkMode() ? '#1976D2' : '#1976D2'
+      const gridColor = this.isDarkMode() ? '#333' : '#eee'
+      
+      // Draw y-axis scale and grid lines
+      ctx.font = '14px sans-serif'
+      ctx.fillStyle = textColor
+      ctx.textAlign = 'right'
+      const yLabels = [0, 25, 50, 75, 100]
+      yLabels.forEach(percent => {
+        const y = height - padding.bottom - (percent / 100) * chartHeight
+        // Draw label
+        ctx.fillText(`${percent}%`, padding.left - 8, y + 3)
+        // Draw grid line
+        ctx.strokeStyle = gridColor
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(padding.left, y)
+        ctx.lineTo(width - padding.right, y)
+        ctx.stroke()
       })
+      
+      // Draw axes
       ctx.strokeStyle = this.isDarkMode() ? '#555' : '#ccc'
+      ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.moveTo(padding, height - padding)
-      ctx.lineTo(width - padding, height - padding)
-      ctx.moveTo(padding, padding)
-      ctx.lineTo(padding, height - padding)
+      ctx.moveTo(padding.left, height - padding.bottom)
+      ctx.lineTo(width - padding.right, height - padding.bottom)
+      ctx.moveTo(padding.left, padding.top)
+      ctx.lineTo(padding.left, height - padding.bottom)
       ctx.stroke()
+      
+      // Draw spline/curved line and points
+      ctx.strokeStyle = lineColor
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      
+      const points = dailyStats.map((day, index) => ({
+        x: padding.left + index * xStep,
+        y: height - padding.bottom - (day.rate / 100) * chartHeight
+      }))
+      
+      if (points.length > 0) {
+        ctx.moveTo(points[0].x, points[0].y)
+        
+        for (let i = 1; i < points.length; i++) {
+          const cp1x = points[i - 1].x + (points[i].x - points[i - 1].x) / 2
+          const cp1y = points[i - 1].y
+          const cp2x = points[i - 1].x + (points[i].x - points[i - 1].x) / 2
+          const cp2y = points[i].y
+          
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, points[i].x, points[i].y)
+        }
+      }
+      ctx.stroke()
+      
+      // Draw points and labels
+      ctx.font = '15px sans-serif'
+      ctx.textAlign = 'center'
+      dailyStats.forEach((day, index) => {
+        const x = padding.left + index * xStep
+        const y = height - padding.bottom - (day.rate / 100) * chartHeight
+        
+        // Draw point
+        const color = day.rate >= 80 ? '#21BA45' : day.rate >= 50 ? '#F2C037' : '#C10015'
+        ctx.fillStyle = color
+        ctx.beginPath()
+        ctx.arc(x, y, 5, 0, Math.PI * 2)
+        ctx.fill()
+        
+        // Draw value label above point
+        ctx.fillStyle = textColor
+        ctx.fillText(`${Math.round(day.rate)}%`, x, y - 12)
+        
+        // Draw day label below axis
+        const label = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })
+        ctx.fillText(label, x, height - padding.bottom + 20)
+      })
     }
   },
   render() {
@@ -300,41 +286,91 @@ const ChartWidget = defineComponent({
 const ActivityWidget = defineComponent({
   props: ['stats'],
   data() {
-    return { recentActivity: [] }
+    return { recentActivity: [], interval: null, refreshMs: 30000 }
   },
   mounted() {
     this.loadActivity()
+    this.setRefresh()
+  },
+  beforeUnmount() {
+    if (this.interval) {
+      clearInterval(this.interval)
+    }
   },
   methods: {
     async loadActivity() {
       try {
-        const res = await api.get('/audit-logs/?limit=10')
+        const res = await api.get('/recent-backup-activity/?limit=15')
         this.recentActivity = Array.isArray(res.data) ? res.data : res.data.results || []
+        // Adjust refresh cadence: faster when any backups are in progress
+        const hasInProgress = this.recentActivity.some(item => item.status === 'in_progress' || item.status === 'pending')
+        this.refreshMs = hasInProgress ? 5000 : 30000
+        this.setRefresh()
       } catch (e) {
         this.recentActivity = []
       }
     },
+    setRefresh() {
+      if (this.interval) {
+        clearInterval(this.interval)
+      }
+      this.interval = setInterval(() => this.loadActivity(), this.refreshMs)
+    },
     formatDate(dateStr) {
       if (!dateStr) return ''
-      return new Date(dateStr).toLocaleString()
+      const date = new Date(dateStr)
+      const now = new Date()
+      const diffMs = now - date
+      const diffMins = Math.floor(diffMs / 60000)
+      const diffHours = Math.floor(diffMs / 3600000)
+      
+      if (diffMins < 1) return 'Just now'
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffHours < 24) return `${diffHours}h ago`
+      return date.toLocaleDateString()
+    },
+    getStatusColor(status) {
+      if (status === 'success') return 'positive'
+      if (status === 'failed') return 'negative'
+      if (status === 'pending' || status === 'in_progress') return 'warning'
+      return 'grey'
+    },
+    getStatusIcon(status) {
+      if (status === 'success') return 'check_circle'
+      if (status === 'failed') return 'error'
+      if (status === 'pending' || status === 'in_progress') return 'autorenew'
+      return 'info'
+    },
+    getIconClass(status) {
+      return (status === 'in_progress' || status === 'pending') ? 'pulse-icon' : ''
+    },
+    formatSize(bytes) {
+      if (!bytes) return ''
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+      return `${(bytes / 1048576).toFixed(1)} MB`
     }
   },
   render() {
-    return h(QList, { separator: true, style: 'max-height: 300px; overflow-y: auto' }, () => [
-      this.recentActivity.length > 0
+    return h('div', { class: 'q-pa-sm', style: 'max-height: 300px; overflow-y: auto' }, [
+      ...(this.recentActivity.length > 0
         ? this.recentActivity.map(item =>
-            h(QItem, { key: item.id }, () => [
-              h(QItemSection, () => [
-                h(QItemLabel, { class: 'text-caption' }, () => item.action),
-                h(QItemLabel, { caption: true }, () => this.formatDate(item.created_at))
+            h('div', { key: item.id, class: 'row items-center activity-row q-px-md q-py-xs' }, [
+              h('div', { class: 'col-5', style: { fontSize: '1.5rem', fontWeight: 'bold' } }, item.device_name),
+              h('div', { class: 'col-3', style: { fontSize: '1.25rem' } }, this.formatDate(item.timestamp)),
+              h('div', { class: 'col-2', style: { fontSize: '1.25rem' } }, item.duration ? `${item.duration}s` : ''),
+              h('div', { class: 'col-2 row items-center', style: { fontSize: '1.25rem' } }, [
+                h(QIcon, { 
+                  name: this.getStatusIcon(item.status),
+                  color: this.getStatusColor(item.status),
+                  class: this.getIconClass(item.status),
+                  size: 'lg'
+                }),
+                h('span', { class: 'q-ml-xs' }, item.status_display || item.status)
               ])
             ])
           )
-        : h(QItem, () => [
-            h(QItemSection, () => [
-              h(QItemLabel, { caption: true }, () => 'No recent activity')
-            ])
-          ])
+        : [h('div', { style: { fontSize: '1.25rem', padding: '16px' } }, 'No recent backup activity')])
     ])
   }
 })
@@ -350,29 +386,19 @@ export default defineComponent({
     ActivityWidget
   },
   data() {
+    const defaultWidgets = [
+      { id: 'devices', width: 3, height: 220 },
+      { id: 'backups', width: 3, height: 220 },
+      { id: 'avgtime', width: 3, height: 220 },
+      { id: 'successrate', width: 3, height: 440 },
+      { id: 'chart', width: 6, height: 120 },
+      { id: 'activity', width: 6, height: 150 }
+    ]
+
     return {
       stats: { devicesByType: {}, success24h: 0, failed24h: 0, avgDuration: 0, dailyStats: [] },
-      isEditing: false,
-      isAdmin: false,
-      widgetOrder: [
-        { id: 'devices', width: 3, height: 220 },
-        { id: 'backups', width: 3, height: 220 },
-        { id: 'avgtime', width: 3, height: 220 },
-        { id: 'successrate', width: 3, height: 440 },
-        { id: 'chart', width: 12, height: 300 },
-        { id: 'activity', width: 12, height: 300 }
-      ],
-      defaultOrder: [
-        { id: 'devices', width: 3, height: 220 },
-        { id: 'backups', width: 3, height: 220 },
-        { id: 'avgtime', width: 3, height: 220 },
-        { id: 'successrate', width: 3, height: 440 },
-        { id: 'chart', width: 12, height: 300 },
-        { id: 'activity', width: 12, height: 300 }
-      ],
-      draggedIndex: null,
-      dragOverIndex: null,
-      resizingIndex: null
+      defaultOrder: defaultWidgets,
+      widgetOrder: [...defaultWidgets]
     }
   },
   computed: {
@@ -383,18 +409,21 @@ export default defineComponent({
         avgtime: { id: 'avgtime', title: 'Avg Backup Time', component: AvgTimeWidget },
         successrate: { id: 'successrate', title: 'Success Rate', component: SuccessRateWidget },
         chart: { id: 'chart', title: 'Backup Success Rate (Last 7 Days)', component: ChartWidget },
-        activity: { id: 'activity', title: 'Recent Activity', component: ActivityWidget }
+        activity: { id: 'activity', title: 'Recent Backup Activity', component: ActivityWidget }
       }
+
       return this.widgetOrder
         .map(widget => {
           const widgetConfig = widgetMap[widget.id]
           if (!widgetConfig) return null
+
           const defaultHeight =
             widget.id === 'chart' || widget.id === 'activity'
               ? 300
               : widget.id === 'successrate'
               ? 440
               : 220
+
           return {
             ...widgetConfig,
             width: widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3),
@@ -405,166 +434,36 @@ export default defineComponent({
     }
   },
   methods: {
-    getWidgetClass(widget) {
-      const baseClass = 'dashboard-widget'
-      let classes = [baseClass]
-      if (this.isEditing) classes.push('editing')
-      if (this.draggedIndex !== null && this.orderedWidgets[this.draggedIndex]?.id === widget.id) {
-        classes.push('dragging')
-      }
-      return classes.join(' ')
+    getWidgetClass() {
+      return 'dashboard-widget'
     },
     getWidgetStyle(widget) {
+      const width = Math.max(1, Math.min(12, widget.width || (widget.id === 'chart' || widget.id === 'activity' ? 12 : 3)))
+      const height =
+        widget.height ||
+        (widget.id === 'chart' || widget.id === 'activity'
+          ? 300
+          : widget.id === 'successrate'
+          ? 440
+          : 220)
+
       return {
-        gridColumn: `span ${widget.width}`,
-        minHeight: `${widget.height || 220}px`
+        gridColumn: `span ${width}`,
+        minHeight: `${height}px`
       }
-    },
-    startResize(e, index, dimension) {
-      e.preventDefault()
-      this.resizingIndex = index
-      const startX = e.clientX
-      const startY = e.clientY
-      const startWidth = this.widgetOrder[index].width
-      const startHeight = this.widgetOrder[index].height || 220
-      
-      const handleMouseMove = (moveEvent) => {
-        if (dimension === 'width') {
-          const delta = moveEvent.clientX - startX
-          const pixelsPerColumn = 100 / 12
-          const columnDelta = Math.round(delta / (window.innerWidth * pixelsPerColumn / 100))
-          let newWidth = Math.max(2, Math.min(12, startWidth + columnDelta))
-          this.widgetOrder[index].width = newWidth
-        } else if (dimension === 'height') {
-          const delta = moveEvent.clientY - startY
-          let newHeight = Math.max(150, startHeight + delta)
-          this.widgetOrder[index].height = newHeight
-        }
-      }
-      
-      const handleMouseUp = () => {
-        document.removeEventListener('mousemove', handleMouseMove)
-        document.removeEventListener('mouseup', handleMouseUp)
-        this.resizingIndex = null
-      }
-      
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
     },
     async loadData() {
       try {
-        const [statsRes, layoutRes] = await Promise.all([
-          api.get('/dashboard-stats/'),
-          api.get('/dashboard-layout/')
-        ])
-        this.stats = statsRes.data
-        // Check if layout exists AND has items
-        const layoutData = layoutRes.data?.layout || layoutRes.data
-        if (layoutData && Array.isArray(layoutData) && layoutData.length > 0) {
-          this.widgetOrder = layoutData.map(item => {
-            const normalized = typeof item === 'string' ? { id: item } : { ...item }
-            // Apply defaults for width/height if missing
-            if (!normalized.width) {
-              normalized.width = normalized.id === 'chart' || normalized.id === 'activity' ? 12 : 3
-            }
-            if (!normalized.height) {
-              normalized.height = normalized.id === 'successrate'
-                ? 440
-                : normalized.id === 'chart' || normalized.id === 'activity'
-                ? 300
-                : 220
-            }
-            return normalized
-          })
-        } else {
-          this.widgetOrder = [...this.defaultOrder]
-        }
+        const res = await api.get('/dashboard-stats/')
+        this.stats = res.data || this.stats
+        this.widgetOrder = [...this.defaultOrder]
       } catch (e) {
-        console.error('Failed to load dashboard:', e)
+        this.stats = { devicesByType: {}, success24h: 0, failed24h: 0, avgDuration: 0, dailyStats: [] }
         this.widgetOrder = [...this.defaultOrder]
       }
-    },
-    startEdit() {
-      this.isEditing = true
-    },
-    cancelEdit() {
-      this.isEditing = false
-      this.loadData()
-    },
-    async saveLayout() {
-      try {
-        await api.post('/dashboard-layout/', { layout: this.widgetOrder })
-        this.$q.notify({ type: 'positive', message: 'Layout saved', position: 'top' })
-        this.isEditing = false
-      } catch (e) {
-        this.$q.notify({ type: 'negative', message: 'Failed to save layout', position: 'top' })
-      }
-    },
-    async setAsDefault() {
-      try {
-        await api.post('/dashboard-layout/default/', { layout: this.widgetOrder })
-        this.$q.notify({ type: 'positive', message: 'Set as default for all new users', position: 'top' })
-      } catch (e) {
-        this.$q.notify({ type: 'negative', message: 'Failed to set default', position: 'top' })
-      }
-    },
-    async resetLayout() {
-      this.widgetOrder = [...this.defaultOrder]
-      try {
-        await api.post('/dashboard-layout/', { layout: this.defaultOrder })
-        this.$q.notify({ type: 'info', message: 'Layout reset to default', position: 'top' })
-      } catch (e) {
-        this.$q.notify({ type: 'negative', message: 'Failed to reset layout', position: 'top' })
-      }
-    },
-    onDragStart(e, index) {
-      this.draggedIndex = index
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/html', e.currentTarget)
-    },
-    onDragOver(e) {
-      if (!this.isEditing) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'move'
-    },
-    onDragEnter(e, index) {
-      if (!this.isEditing) return
-      this.dragOverIndex = index
-      e.currentTarget.classList.add('drag-over')
-    },
-    onDragLeave(e) {
-      if (!this.isEditing) return
-      e.currentTarget.classList.remove('drag-over')
-      if (e.currentTarget.contains(e.relatedTarget)) return
-      this.dragOverIndex = null
-    },
-    onDrop(e, dropIndex) {
-      if (!this.isEditing) return
-      e.preventDefault()
-      e.currentTarget.classList.remove('drag-over')
-      
-      if (this.draggedIndex !== null && this.draggedIndex !== dropIndex) {
-        const widgets = [...this.widgetOrder]
-        const draggedWidget = widgets[this.draggedIndex]
-        widgets.splice(this.draggedIndex, 1)
-        
-        const actualDropIndex = this.draggedIndex < dropIndex ? dropIndex - 1 : dropIndex
-        widgets.splice(actualDropIndex, 0, draggedWidget)
-        
-        this.widgetOrder = widgets
-      }
-      this.draggedIndex = null
-      this.dragOverIndex = null
-    },
-    onDragEnd(e) {
-      e.currentTarget.classList.remove('drag-over')
-      this.draggedIndex = null
-      this.dragOverIndex = null
     }
   },
   async mounted() {
-    const user = localStorage.getItem('user')
-    this.isAdmin = user ? JSON.parse(user).is_staff : false
     await this.loadData()
   }
 })
@@ -585,87 +484,25 @@ export default defineComponent({
   min-width: 0;
 }
 
-.dashboard-widget.editing {
-  cursor: grab;
-  opacity: 0.9;
-}
-
-.dashboard-widget.editing:active {
-  cursor: grabbing;
-}
-
-.dashboard-widget.dragging {
-  opacity: 0.5;
-  transform: scale(0.98);
-}
-
-.dashboard-widget.drag-over {
-  background-color: #e3f2fd;
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 2px #2196F3;
-}
-
-.drag-handle {
-  float: right;
-  cursor: grab;
-  opacity: 0.7;
-  margin-left: 8px;
-}
-
-.drag-handle:active {
-  cursor: grabbing;
-}
-
-.widget-resize-handle {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  cursor: col-resize;
-  background: linear-gradient(to right, transparent, #2196F3);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.widget-resize-handle.widget-resize-width {
-  right: 0;
-  cursor: col-resize;
-}
-
-.widget-resize-handle.widget-resize-height {
-  right: auto;
-  left: 0;
-  top: auto;
-  bottom: 0;
-  width: 100%;
-  height: 6px;
-  background: linear-gradient(to bottom, transparent, #2196F3);
-  cursor: row-resize;
-}
-
-.dashboard-widget.editing:hover .widget-resize-handle {
-  opacity: 0.8;
-}
-
-.widget-resize-handle:hover {
-  opacity: 1 !important;
-  background: linear-gradient(to right, transparent, #1976D2);
-}
-
-.widget-resize-height:hover {
-  background: linear-gradient(to bottom, transparent, #1976D2) !important;
-}
-
 .widget-card {
   position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
-  border: 2px solid #2196F3;
+  border: 2px solid var(--theme-dashboard-box, #2196F3);
   border-radius: 8px;
   min-height: 220px;
+}
+
+.widget-title {
+  background: #f5f5f5;
+  border-bottom: 2px solid var(--theme-dashboard-box, #2196F3);
+  flex-shrink: 0;
+}
+
+.widget-content {
+  flex: 1;
 }
 
 body.body--dark .widget-card {
@@ -673,8 +510,9 @@ body.body--dark .widget-card {
   border-color: #1976D2;
 }
 
-.dashboard-widget:nth-child(5) {
-  grid-column: 1 / -1;
+body.body--dark .widget-title {
+  background: #1f1f1f;
+  border-color: #1976D2;
 }
 
 .dashboard-widget:nth-child(6) {
@@ -685,8 +523,7 @@ body.body--dark .widget-card {
   .dashboard-grid {
     grid-template-columns: repeat(6, 1fr);
   }
-  
-  .dashboard-widget:nth-child(5),
+
   .dashboard-widget:nth-child(6) {
     grid-column: 1 / -1;
   }
@@ -696,37 +533,10 @@ body.body--dark .widget-card {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
-  
-  .dashboard-widget:nth-child(5),
+
   .dashboard-widget:nth-child(6) {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
-}
-
-
-
-.widget-title {
-  background: #f5f5f5;
-  border-bottom: 2px solid #2196F3;
-  flex-shrink: 0;
-  color: #000;
-  font-weight: 600;
-}
-
-body.body--dark .widget-title {
-  background: #1e1e1e;
-  border-bottom-color: #1976D2;
-  color: #fff;
-}
-
-.widget-content {
-  flex: 1;
-  overflow: auto;
-  color: #000;
-}
-
-body.body--dark .widget-content {
-  color: #fff;
 }
 
 .full-height {
@@ -745,15 +555,20 @@ canvas {
 }
 
 .nested-box {
-  border: 2px solid #2196F3 !important;
+  border: 3px solid var(--theme-dashboard-nested-box, #2196F3) !important;
   border-radius: 8px;
   padding: 18px 20px;
-  background: #fafafa;
+  background: #ffffff;
   color: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 80px;
 }
 
 body.body--dark .nested-box {
-  background: #1e1e1e;
+  background: #2a2a2a;
   border-color: #1976D2 !important;
   color: #fff;
 }
@@ -771,5 +586,23 @@ body.body--dark .strong-box {
 .dashboard-page {
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+.activity-row {
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+}
+
+body.body--dark .activity-row {
+  border-bottom-color: rgba(255,255,255,0.1);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pulse-icon {
+  animation: pulse 1.2s ease-in-out infinite;
 }
 </style>

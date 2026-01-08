@@ -1,37 +1,43 @@
 <template>
   <q-page class="q-pa-md">
-    <!-- Page Header -->
-    <div class="row items-center q-mb-lg">
-      <div class="col">
-        <h4 class="q-my-none">Device Groups</h4>
-        <p class="text-caption text-grey-7">Summary of device groups. Roles are managed automatically.</p>
-      </div>
-      <div class="col-auto">
-        <q-btn
-          v-if="isAdmin"
-          color="primary"
-          label="Add Device Group"
-          icon="add"
-          @click="openAddGroupDialog"
-          unelevated
-        />
-      </div>
-    </div>
-
-    <!-- Device Groups Table -->
     <q-card>
-      <q-linear-progress
-        v-if="loading"
-        indeterminate
-        color="primary"
-      />
-      
-      <q-table
+      <!-- Page Header -->
+      <q-card-section>
+        <div class="row items-center q-mb-sm">
+          <div class="col">
+            <div class="text-h4">Device Groups</div>
+          </div>
+          <div class="col-auto">
+            <q-btn
+              v-if="isAdmin"
+              color="primary"
+              label="Add Device Group"
+              icon="add"
+              @click="openAddGroupDialog"
+            />
+          </div>
+        </div>
+        <div class="row justify-end">
+          <div class="text-caption text-grey">
+            Summary of device groups. Roles are managed automatically.
+          </div>
+        </div>
+      </q-card-section>
+      <q-separator />
+
+      <!-- Device Groups Table -->
+      <q-card-section>
+        <q-linear-progress
+          v-if="loading"
+          indeterminate
+          color="primary"
+        />
+        
+        <q-table
         :rows="deviceGroups"
         :columns="columns"
         row-key="id"
         flat
-        bordered
       >
         <!-- Name Column -->
         <template #body-cell-name="props">
@@ -73,8 +79,6 @@
           <q-td :props="props">
             <q-btn
               v-if="isAdmin"
-              flat
-              dense
               color="primary"
               icon="edit"
               label="Edit"
@@ -83,16 +87,16 @@
             />
             <q-btn
               v-if="isAdmin"
-              flat
-              dense
               color="negative"
               icon="delete"
               label="Delete"
               @click="deleteGroup(props.row)"
+              class="q-mr-sm"
             />
           </q-td>
         </template>
       </q-table>
+      </q-card-section>
     </q-card>
 
     <!-- Add/Edit Device Group Dialog -->
@@ -194,7 +198,7 @@ const columns = [
   { name: 'description', label: 'Description', field: 'description', align: 'left' },
   { name: 'created_at', label: 'Created', field: 'created_at', align: 'left' },
   { name: 'updated_at', label: 'Updated', field: 'updated_at', align: 'left' },
-  { name: 'actions', label: 'Actions', align: 'center' }
+  { name: 'actions', label: 'Actions', align: 'right' }
 ]
 
 /**
@@ -314,3 +318,28 @@ onMounted(async () => {
   await loadDeviceGroups()
 })
 </script>
+
+<style scoped>
+:deep(.q-table) {
+  font-size: 1.5rem;
+}
+
+:deep(.q-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.4rem;
+}
+
+:deep(.q-table thead th) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+:deep(.q-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>

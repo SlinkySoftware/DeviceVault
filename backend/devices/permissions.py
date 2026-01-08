@@ -25,6 +25,7 @@ from devices.models import (
     DeviceGroupRole,
     DeviceGroupPermission,
     DeviceGroup,
+    DeviceGroupDjangoPermissions,
 )
 from django.contrib.auth.models import User
 from rest_framework.permissions import BasePermission
@@ -74,17 +75,61 @@ def user_get_device_group_permissions(user: User, device_group) -> set:
     return set(permissions)
 
 
+def user_has_device_group_django_permission(user: User, device_group: DeviceGroup, action: str) -> bool:
+    """Check if user has the Django auth permission for the given device group and action.
+
+    action in {'view','modify','view_backups','backup_now'}
+    """
+    if user.is_staff or user.is_superuser:
+        return True
+    try:
+        link = device_group.django_permissions
+    except DeviceGroupDjangoPermissions.DoesNotExist:
+        link = DeviceGroupDjangoPermissions.ensure_for_group(device_group)
+    mapping = {
+        'view': link.perm_view,
+        'modify': link.perm_modify,
+        'view_backups': link.perm_view_backups,
+        'backup_now': link.perm_backup_now,
+    }
+    perm = mapping.get(action)
+    if not perm:
+        return False
+    return user.has_perm(f"{perm.content_type.app_label}.{perm.codename}")
+
+
+def user_get_device_group_django_permissions(user: User, device_group: DeviceGroup) -> set:
+    """Return {'view','modify','view_backups','backup_now'} that the user has for this group."""
+    if user.is_staff or user.is_superuser:
+        return {'view', 'modify', 'view_backups', 'backup_now'}
+    try:
+        link = device_group.django_permissions
+    except DeviceGroupDjangoPermissions.DoesNotExist:
+        link = DeviceGroupDjangoPermissions.ensure_for_group(device_group)
+    results = set()
+    for action, perm in (
+        ('view', link.perm_view),
+        ('modify', link.perm_modify),
+        ('view_backups', link.perm_view_backups),
+        ('backup_now', link.perm_backup_now),
+    ):
+        if perm and user.has_perm(f"{perm.content_type.app_label}.{perm.codename}"):
+            results.add(action)
+    return results
+
+
 def user_get_accessible_device_groups(user: User):
-    """Return device groups a user has at least some access to."""
+    """Return device groups a user can access via any of the Django permissions."""
     if user.is_staff or user.is_superuser:
         return DeviceGroup.objects.all()
-    user_device_groups = DeviceGroup.objects.filter(
-        roles__userdevicegrouprole__user=user,
-    )
-    group_device_groups = DeviceGroup.objects.filter(
-        roles__groupdevicegrouprole__auth_group__user=user,
-    )
-    return (user_device_groups | group_device_groups).distinct()
+    # Evaluate against Django permissions mapping for each group
+    groups = []
+    for dg in DeviceGroup.objects.all():
+        if user_get_device_group_django_permissions(user, dg):
+            groups.append(dg)
+    from django.db.models import QuerySet
+    # Return a QuerySet-like object; simplest is to filter by IDs
+    return DeviceGroup.objects.filter(id__in=[g.id for g in groups])
 
 
 # ===== REST Framework Permission Classes =====
