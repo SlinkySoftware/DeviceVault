@@ -25,9 +25,6 @@ cd "$REPO_ROOT/backend"
 
 PYTHON=${PYTHON:-python3}
 
-echo "Running migrations before seeding demo data..."
-$PYTHON manage.py migrate --run-syncdb
-
 echo "Populating demonstration/sample data..."
 # seed_data.py is executable and sets up Django environment
 $PYTHON seed_data.py
