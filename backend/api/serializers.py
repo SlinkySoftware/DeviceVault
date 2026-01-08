@@ -21,7 +21,7 @@ Includes authentication serializers for login and user profile management.
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from rest_framework import serializers
-from devices.models import DeviceType, Manufacturer, Device
+from devices.models import DeviceType, Manufacturer, Device, CollectionGroup
 from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
@@ -50,6 +50,31 @@ class ManufacturerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Manufacturer
         fields = '__all__'
+
+
+class CollectionGroupSerializer(serializers.ModelSerializer):
+    """
+    Serializes CollectionGroup model with device count
+    
+    Fields:
+        - id: Primary key
+        - name: Collection group name
+        - description: Collection group description
+        - rabbitmq_queue_id: RabbitMQ queue ID for task distribution
+        - device_count: Read-only field showing count of devices in group
+        - created_at: Timestamp when created
+        - updated_at: Timestamp when last updated
+    """
+    device_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = CollectionGroup
+        fields = ['id', 'name', 'description', 'rabbitmq_queue_id', 'device_count', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+    
+    def get_device_count(self, obj):
+        """Return count of devices assigned to this collection group"""
+        return obj.device_count
 
 
 class RetentionPolicySerializer(serializers.ModelSerializer):
@@ -97,10 +122,12 @@ class DeviceSerializer(serializers.ModelSerializer):
     Nested Objects:
         - device_type (DeviceTypeSerializer): Includes icon and name
         - manufacturer (ManufacturerSerializer): Full manufacturer details (optional)
+        - collection_group (CollectionGroupSerializer): Collection group assignment (optional)
         - user_permissions (SerializerMethodField): User's permissions for device's group
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
+    collection_group = CollectionGroupSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     device_group_name = serializers.CharField(source='device_group.name', read_only=True)
     backup_method_display = serializers.SerializerMethodField()
@@ -110,7 +137,7 @@ class DeviceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display', 'device_group', 'device_group_name',
-            'enabled', 'last_backup_time', 'last_backup_status',
+            'collection_group', 'enabled', 'last_backup_time', 'last_backup_status',
             'retention_policy', 'backup_location', 'credential', 'user_permissions'
         ]
     
@@ -121,12 +148,6 @@ class DeviceSerializer(serializers.ModelSerializer):
         if not request or not request.user or not obj.device_group:
             return []
         return list(user_get_device_group_django_permissions(request.user, obj.device_group))
-    
-    def get_backup_method_display(self, obj):
-        """Get friendly name of backup method plugin"""
-        from backups.plugins import get_plugin
-        plugin = get_plugin(obj.backup_method)
-        return plugin.friendly_name if plugin else obj.backup_method
     
     def get_backup_method_display(self, obj):
         """Get friendly name of backup method plugin"""
@@ -469,10 +490,12 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         - device_type (DeviceTypeSerializer): Includes icon and name
         - manufacturer (ManufacturerSerializer): Full manufacturer details
         - device_group (DeviceGroupSerializer): Device group with roles
+        - collection_group (CollectionGroupSerializer): Collection group info
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
     device_group = DeviceGroupSerializer(read_only=True)
+    collection_group = CollectionGroupSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     backup_method_display = serializers.SerializerMethodField()
     
@@ -481,7 +504,7 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display',
-            'device_group', 'enabled', 'last_backup_time',
+            'device_group', 'collection_group', 'enabled', 'last_backup_time',
             'last_backup_status', 'retention_policy', 'backup_location', 'credential',
             'user_permissions'
         ]

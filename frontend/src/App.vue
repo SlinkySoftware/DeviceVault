@@ -152,6 +152,15 @@
             <!-- Application Settings submenu (superuser only) -->
             <q-expansion-item v-if="isSuperuser" icon="settings_applications" label="Application Settings" dense dense-toggle class="submenu-level-1">
               <q-list class="submenu-items">
+                <q-item clickable to="/vaultadmin/collection-groups" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="workspaces" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Collection Groups</q-item-label>
+                  </q-item-section>
+                </q-item>
+
                 <q-item clickable to="/vaultadmin/theme" class="submenu-item">
                   <q-item-section avatar>
                     <q-icon name="palette" size="xs" />

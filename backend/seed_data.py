@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'devicevault.settings')
 django.setup()
 
-from devices.models import DeviceType, Manufacturer, Device, DeviceGroup
+from devices.models import DeviceType, Manufacturer, Device, DeviceGroup, CollectionGroup
 from credentials.models import CredentialType, Credential
 from locations.models import BackupLocation
 from policies.models import RetentionPolicy, BackupSchedule
@@ -214,6 +214,33 @@ def create_sample_data():
         created_groups['Access Layer'].device_set.set(access_devices)
     
     print(f"✓ Assigned devices to groups")
+
+    # --- Collection Groups (for task distribution to workers) ---
+    # Create two collection groups and assign existing devices randomly
+    import random
+
+    cg_secure, _ = CollectionGroup.objects.get_or_create(
+        name='Secure Zone Collectors',
+        defaults={'description': 'Collectors for secure/internal zone', 'rabbitmq_queue_id': 'secure_zone_queue'}
+    )
+    cg_dmz, _ = CollectionGroup.objects.get_or_create(
+        name='DMZ Zone Collectors',
+        defaults={'description': 'Collectors for DMZ/external zone', 'rabbitmq_queue_id': 'dmz_zone_queue'}
+    )
+
+    collectors = [cg_secure, cg_dmz]
+
+    # Assign all existing devices randomly to one of the two collection groups
+    all_devices = list(Device.objects.all())
+    assigned_counts = {cg_secure.id: 0, cg_dmz.id: 0}
+    for dev in all_devices:
+        chosen = random.choice(collectors)
+        dev.collection_group = chosen
+        dev.save(update_fields=['collection_group'])
+        assigned_counts[chosen.id] += 1
+
+    print(f"✓ Created collection groups: '{cg_secure.name}' and '{cg_dmz.name}'")
+    print(f"✓ Assigned {len(all_devices)} devices to collection groups: {assigned_counts}")
     
     print("\n✅ Sample data created successfully!")
     print("\nProduction devices (will be backed up):")

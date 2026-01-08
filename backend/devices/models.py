@@ -30,6 +30,57 @@ from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 
 
+# ===== Collection Group Models =====
+
+class CollectionGroup(models.Model):
+    """
+    CollectionGroup Model: Groups devices for collection task assignment
+    
+    Fields:
+        - name (CharField): Unique collection group name
+        - description (TextField): Description of the collection group's purpose
+        - rabbitmq_queue_id (CharField): RabbitMQ queue ID for task distribution
+        - created_at (DateTimeField): When group was created
+        - updated_at (DateTimeField): When group was last modified
+    
+    Methods:
+        - __str__(): Returns the collection group name
+        - device_count: Property that returns count of devices in this group
+    
+    Usage:
+        Collection groups are used to assign data collection tasks to specific
+        worker processes. Devices are assigned to collection groups, and workers
+        listening on the group's RabbitMQ queue will receive collection tasks.
+    """
+    name = models.CharField(max_length=128, unique=True, help_text='Unique collection group name')
+    description = models.TextField(blank=True, help_text='Description of the collection group purpose')
+    rabbitmq_queue_id = models.CharField(max_length=128, help_text='RabbitMQ queue ID for task distribution')
+    created_at = models.DateTimeField(auto_now_add=True, help_text='When group was created')
+    updated_at = models.DateTimeField(auto_now=True, help_text='When group was last modified')
+    
+    def __str__(self):
+        """Return collection group name for admin display"""
+        return self.name
+    
+    @property
+    def device_count(self):
+        """Return count of devices assigned to this collection group"""
+        return self.devices.count()
+    
+    def save(self, *args, **kwargs):
+        # Ensure name is clean and not padded with whitespace
+        if self.name is not None:
+            self.name = self.name.strip()
+        if self.rabbitmq_queue_id is not None:
+            self.rabbitmq_queue_id = self.rabbitmq_queue_id.strip()
+        super().save(*args, **kwargs)
+    
+    class Meta:
+        verbose_name = 'Collection Group'
+        verbose_name_plural = 'Collection Groups'
+        ordering = ['name']
+
+
 class DeviceType(models.Model):
     """
     DeviceType Model: Represents the category/type of network device
@@ -99,6 +150,7 @@ class Device(models.Model):
     manufacturer = models.ForeignKey(Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)')
     backup_method = models.CharField(max_length=128, default='noop', help_text='Backup plugin key to use for this device')
     device_group = models.ForeignKey('DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control')
+    collection_group = models.ForeignKey('CollectionGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices', help_text='Collection group for task distribution')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
     last_backup_status = models.CharField(max_length=32, blank=True, help_text='Status of last backup: success, failed, pending, etc.')
@@ -425,3 +477,10 @@ def prevent_delete_if_permissions_in_use(sender, instance, **kwargs):
     if link.has_any_holders():
         from django.core.exceptions import ValidationError
         raise ValidationError('Cannot delete device group: related Django permissions are assigned to users or groups.')
+
+@receiver(pre_delete, sender=CollectionGroup)
+def prevent_delete_if_devices_in_collection_group(sender, instance, **kwargs):
+    """Block deletion of collection groups if any devices are assigned to them"""
+    if instance.device_count > 0:
+        from django.core.exceptions import ValidationError
+        raise ValidationError(f'Cannot delete collection group "{instance.name}": {instance.device_count} device(s) are assigned to this group.')

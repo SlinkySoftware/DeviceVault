@@ -75,6 +75,21 @@
             :disable="!canModify"
           />
           
+          <!-- Collection Group -->
+          <q-select
+            v-model="form.collection_group"
+            :options="collectionGroups"
+            option-label="name"
+            option-value="id"
+            label="Collection Group (optional)"
+            outlined
+            emit-value
+            map-options
+            clearable
+            class="field-dropdown"
+            :disable="!canModify"
+          />
+          
           <!-- Device Type -->
           <q-select
             v-model="form.device_type"
@@ -209,6 +224,7 @@ const form = ref({
   backup_location: null,
   retention_policy: null,
   device_group: null,
+  collection_group: null,
   enabled: true,
   last_backup_status: null,
   last_backup_time: null
@@ -222,6 +238,7 @@ const backupLocations = ref([])
 const retentionPolicies = ref([])
 const deviceGroups = ref([])
 const deviceGroupOptions = ref([])
+const collectionGroups = ref([])
 
 const statusColor = computed(() => {
   const status = form.value.last_backup_status
@@ -238,13 +255,14 @@ function formatBackupTime(time) {
 
 async function loadData() {
   try {
-    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp] = await Promise.all([
+    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp, collectionResp] = await Promise.all([
       api.get('/device-types/'),
       api.get('/backup-methods/'),
       api.get('/credentials/'),
       api.get('/backup-locations/'),
       api.get('/retention-policies/'),
-      api.get('/device-groups/')
+      api.get('/device-groups/'),
+      api.get('/collection-groups/')
     ])
     
     deviceTypes.value = typesResp.data
@@ -253,6 +271,7 @@ async function loadData() {
     backupLocations.value = locsResp.data
     retentionPolicies.value = polsResp.data
     deviceGroups.value = groupsResp.data || []
+    collectionGroups.value = collectionResp.data || []
     
     // Filter device groups to only those user can modify (for new devices)
     // For editing, show all groups user has view/modify for (to see which group device belongs to)
@@ -276,6 +295,7 @@ async function loadData() {
         backup_location: data.backup_location ?? null,
         retention_policy: data.retention_policy ?? null,
         device_group: data.device_group?.id ?? null,
+        collection_group: data.collection_group?.id ?? null,
         enabled: data.enabled ?? true,
         last_backup_status: data.last_backup_status ?? null,
         last_backup_time: data.last_backup_time ?? null

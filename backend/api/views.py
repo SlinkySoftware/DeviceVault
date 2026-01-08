@@ -25,7 +25,7 @@ from django.contrib.auth import authenticate
 from django.db.models import Count, Avg
 from django.utils import timezone
 from datetime import timedelta
-from devices.models import DeviceType, Manufacturer, Device
+from devices.models import DeviceType, Manufacturer, Device, CollectionGroup
 from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
@@ -41,7 +41,7 @@ from devices.permissions import user_has_device_group_permission, user_get_devic
 from .serializers import (
     DeviceTypeSerializer, ManufacturerSerializer, DeviceSerializer,
     BackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
-    CredentialSerializer, CredentialTypeSerializer,
+    CredentialSerializer, CredentialTypeSerializer, CollectionGroupSerializer,
     UserSerializer, AuditLogSerializer,
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
     UserProfileSerializer, BackupScheduleSerializer, GroupSerializer,
@@ -53,9 +53,42 @@ import difflib, os
 class DeviceTypeViewSet(viewsets.ModelViewSet):
     queryset = DeviceType.objects.all()
     serializer_class = DeviceTypeSerializer
+
+
 class ManufacturerViewSet(viewsets.ModelViewSet):
     queryset = Manufacturer.objects.all()
     serializer_class = ManufacturerSerializer
+
+
+class CollectionGroupViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing collection groups
+    
+    Features:
+    - Restricted to superuser only for all operations
+    - Prevents deletion of collection groups that have devices assigned
+    - Returns device count for each collection group
+    
+    Permissions:
+    - Only superuser/staff users can access this endpoint
+    """
+    queryset = CollectionGroup.objects.all()
+    serializer_class = CollectionGroupSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def check_permissions(self, request):
+        """Override to enforce superuser-only access"""
+        super().check_permissions(request)
+        if not (request.user.is_staff or request.user.is_superuser):
+            self.permission_denied(request, message="Only superusers can manage collection groups")
+    
+    def perform_destroy(self, instance):
+        """Prevent deletion if any devices are assigned to this collection group"""
+        if instance.device_count > 0:
+            from django.core.exceptions import ValidationError
+            raise ValidationError(f'Cannot delete collection group "{instance.name}": {instance.device_count} device(s) are assigned to this group.')
+        instance.delete()
+
 
 
 class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
