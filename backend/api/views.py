@@ -46,7 +46,8 @@ from .serializers import (
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
     UserProfileSerializer, BackupScheduleSerializer, GroupSerializer,
     DeviceGroupSerializer, DeviceGroupRoleSerializer, DeviceGroupPermissionSerializer,
-    UserDeviceGroupRoleSerializer, GroupDeviceGroupRoleSerializer, DeviceDetailedSerializer
+    UserDeviceGroupRoleSerializer, GroupDeviceGroupRoleSerializer, DeviceDetailedSerializer,
+    DeviceBackupResultSerializer
 )
 import difflib, os
 
@@ -123,6 +124,95 @@ class DeviceViewSet(viewsets.ModelViewSet):
             
             if not user_has_device_group_permission(self.request.user, instance.device_group, 'delete_device'):
                 raise serializers.ValidationError("You do not have permission to delete devices in this group")
+    
+    @decorators.action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def trigger_collection(self, request, pk=None):
+        """
+        Trigger a Celery device collection task for this device.
+        
+        This endpoint enqueues a device_collect_task to the appropriate
+        queue based on the device's collection_group assignment.
+        
+        Request body (optional):
+            {
+                "timeout": 30  # Collection timeout in seconds (default: 30)
+            }
+        
+        Response:
+            {
+                "task_id": "celery-uuid",
+                "status": "pending",
+                "device_id": 5,
+                "queue": "collector.default" or "collector.group.<name>"
+            }
+        
+        Permissions:
+            - Staff/superuser: always allowed
+            - Other users: requires 'modify_device' permission on device's group
+        """
+        import json
+        from celery_app import device_collect_task
+        
+        device = self.get_object()
+        
+        # Check permissions for non-staff users
+        if not request.user.is_staff and not request.user.is_superuser:
+            if device.device_group:
+                if not user_has_device_group_permission(request.user, device.device_group, 'modify_device'):
+                    return response.Response(
+                        {'detail': 'You do not have permission to trigger collections on this device'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+        
+        # Validate device has credentials and backup method
+        if not device.credential:
+            return response.Response(
+                {'detail': 'Device has no credential configured'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if device.backup_method == 'noop' and not device.is_example_data:
+            return response.Response(
+                {'detail': 'Device is using noop backup method (demo devices only)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Build collection config
+        timeout = request.data.get('timeout', 30) if request.data else 30
+        config = {
+            'ip': device.ip_address,
+            'username': device.credential.data.get('username'),
+            'password': device.credential.data.get('password'),
+            'timeout': timeout,
+        }
+        config_json = json.dumps(config)
+        
+        # Determine queue based on collection group
+        queue = None
+        collection_group_name = None
+        if device.collection_group:
+            queue = device.collection_group.queue_name
+            collection_group_name = device.collection_group.name
+        
+        # Enqueue task with optional queue override
+        if queue:
+            task = device_collect_task.apply_async(
+                args=[device.id, config_json, collection_group_name],
+                queue=queue,
+                task_id=None  # Let Celery generate task_id
+            )
+        else:
+            task = device_collect_task.apply_async(
+                args=[device.id, config_json, None]
+            )
+        
+        return response.Response({
+            'task_id': task.id,
+            'status': 'pending',
+            'device_id': device.id,
+            'queue': queue or 'collector.default'
+        }, status=status.HTTP_202_ACCEPTED)
+
 class BackupViewSet(viewsets.ModelViewSet):
     queryset = Backup.objects.all()
     serializer_class = BackupSerializer
@@ -142,6 +232,51 @@ class CredentialTypeViewSet(viewsets.ModelViewSet):
     queryset = CredentialType.objects.all()
     serializer_class = CredentialTypeSerializer
 
+class DeviceBackupResultViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only ViewSet for querying device collection task results.
+    
+    Endpoints:
+    - GET /device-backup-results/ - List all collection results (paginated)
+    - GET /device-backup-results/{id}/ - Get specific collection result
+    
+    Filtering:
+    - ?device_id=5 - Filter by device
+    - ?task_id=celery-uuid - Filter by task UUID
+    - ?status=success - Filter by task status
+    
+    Usage:
+        After triggering a collection via device.trigger_collection, query
+        this endpoint to get the task result, logs, and completion status.
+    """
+    queryset = None  # Set in __init__ to avoid model import at module level
+    serializer_class = DeviceBackupResultSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['device_id', 'task_id', 'status']
+    ordering = ['-timestamp']
+    ordering_fields = ['timestamp', 'status']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Import at runtime to avoid circular imports
+        from devices.models import DeviceBackupResult
+        self.queryset = DeviceBackupResult.objects.all()
+    
+    def get_queryset(self):
+        """Filter results based on user's device group access"""
+        from devices.permissions import user_get_accessible_device_groups
+        
+        user = self.request.user
+        
+        # Import here to avoid circular imports
+        from devices.models import DeviceBackupResult
+        
+        if user.is_staff or user.is_superuser:
+            return DeviceBackupResult.objects.all()
+        
+        # Filter to only results for devices in groups the user can access
+        accessible_groups = user_get_accessible_device_groups(user)
+        return DeviceBackupResult.objects.filter(device__device_group__in=accessible_groups)
 class GroupViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing user groups with label assignments

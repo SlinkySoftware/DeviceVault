@@ -30,6 +30,64 @@ from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 
 
+class CollectionGroup(models.Model):
+    """
+    CollectionGroup Model: Defines task routing groups for distributed collection workers.
+    
+    Devices can be assigned to a collection group to route their backup tasks to
+    specific worker nodes or queues. This enables:
+    - Geographically distributed collectors
+    - Specialized workers for different device types
+    - Rate limiting per collection endpoint
+    
+    Fields:
+        - name (CharField): Unique collection group name (e.g., "us-west-collectors")
+        - description (TextField): Purpose and scope of this collector group
+        - queue_name (CharField): Celery queue name (e.g., "collector.group.us-west")
+        - created_at (DateTimeField): When group was created
+        - updated_at (DateTimeField): When group was last modified
+    
+    Routing:
+        When a device has a collection_group assigned, device.collect tasks are routed to
+        the queue: "collector.group.<group_name>"
+        If collection_group is NULL, tasks route to "collector.default" (any available worker)
+    
+    Usage:
+        1. Create collection groups in Django admin or via API
+        2. Assign devices to collection groups
+        3. Start Celery workers bound to specific queues
+           Example: celery -A devicevault worker -Q collector.group.us-west
+    """
+    name = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text='Unique collection group identifier (e.g., us-west-collectors)'
+    )
+    description = models.TextField(
+        blank=True,
+        help_text='Description of this collector group purpose and scope'
+    )
+    queue_name = models.CharField(
+        max_length=128,
+        default='',
+        blank=True,
+        help_text='Celery queue name (auto-derived from name if blank)'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name
+    
+    def save(self, *args, **kwargs):
+        if not self.queue_name:
+            self.queue_name = f"collector.group.{self.name.lower().replace(' ', '_')}"
+        super().save(*args, **kwargs)
+
+
 class DeviceType(models.Model):
     """
     DeviceType Model: Represents the category/type of network device
@@ -101,6 +159,7 @@ class Device(models.Model):
     manufacturer = models.ForeignKey(Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)')
     backup_method = models.CharField(max_length=128, default='noop', help_text='Backup plugin key to use for this device')
     device_group = models.ForeignKey('DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control')
+    collection_group = models.ForeignKey('CollectionGroup', on_delete=models.SET_NULL, null=True, blank=True, help_text='Collection group for task routing (routes to collector.group.<name> queue)')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
     is_example_data = models.BooleanField(default=False, help_text='Mark as example/demo data to exclude from backups')
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
@@ -396,3 +455,112 @@ def prevent_delete_if_permissions_in_use(sender, instance, **kwargs):
     if link.has_any_holders():
         from django.core.exceptions import ValidationError
         raise ValidationError('Cannot delete device group: related Django permissions are assigned to users or groups.')
+
+
+class DeviceBackupResult(models.Model):
+    """
+    DeviceBackupResult Model: Records the result of a Celery device backup collection task.
+    
+    This model stores metadata about backup collection tasks executed via Celery.
+    Device configurations are stored externally (filesystem, S3, etc.) and referenced
+    via task_identifier for later retrieval.
+    
+    Fields:
+        - task_id (CharField): Celery task UUID for tracing and lookup
+        - task_identifier (CharField): Unique identifier combining device_id and task_id
+                                       Used to retrieve device_config from external storage
+        - device (ForeignKey): The device that was backed up
+        - status (CharField): Task result status (success, failure, pending, revoked)
+        - timestamp (DateTimeField): When task completed
+        - log (TextField): JSON-serialized list of log messages from collection process
+    
+    Indices:
+        - task_id: For rapid lookup by Celery task UUID
+        - task_identifier: For retrieving device config via external storage lookup
+        - device: For querying all collection results for a device
+    
+    Usage:
+        Created by device_collect_task in celery_app.py after collection completes.
+        Device configurations are stored separately via FileSystemStorage or cloud storage.
+        The task_identifier field enables later retrieval: e.g., query by task_identifier,
+        retrieve device_config from storage using that identifier.
+    
+    Example flow:
+        1. device_collect_task(device_id=5) runs
+        2. Plugin collects config from device
+        3. Config saved to storage at path: backups/device_name/method/type/5.cfg
+        4. DeviceBackupResult created with task_identifier="5:celery-uuid"
+        5. Later, app queries DeviceBackupResult.objects.get(task_identifier="5:celery-uuid")
+        6. Uses storage to fetch config: load(identifier) -> reads from file system
+    """
+    task_id = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text='Celery task UUID for tracing'
+    )
+    task_identifier = models.CharField(
+        max_length=128,
+        db_index=True,
+        help_text='Unique identifier for external device_config lookup: device_id:task_id'
+    )
+    device = models.ForeignKey(
+        Device,
+        on_delete=models.CASCADE,
+        db_index=True,
+        related_name='backup_results',
+        help_text='Device that was backed up'
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=[
+            ('success', 'Success'),
+            ('failure', 'Failure'),
+            ('pending', 'Pending'),
+            ('revoked', 'Revoked'),
+        ],
+        help_text='Collection task status'
+    )
+    timestamp = models.DateTimeField(
+        help_text='When collection task completed'
+    )
+    log = models.TextField(
+        help_text='JSON-serialized list of log messages'
+    )
+    
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name_plural = 'Device Backup Results'
+        indexes = [
+            models.Index(fields=['task_id']),
+            models.Index(fields=['task_identifier']),
+            models.Index(fields=['device']),
+            models.Index(fields=['-timestamp']),
+        ]
+    
+    def __str__(self):
+        return f"{self.device.name} @ {self.timestamp} ({self.status})"
+    
+    def get_log(self):
+        """Parse and return log as list of strings."""
+        import json
+        try:
+            return json.loads(self.log) if self.log else []
+        except json.JSONDecodeError:
+            return [self.log] if self.log else []
+    
+    def get_device_config_ref(self):
+        """
+        Retrieve device configuration reference from external storage.
+        
+        The device_config is not stored in the ORM. To retrieve it:
+        1. Query DeviceBackupResult by task_identifier
+        2. Use the task_identifier to construct storage path
+        3. Read from FileSystemStorage, S3, etc.
+        
+        Returns:
+            Storage reference path/identifier (e.g., backups/device_name/method/type/id.cfg)
+        """
+        # Storage path convention: backups/<device_name>/<method>/<type>/<device_id>.cfg
+        device = self.device
+        return f"backups/{device.name}/{device.backup_method}/{device.device_type.name}/{device.id}.cfg"
+

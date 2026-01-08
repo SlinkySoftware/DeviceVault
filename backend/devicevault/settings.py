@@ -22,7 +22,8 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 INSTALLED_APPS = [
  'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes','django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
- 'rest_framework','rest_framework.authtoken','corsheaders','dv_user','dv_devices','dv_backups','core','devices','backups','credentials','locations','policies','audit','api'
+ 'rest_framework','rest_framework.authtoken','corsheaders','dv_user','dv_devices','dv_backups','core','devices','backups','credentials','locations','policies','audit','api',
+ 'django_celery_beat','django_celery_results'
 ]
 MIDDLEWARE = ['corsheaders.middleware.CorsMiddleware','django.middleware.security.SecurityMiddleware','django.contrib.sessions.middleware.SessionMiddleware','django.middleware.common.CommonMiddleware','django.middleware.csrf.CsrfViewMiddleware','django.contrib.auth.middleware.AuthenticationMiddleware','django.contrib.messages.middleware.MessageMiddleware','django.middleware.clickjacking.XFrameOptionsMiddleware']
 ROOT_URLCONF = 'devicevault.urls'
@@ -59,3 +60,46 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated'
     ]
 }
+
+# ===== CELERY CONFIGURATION =====
+# Celery broker and result backend configuration
+# Development: Redis on localhost:6379
+# Production: Configure via CELERY_BROKER_URL environment variable
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/1')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 min hard limit per task
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 min soft limit (raise SoftTimeLimitExceeded)
+
+# Task routing configuration
+# Tasks are routed to queues based on device collection groups
+CELERY_TASK_ROUTES = {
+    'device.collect': {'queue': 'collector.default'},
+    'device.collect.stale': {'queue': 'collector.default'},
+    'scheduling.list_pending': {'queue': 'scheduler'},
+}
+
+# Default task queue for tasks not explicitly routed
+CELERY_DEFAULT_QUEUE = 'collector.default'
+
+# Queue definitions
+# Each queue can have its own concurrency limit, prefetch count, etc.
+CELERY_QUEUES = {
+    'collector.default': {
+        'exchange': 'collector',
+        'routing_key': 'collector.default',
+    },
+    'scheduler': {
+        'exchange': 'scheduler',
+        'routing_key': 'scheduler',
+    },
+}
+
+# Celery Beat scheduler for periodic tasks
+# Configure periodic device collection schedule in code or database
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+

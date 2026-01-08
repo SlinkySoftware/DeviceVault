@@ -18,35 +18,62 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from typing import Dict
+import socket
 
 import paramiko
 
-from .base import BackupPlugin
+from .base import BackupPlugin, CollectorAuthException, CollectorTimeoutException, CollectorPluginException
 
 
 def _export_config(ip_address: str, credentials: Dict) -> str:
+    """
+    Execute /export show-sensitive on RouterOS via SSH.
+    
+    Raises:
+        CollectorAuthException: If SSH authentication fails
+        CollectorTimeoutException: If connection or command times out
+        CollectorPluginException: If device command execution fails
+    """
     username = credentials.get('username')
     password = credentials.get('password')
+    timeout = credentials.get('timeout', 30)
+    
     if not username or not password:
-        raise ValueError('Mikrotik SSH plugin requires username and password credentials')
+        raise CollectorAuthException('Mikrotik SSH plugin requires username and password credentials')
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
-        client.connect(
-            hostname=ip_address,
-            username=username,
-            password=password,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=10,
-        )
-        _, stdout, stderr = client.exec_command('/export show-sensitive')
-        output = stdout.read().decode('utf-8', errors='ignore')
-        error_text = stderr.read().decode('utf-8', errors='ignore')
+        try:
+            client.connect(
+                hostname=ip_address,
+                username=username,
+                password=password,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=timeout,
+            )
+        except socket.timeout:
+            raise CollectorTimeoutException(f'SSH connection to {ip_address} timed out after {timeout}s')
+        except paramiko.AuthenticationException as e:
+            raise CollectorAuthException(f'SSH authentication failed for {ip_address}: {str(e)}')
+        except paramiko.SSHException as e:
+            raise CollectorPluginException(f'SSH error: {str(e)}')
+        except OSError as e:
+            raise CollectorPluginException(f'Network error connecting to {ip_address}: {str(e)}')
+        
+        # Execute export command with timeout
+        try:
+            _, stdout, stderr = client.exec_command('/export show-sensitive', timeout=timeout)
+            output = stdout.read().decode('utf-8', errors='ignore')
+            error_text = stderr.read().decode('utf-8', errors='ignore')
+        except socket.timeout:
+            raise CollectorTimeoutException(f'Export command execution timed out after {timeout}s')
+        
         if error_text.strip():
-            raise RuntimeError(f'Mikrotik export returned error: {error_text.strip()}')
+            raise CollectorPluginException(f'Mikrotik export returned error: {error_text.strip()}')
+        
         return output
     finally:
         try:

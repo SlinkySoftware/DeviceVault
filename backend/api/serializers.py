@@ -134,6 +134,46 @@ class DeviceSerializer(serializers.ModelSerializer):
         plugin = get_plugin(obj.backup_method)
         return plugin.friendly_name if plugin else obj.backup_method
 
+class DeviceBackupResultSerializer(serializers.ModelSerializer):
+    """
+    Serializes DeviceBackupResult model for API responses.
+    
+    Represents a completed device collection task with metadata:
+    - task_id: Celery task UUID for tracking
+    - task_identifier: Stable ID for external storage reference (device_id:task_id)
+    - status: Task result (success/failure/pending/revoked)
+    - log: JSON list of operation messages
+    
+    Device configuration is NOT included; must be retrieved from external storage
+    using task_identifier.
+    
+    Example response:
+    {
+        "id": 42,
+        "task_id": "abc123def456",
+        "task_identifier": "5:abc123def456",
+        "device": 5,
+        "status": "success",
+        "timestamp": "2026-01-08T10:15:43.456Z",
+        "log": ["[Lock] Acquired...", "[Plugin] Using...", ...]
+    }
+    """
+    log = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = None  # Will be imported at runtime
+        fields = ['id', 'task_id', 'task_identifier', 'device', 'status', 'timestamp', 'log']
+        read_only_fields = ['id', 'task_id', 'task_identifier', 'timestamp']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Import at runtime to avoid circular imports
+        from devices.models import DeviceBackupResult
+        self.Meta.model = DeviceBackupResult
+    
+    def get_log(self, obj):
+        """Parse JSON log field and return as list"""
+        return obj.get_log()
 
 class BackupSerializer(serializers.ModelSerializer):
     """Serializes Backup model for API responses"""

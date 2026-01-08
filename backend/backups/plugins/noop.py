@@ -23,6 +23,10 @@ from .base import BackupPlugin
 
 
 def _noop_export(ip_address: str, credentials: Dict) -> str:
+    """
+    No-op collector: returns empty configuration.
+    Used for demo and test devices that should not trigger real backups.
+    """
     return ''
 
 
