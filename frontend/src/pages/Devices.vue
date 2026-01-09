@@ -385,8 +385,9 @@ async function toggleEnabled(device) {
  */
 async function backupNow(device) {
   try {
-    await api.post(`/devices/${device.id}/backup_now/`)
-    $q.notify({ type: 'positive', message: 'Backup started' })
+    const resp = await api.post(`/devices/${device.id}/collect/`)
+    const queuedOn = resp.data && resp.data.queued_on ? resp.data.queued_on : 'default'
+    $q.notify({ type: 'positive', message: `Backup queued on ${queuedOn}` })
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to start backup' })
   }

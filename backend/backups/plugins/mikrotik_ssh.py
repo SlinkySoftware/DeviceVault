@@ -17,18 +17,39 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from typing import Dict
+from typing import Dict, Any, Optional
 
 import paramiko
+from datetime import datetime
 
 from .base import BackupPlugin
 
 
-def _export_config(ip_address: str, credentials: Dict) -> str:
+def _mask_credentials(creds: Dict) -> Dict:
+    c = dict(creds or {})
+    if 'password' in c and c['password']:
+        c['password'] = '****'
+    return c
+
+
+def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dict[str, Any]:
+    """New collector contract: accepts a config dict and optional timeout.
+
+    Expected config keys: ip (str), credentials (dict)
+    """
+    ip_address = config.get('ip') or config.get('ip_address')
+    credentials = config.get('credentials') or {}
+
     username = credentials.get('username')
     password = credentials.get('password')
     if not username or not password:
-        raise ValueError('Mikrotik SSH plugin requires username and password credentials')
+        return {
+            'task_id': None,
+            'status': 'failure',
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'log': ['missing username or password in credentials'],
+            'device_config': None
+        }
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -40,14 +61,34 @@ def _export_config(ip_address: str, credentials: Dict) -> str:
             password=password,
             look_for_keys=False,
             allow_agent=False,
-            timeout=10,
+            timeout=timeout or 10,
         )
         _, stdout, stderr = client.exec_command('/export show-sensitive')
         output = stdout.read().decode('utf-8', errors='ignore')
         error_text = stderr.read().decode('utf-8', errors='ignore')
         if error_text.strip():
-            raise RuntimeError(f'Mikrotik export returned error: {error_text.strip()}')
-        return output
+            return {
+                'task_id': None,
+                'status': 'failure',
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'log': [f'Mikrotik export returned error: {error_text.strip()}'],
+                'device_config': None
+            }
+        return {
+            'task_id': None,
+            'status': 'success',
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'log': [f'connected as {username}', f'credentials: { _mask_credentials(credentials) }'],
+            'device_config': output
+        }
+    except Exception as exc:
+        return {
+            'task_id': None,
+            'status': 'failure',
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'log': [f'connection_failed: {repr(exc)}'],
+            'device_config': None
+        }
     finally:
         try:
             client.close()

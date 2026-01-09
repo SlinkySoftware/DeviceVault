@@ -48,6 +48,9 @@ from .serializers import (
     DeviceGroupSerializer, DeviceGroupRoleSerializer, DeviceGroupPermissionSerializer,
     UserDeviceGroupRoleSerializer, GroupDeviceGroupRoleSerializer, DeviceDetailedSerializer
 )
+import json
+from celery_app import app as celery_app
+from devicevault_worker import collection_queue_name_from_group
 import difflib, os
 
 class DeviceTypeViewSet(viewsets.ModelViewSet):
@@ -162,13 +165,66 @@ class DeviceViewSet(viewsets.ModelViewSet):
         from devices.permissions import user_has_device_group_django_permission
         if not user_has_device_group_django_permission(request.user, device.device_group, 'backup_now'):
             return response.Response({ 'error': 'Not authorized for Backup Now on this device group' }, status=status.HTTP_403_FORBIDDEN)
-        # Execute backup synchronously
+
+        # Enqueue backup task via Celery (orchestrator workers will perform the work)
+        cfg = {
+            'device_id': device.id,
+            'task_identifier': f'backup_now:{device.id}:{timezone.now().isoformat()}',
+            'ip': device.ip_address,
+            'credentials': device.credential.data if device.credential else {},
+            'backup_method': device.backup_method,
+            'plugin_params': {},
+            'timeout': 240
+        }
+
+        queue = None
+        if device.collection_group:
+            queue_name = collection_queue_name_from_group(device.collection_group)
+            if queue_name:
+                queue = queue_name
+
         try:
-            from devicevault_worker import run_backup
-            run_backup(device)
-            return response.Response({ 'status': 'started' }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return response.Response({ 'error': str(e) }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            task = celery_app.send_task('device.collect', args=[json.dumps(cfg)], queue=queue)
+            return response.Response({'task_id': task.id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
+        except Exception as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @decorators.action(detail=True, methods=['post'])
+    def collect(self, request, pk=None):
+        """Enqueue a collection task for this device.
+
+        Routing: If device.collection_group is set, the task will be queued to
+        the group's queue (collector.group.<rabbitmq_queue_id>); otherwise the
+        default broker routing will be used.
+        """
+        device = self.get_object()
+        # Permission check - reuse existing RBAC for 'backup_now'
+        from devices.permissions import user_has_device_group_django_permission
+        if device.device_group and not user_has_device_group_django_permission(request.user, device.device_group, 'backup_now') and not request.user.is_superuser:
+            return response.Response({'error': 'Not authorized to start backup for this device'}, status=status.HTTP_403_FORBIDDEN)
+
+        cfg = {
+            'device_id': device.id,
+            'task_identifier': f'collect:{device.id}:{timezone.now().isoformat()}',
+            'ip': device.ip_address,
+            'credentials': device.credential.data if device.credential else {},
+            'backup_method': device.backup_method,
+            'plugin_params': {},
+            'timeout': 240
+        }
+
+        queue = None
+        if device.collection_group:
+            queue_name = collection_queue_name_from_group(device.collection_group)
+            if queue_name:
+                queue = queue_name
+
+        # Use send_task to set routing dynamically
+        try:
+            task = celery_app.send_task('device.collect', args=[json.dumps(cfg)], queue=queue)
+            return response.Response({'task_id': task.id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
+        except Exception as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 class BackupViewSet(viewsets.ModelViewSet):
     queryset = Backup.objects.all()
     serializer_class = BackupSerializer

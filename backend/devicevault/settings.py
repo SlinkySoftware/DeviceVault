@@ -59,3 +59,23 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated'
     ]
 }
+
+# Celery configuration: prefer explicit env var, then config.yaml 'celery' section, then sensible defaults
+CELERY_BROKER_URL = os.environ.get(
+    'DEVICEVAULT_BROKER_URL',
+    cfg.get('celery', {}).get('broker', 'amqp://guest:guest@localhost:5672//')
+)
+DEVICEVAULT_REDIS_URL = os.environ.get(
+    'DEVICEVAULT_REDIS_URL',
+    cfg.get('redis', {}).get('url', 'redis://localhost:6379/1')
+)
+CELERY_RESULT_BACKEND = os.environ.get(
+    'DEVICEVAULT_RESULT_BACKEND',
+    cfg.get('celery', {}).get('result_backend', DEVICEVAULT_REDIS_URL)
+)
+# RabbitMQ management API for Flower - uses HTTP port (15672 by default)
+CELERY_BROKER_API = os.environ.get(
+    'DEVICEVAULT_BROKER_API',
+    cfg.get('celery', {}).get('broker_api', 'http://guest:guest@localhost:15672/api/')
+)
+DEVICEVAULT_RESULTS_STREAM = cfg.get('results_stream', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results'))

@@ -163,6 +163,29 @@ class Device(models.Model):
         return self.name
 
 
+class DeviceBackupResult(models.Model):
+    """
+    Stores the result metadata for a device backup collection task.
+
+    Note: The raw device configuration is NOT stored here; this model stores
+    references / tracing information. The `task_identifier` is intended to be
+    a logical identifier for the backup job so storage backends can retrieve
+    the actual device_config artifact if necessary.
+    """
+    task_id = models.CharField(max_length=64, db_index=True)
+    task_identifier = models.CharField(max_length=128, db_index=True)
+    device = models.ForeignKey('Device', on_delete=models.CASCADE, db_index=True)
+    status = models.CharField(max_length=16)
+    timestamp = models.DateTimeField()
+    log = models.TextField(help_text='JSON serialized list of log messages')
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.task_identifier} @ {self.device.name} -> {self.status}"
+
+
 # ===== Device Group RBAC Models =====
 
 class DeviceGroup(models.Model):
