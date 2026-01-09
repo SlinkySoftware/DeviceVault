@@ -65,6 +65,7 @@ class Command(BaseCommand):
                         # Idempotency: skip if task_identifier already persisted
                         if task_identifier and DeviceBackupResult.objects.filter(task_identifier=task_identifier).exists():
                             r.xack(stream, group, msg_id)
+                            self.stdout.write(f'Skipped idempotent message: {task_identifier}')
                             continue
 
                         try:
@@ -72,8 +73,22 @@ class Command(BaseCommand):
                             if device_id:
                                 try:
                                     device_obj = Device.objects.get(pk=int(device_id))
-                                except Exception:
-                                    device_obj = None
+                                except Device.DoesNotExist:
+                                    self.stderr.write(self.style.WARNING(f'Device {device_id} not found, skipping message {msg_id}'))
+                                    # Still acknowledge the message to prevent reprocessing
+                                    r.xack(stream, group, msg_id)
+                                    continue
+                                except Exception as exc:
+                                    self.stderr.write(self.style.ERROR(f'Error looking up device {device_id}: {exc}'))
+                                    # Still acknowledge to prevent infinite retries
+                                    r.xack(stream, group, msg_id)
+                                    continue
+
+                            if not device_obj:
+                                self.stderr.write(self.style.WARNING(f'No device specified in message {msg_id}, skipping'))
+                                # Still acknowledge
+                                r.xack(stream, group, msg_id)
+                                continue
 
                             DeviceBackupResult.objects.create(
                                 task_id=task_id or '',
@@ -85,8 +100,11 @@ class Command(BaseCommand):
                             )
 
                             r.xack(stream, group, msg_id)
+                            self.stdout.write(self.style.SUCCESS(f'Persisted result for device {device_id}: {task_identifier}'))
                         except Exception as exc:
-                            self.stderr.write(f'Failed to persist message {msg_id}: {exc}')
+                            self.stderr.write(self.style.ERROR(f'Failed to persist message {msg_id}: {exc}'))
+                            # Still acknowledge to prevent getting stuck on bad messages
+                            r.xack(stream, group, msg_id)
             except Exception as exc:
                 self.stderr.write(f'Error reading stream: {exc}')
                 time.sleep(1)
