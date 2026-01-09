@@ -131,6 +131,8 @@ class DeviceSerializer(serializers.ModelSerializer):
     user_permissions = serializers.SerializerMethodField()
     device_group_name = serializers.CharField(source='device_group.name', read_only=True)
     backup_method_display = serializers.SerializerMethodField()
+    last_backup_time = serializers.SerializerMethodField()
+    last_backup_status = serializers.SerializerMethodField()
     
     class Meta:
         model = Device
@@ -154,6 +156,12 @@ class DeviceSerializer(serializers.ModelSerializer):
         from backups.plugins import get_plugin
         plugin = get_plugin(obj.backup_method)
         return plugin.friendly_name if plugin else obj.backup_method
+
+    def get_last_backup_time(self, obj):
+        return getattr(obj, 'last_success_time', None) or obj.last_backup_time
+
+    def get_last_backup_status(self, obj):
+        return getattr(obj, 'last_success_status', None) or obj.last_backup_status
 
 
 class BackupSerializer(serializers.ModelSerializer):
@@ -498,6 +506,8 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     collection_group = CollectionGroupSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     backup_method_display = serializers.SerializerMethodField()
+    last_backup_time = serializers.SerializerMethodField()
+    last_backup_status = serializers.SerializerMethodField()
     
     class Meta:
         model = Device
@@ -522,6 +532,12 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         from backups.plugins import get_plugin
         plugin = get_plugin(obj.backup_method)
         return plugin.friendly_name if plugin else obj.backup_method
+
+    def get_last_backup_time(self, obj):
+        return getattr(obj, 'last_success_time', None) or obj.last_backup_time
+
+    def get_last_backup_status(self, obj):
+        return getattr(obj, 'last_success_status', None) or obj.last_backup_status
 
 class ThemeSettingsSerializer(serializers.ModelSerializer):
     """Serializes ThemeSettings model for API responses"""

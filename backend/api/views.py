@@ -22,10 +22,10 @@ from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from django.contrib.auth.models import User, Permission
 from django.contrib.auth import authenticate
-from django.db.models import Count, Avg
+from django.db.models import Count, Avg, F, Q, Prefetch, OuterRef, Subquery
 from django.utils import timezone
 from datetime import timedelta
-from devices.models import DeviceType, Manufacturer, Device, CollectionGroup
+from devices.models import DeviceType, Manufacturer, Device, CollectionGroup, DeviceBackupResult
 from backups.models import Backup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
@@ -137,13 +137,25 @@ class DeviceViewSet(viewsets.ModelViewSet):
         return DeviceSerializer
     
     def get_queryset(self):
-        """Filter devices based on user's Django permissions for device groups"""
+        """Filter devices based on user's Django permissions for device groups and annotate last successful backup."""
         from devices.permissions import user_get_accessible_device_groups
+
+        latest_success = DeviceBackupResult.objects.filter(
+            device=OuterRef('pk'),
+            status='success'
+        ).order_by('-timestamp')
+
+        annotated = Device.objects.annotate(
+            last_success_time=Subquery(latest_success.values('timestamp')[:1]),
+            last_success_status=Subquery(latest_success.values('status')[:1]),
+        )
+
         user = self.request.user
         if user.is_staff or user.is_superuser:
-            return Device.objects.all()
+            return annotated
+
         accessible_groups = user_get_accessible_device_groups(user)
-        return Device.objects.filter(device_group__in=accessible_groups)
+        return annotated.filter(device_group__in=accessible_groups)
     
     def perform_destroy(self, instance):
         """Check delete permission before deleting"""

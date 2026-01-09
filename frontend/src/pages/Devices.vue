@@ -176,6 +176,8 @@ const deviceTypes = ref([])
  */
 const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
 
+const formatLastBackup = (value) => (value ? new Date(value).toLocaleString() : 'N/A')
+
 /**
  * Table Column Configuration
  * 
@@ -197,7 +199,7 @@ const columns = [
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left', sortable: true },
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'backup_method', label: 'Backup Method', field: 'backup_method_display', align: 'left', sortable: true },
-  { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left', sortable: true },
+  { name: 'last_backup_time', label: 'Last Backup', field: row => formatLastBackup(row.last_backup_time), align: 'left', sortable: true },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center', sortable: true },
   { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center', sortable: true },
   { name: 'actions', label: 'Actions', align: 'right' }
