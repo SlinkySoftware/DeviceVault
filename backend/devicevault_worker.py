@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import os
 import json
 import logging
+import time
 from datetime import datetime
 
 # Celery + Django integration for distributed collection
@@ -120,15 +121,23 @@ def device_collect_task(self, config_json: str) -> dict:
 
         logger.info('starting_collection', extra={'device_id': device_id, 'plugin': plugin_key, 'queue': self.request.delivery_info.get('routing_key') if hasattr(self, 'request') and getattr(self.request, 'delivery_info', None) else None})
 
+        # Capture start time for execution duration
+        collection_start_ms = int(time.time() * 1000)
+        
         result = plugin.run(plugin_cfg, timeout=timeout)
+        
+        # Capture end time and calculate duration
+        collection_end_ms = int(time.time() * 1000)
+        collection_duration_ms = collection_end_ms - collection_start_ms
 
         # Ensure result is a dict
         if not isinstance(result, dict):
             result = {'task_id': None, 'status': 'failure', 'timestamp': datetime.utcnow().isoformat() + 'Z', 'log': ['invalid_plugin_result'], 'device_config': None}
 
-        # Populate task_id
+        # Populate task_id and timing
         tid = getattr(self.request, 'id', None)
         result['task_id'] = tid
+        result['collection_duration_ms'] = collection_duration_ms
 
         # Worker does NOT persist results or touch the DB — orchestrator is responsible.
         # Log a structured summary for observability and publish the result to a Redis Stream
@@ -137,6 +146,7 @@ def device_collect_task(self, config_json: str) -> dict:
             'task_identifier': task_identifier,
             'device_id': device_id,
             'status': result.get('status'),
+            'collection_duration_ms': collection_duration_ms,
         })
 
         # Publish to Redis Stream for orchestrator consumption. Keep payload small and JSON-serializable.
@@ -147,7 +157,9 @@ def device_collect_task(self, config_json: str) -> dict:
                 'device_id': str(device_id) if device_id is not None else '',
                 'status': result.get('status', ''),
                 'log': json.dumps(result.get('log', [])),
-                'device_config': result.get('device_config') or ''
+                'device_config': result.get('device_config') or '',
+                'collection_duration_ms': str(collection_duration_ms),
+                'initiated_at': cfg.get('initiated_at', ''),
             }
             # redis-py requires mapping values to be bytes/str
             redis_client.xadd(RESULTS_STREAM, payload)

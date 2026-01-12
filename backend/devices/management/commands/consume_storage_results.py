@@ -62,6 +62,7 @@ class Command(BaseCommand):
                         storage_backend = data.get('storage_backend', '')
                         storage_ref = data.get('storage_ref', '')
                         operation = data.get('operation', 'store')
+                        storage_duration_ms = data.get('storage_duration_ms') or None
 
                         if operation and operation != 'store':
                             r.xack(stream, group, msg_id)
@@ -101,7 +102,24 @@ class Command(BaseCommand):
                                 status=status,
                                 timestamp=datetime.utcnow(),
                                 log=log_text,
+                                storage_duration_ms=int(storage_duration_ms) if storage_duration_ms and storage_duration_ms != '' else None,
                             )
+                            
+                            # Update overall duration in DeviceBackupResult (step 1 to step 9)
+                            # Find the related DeviceBackupResult and update overall_duration_ms
+                            if task_identifier and status == 'success':
+                                try:
+                                    from devices.models import DeviceBackupResult
+                                    backup_result = DeviceBackupResult.objects.filter(task_identifier=task_identifier).first()
+                                    if backup_result and backup_result.initiated_at:
+                                        now_timestamp_ms = int(datetime.utcnow().timestamp() * 1000)
+                                        initiated_timestamp_ms = int(backup_result.initiated_at.timestamp() * 1000)
+                                        overall_duration_ms = now_timestamp_ms - initiated_timestamp_ms
+                                        backup_result.overall_duration_ms = overall_duration_ms
+                                        backup_result.save(update_fields=['overall_duration_ms'])
+                                except Exception as exc:
+                                    self.stderr.write(self.style.WARNING(f'Failed to update overall duration for {task_identifier}: {exc}'))
+                            
                             r.xack(stream, group, msg_id)
                             self.stdout.write(self.style.SUCCESS(f'Persisted storage result for device {device_id}: {task_identifier} -> {storage_backend}'))
                         except Exception as exc:

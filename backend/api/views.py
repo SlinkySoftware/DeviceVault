@@ -503,7 +503,7 @@ def onboarding(request):
 @decorators.api_view(['GET'])
 def dashboard_stats(request):
     from devices.permissions import user_get_accessible_device_groups
-    from django.db.models import Max, Subquery, OuterRef
+    from django.db.models import Max, Subquery, OuterRef, Avg
     
     now = timezone.now()
     yesterday = now - timedelta(days=1)
@@ -527,7 +527,18 @@ def dashboard_stats(request):
         timestamp__gte=yesterday, 
         status='failed'
     ).count()
-    avg_duration = 0  # Would need duration field in StoredBackup model
+    
+    # Average overall backup time - calculate from DeviceBackupResult for last 24h
+    # overall_duration_ms is the total time from initiation to completion (step 1 to 5 or 9)
+    avg_result = DeviceBackupResult.objects.filter(
+        device__in=user_devices,
+        timestamp__gte=yesterday,
+        overall_duration_ms__isnull=False
+    ).aggregate(avg_ms=Avg('overall_duration_ms'))
+    
+    # Convert from milliseconds to seconds with 1 decimal place
+    avg_duration_ms = avg_result.get('avg_ms') or 0
+    avg_duration = round(avg_duration_ms / 1000, 1) if avg_duration_ms else 0.0
     
     # Success rate - based on most recent backup per device
     total_devices = user_devices.count()

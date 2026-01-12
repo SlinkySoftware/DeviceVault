@@ -178,6 +178,11 @@ class DeviceBackupResult(models.Model):
     status = models.CharField(max_length=16)
     timestamp = models.DateTimeField()
     log = models.TextField(help_text='JSON serialized list of log messages')
+    
+    # Timing metrics (in milliseconds)
+    initiated_at = models.DateTimeField(null=True, blank=True, help_text='UTC timestamp when backup was initiated (step 1)')
+    collection_duration_ms = models.IntegerField(null=True, blank=True, help_text='Collection execution time in milliseconds (step 3)')
+    overall_duration_ms = models.IntegerField(null=True, blank=True, help_text='Overall processing time from initiation to completion in milliseconds')
 
     class Meta:
         ordering = ['-timestamp']

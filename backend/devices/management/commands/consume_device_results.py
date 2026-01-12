@@ -69,6 +69,8 @@ class Command(BaseCommand):
                         status = data.get('status', 'failure')
                         log_text = data.get('log', '[]')
                         device_config = data.get('device_config', '')
+                        collection_duration_ms = data.get('collection_duration_ms') or None
+                        initiated_at_str = data.get('initiated_at', '')
 
                         # Idempotency: skip if task_identifier already persisted
                         if task_identifier and DeviceBackupResult.objects.filter(task_identifier=task_identifier).exists():
@@ -98,13 +100,43 @@ class Command(BaseCommand):
                                 r.xack(stream, group, msg_id)
                                 continue
 
+                            # Parse initiated_at timestamp
+                            initiated_at = None
+                            if initiated_at_str:
+                                try:
+                                    from django.utils.dateparse import parse_datetime
+                                    initiated_at = parse_datetime(initiated_at_str)
+                                except Exception:
+                                    pass
+                            
+                            # Convert collection_duration_ms to int if present
+                            collection_duration_int = None
+                            if collection_duration_ms:
+                                try:
+                                    collection_duration_int = int(collection_duration_ms)
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Calculate overall duration (step 1 to step 5)
+                            overall_duration_int = None
+                            if initiated_at and collection_duration_int is not None:
+                                try:
+                                    now_timestamp_ms = int(datetime.utcnow().timestamp() * 1000)
+                                    initiated_timestamp_ms = int(initiated_at.timestamp() * 1000)
+                                    overall_duration_int = now_timestamp_ms - initiated_timestamp_ms
+                                except Exception:
+                                    pass
+
                             DeviceBackupResult.objects.create(
                                 task_id=task_id or '',
                                 task_identifier=task_identifier,
                                 device=device_obj,
                                 status=status,
                                 timestamp=datetime.utcnow(),
-                                log=log_text
+                                log=log_text,
+                                initiated_at=initiated_at,
+                                collection_duration_ms=collection_duration_int,
+                                overall_duration_ms=overall_duration_int
                             )
 
                             if status == 'success':

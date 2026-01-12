@@ -100,6 +100,8 @@ const BackupsWidget = defineComponent({
 const AvgTimeWidget = defineComponent({
   props: ['stats'],
   render() {
+    const avgDuration = this.stats?.avgDuration || 0
+    const formattedDuration = typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0.0'
     return h('div', { 
       class: 'full-height flex flex-center',
       style: { padding: '20px' }
@@ -107,7 +109,7 @@ const AvgTimeWidget = defineComponent({
       h('div', { 
         class: 'text-primary text-weight-bold dynamic-text',
         style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
-      }, (this.stats?.avgDuration || 0) + 's')
+      }, formattedDuration + 's')
     ])
   }
 })

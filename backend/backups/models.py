@@ -80,6 +80,9 @@ class StoredBackup(models.Model):
     status = models.CharField(max_length=16)
     timestamp = models.DateTimeField()
     log = models.TextField(help_text='JSON serialized list of log messages')
+    
+    # Timing metrics (in milliseconds)
+    storage_duration_ms = models.IntegerField(null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)')
 
     class Meta:
         ordering = ['-timestamp']

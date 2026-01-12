@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -71,6 +72,7 @@ def _publish_result(result: Dict) -> None:
             'storage_backend': result.get('storage_backend', '') or '',
             'storage_ref': result.get('storage_ref', '') or '',
             'operation': result.get('operation', '') or 'store',
+            'storage_duration_ms': str(result.get('storage_duration_ms', '') or ''),
         }
         redis_client.xadd(STORAGE_RESULTS_STREAM, payload)  # type: ignore
     except Exception:
@@ -162,8 +164,17 @@ def storage_store_task(self, payload: Dict) -> Dict:
                 'queue': getattr(getattr(self, 'request', None), 'delivery_info', {}).get('routing_key'),
             },
         )
+        
+        # Capture start time for storage duration
+        storage_start_ms = int(time.time() * 1000)
+        
         storage_fn = STORAGE_BACKENDS[storage_backend]['store']
         storage_ref = storage_fn(str(device_config), rel_path, storage_config)
+        
+        # Capture end time and calculate duration
+        storage_end_ms = int(time.time() * 1000)
+        storage_duration_ms = storage_end_ms - storage_start_ms
+        
         log_lines.append(f'stored to {storage_backend}:{storage_ref}')
         result = {
             'task_id': tid,
@@ -175,7 +186,17 @@ def storage_store_task(self, payload: Dict) -> Dict:
             'timestamp': _iso_now(),
             'log': log_lines,
             'operation': operation,
+            'storage_duration_ms': storage_duration_ms,
         }
+        logger.info(
+            'storage_store_complete',
+            extra={
+                'storage_backend': storage_backend,
+                'device_id': device_id,
+                'task_identifier': task_identifier,
+                'storage_duration_ms': storage_duration_ms,
+            },
+        )
         _publish_result(result)
         return result
     except SoftTimeLimitExceeded:
