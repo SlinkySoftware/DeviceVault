@@ -328,14 +328,16 @@ const ActivityWidget = defineComponent({
     },
     getStatusColor(status) {
       if (status === 'success') return 'positive'
-      if (status === 'failed') return 'negative'
+      if (status === 'failed' || status === 'failure') return 'negative'
       if (status === 'pending' || status === 'in_progress') return 'warning'
+      if (status === 'n/a') return 'grey-6'
       return 'grey'
     },
     getStatusIcon(status) {
       if (status === 'success') return 'check_circle'
-      if (status === 'failed') return 'error'
+      if (status === 'failed' || status === 'failure') return 'warning'
       if (status === 'pending' || status === 'in_progress') return 'autorenew'
+      if (status === 'n/a') return 'remove'
       return 'info'
     },
     getIconClass(status) {
@@ -349,25 +351,58 @@ const ActivityWidget = defineComponent({
     }
   },
   render() {
-    return h('div', { class: 'q-pa-sm', style: 'max-height: 300px; overflow-y: auto' }, [
-      ...(this.recentActivity.length > 0
-        ? this.recentActivity.map(item =>
-            h('div', { key: item.id, class: 'row items-center activity-row q-px-md q-py-xs' }, [
-              h('div', { class: 'col-5', style: { fontSize: '1.5rem', fontWeight: 'bold' } }, item.device_name),
-              h('div', { class: 'col-3', style: { fontSize: '1.25rem' } }, this.formatDate(item.timestamp)),
-              h('div', { class: 'col-2', style: { fontSize: '1.25rem' } }, item.duration ? `${item.duration}s` : ''),
-              h('div', { class: 'col-2 row items-center', style: { fontSize: '1.25rem' } }, [
-                h(QIcon, { 
-                  name: this.getStatusIcon(item.status),
-                  color: this.getStatusColor(item.status),
-                  class: this.getIconClass(item.status),
-                  size: 'lg'
-                }),
-                h('span', { class: 'q-ml-xs' }, item.status_display || item.status)
+    return h('div', { class: 'q-pa-sm', style: 'height: 100%; display: flex; flex-direction: column;' }, [
+      // Header row
+      h('div', { class: 'row items-center activity-row q-px-md q-py-sm', style: 'font-weight: 600; border-bottom: 2px solid rgba(0,0,0,0.2); flex-shrink: 0;' }, [
+        h('div', { class: 'col-2', style: { fontSize: '0.875rem' } }, 'Date/Time'),
+        h('div', { class: 'col-3', style: { fontSize: '0.875rem' } }, 'Device Name'),
+        h('div', { class: 'col-2', style: { fontSize: '0.875rem' } }, 'Backup Status'),
+        h('div', { class: 'col-2', style: { fontSize: '0.875rem' } }, 'Storage Status'),
+        h('div', { class: 'col-3 text-right', style: { fontSize: '0.875rem' } }, 'Log')
+      ]),
+      // Activity rows
+      h('div', { style: 'flex: 1; overflow-y: auto;' }, [
+        ...(this.recentActivity.length > 0
+          ? this.recentActivity.map(item =>
+              h('div', { key: item.id, class: 'row items-center activity-row q-px-md q-py-xs', style: 'border-bottom: 1px solid rgba(0,0,0,0.12)' }, [
+                h('div', { class: 'col-2', style: { fontSize: '1rem' } }, this.formatDate(item.timestamp)),
+                h('div', { class: 'col-3', style: { fontSize: '1rem', fontWeight: '500' } }, item.device_name),
+                h('div', { class: 'col-2 row items-center', style: { fontSize: '0.875rem' } }, [
+                  h(QIcon, { 
+                    name: this.getStatusIcon(item.status),
+                    color: this.getStatusColor(item.status),
+                    class: this.getIconClass(item.status),
+                    size: 'sm'
+                  }),
+                  h('span', { class: 'q-ml-xs' }, item.status_display || item.status)
+                ]),
+                h('div', { class: 'col-2 row items-center', style: { fontSize: '0.875rem' } }, [
+                  h(QIcon, { 
+                    name: this.getStatusIcon(item.storage_status || 'pending'),
+                    color: this.getStatusColor(item.storage_status || 'pending'),
+                    class: this.getIconClass(item.storage_status || 'pending'),
+                    size: 'sm'
+                  }),
+                  h('span', { class: 'q-ml-xs' }, item.storage_status_display || (item.storage_status || 'pending').charAt(0).toUpperCase() + (item.storage_status || 'pending').slice(1))
+                ]),
+                h('div', { class: 'col-3 text-right' }, [
+                  item.log ? h('button', {
+                    class: 'q-btn q-btn-item non-selectable no-outline q-btn--flat q-btn--rectangle text-primary q-btn--actionable q-focusable q-hoverable',
+                    style: { fontSize: '0.75rem', padding: '4px 8px' },
+                    onClick: () => {
+                      // Show log in a dialog
+                      this.$q?.notify?.({
+                        type: 'info',
+                        message: 'Log viewer not yet implemented',
+                        position: 'top'
+                      })
+                    }
+                  }, 'View Log') : null
+                ])
               ])
-            ])
-          )
-        : [h('div', { style: { fontSize: '1.25rem', padding: '16px' } }, 'No recent backup activity')])
+            )
+          : [h('div', { style: { fontSize: '1.25rem', padding: '16px', textAlign: 'center' } }, 'No recent backup activity')])
+      ])
     ])
   }
 })

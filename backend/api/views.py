@@ -345,28 +345,53 @@ def recent_backup_activity(request):
     accessible_groups = user_get_accessible_device_groups(request.user)
     user_devices = Device.objects.filter(device_group__in=accessible_groups)
     
-    # Get recent backups
+    # Get recent backups from DeviceBackupResult (authoritative backup collection results)
     limit = int(request.GET.get('limit', 15))
-    recent_backups = Backup.objects.filter(
+    recent_backups = DeviceBackupResult.objects.filter(
         device__in=user_devices
     ).select_related('device', 'device__device_type').order_by('-timestamp')[:limit]
     
     activity = []
     for backup in recent_backups:
-        # Determine current status and duration
-        status = backup.status
-        status_display = status.capitalize()
-        duration = backup.duration_seconds
+        # Determine storage status based on backup result and storage result
+        storage_status = 'n/a'
+        storage_status_display = 'N/A'
+        
+        if backup.status == 'success':
+            # Backup was successful, check for storage result
+            try:
+                storage_result = StoredBackup.objects.filter(
+                    task_identifier=backup.task_identifier
+                ).first()
+                if storage_result:
+                    storage_status = storage_result.status
+                    storage_status_display = storage_result.status.capitalize()
+                else:
+                    # No storage result yet, still pending
+                    storage_status = 'pending'
+                    storage_status_display = 'Pending'
+            except Exception:
+                storage_status = 'pending'
+                storage_status_display = 'Pending'
+        # If backup failed, storage_status stays as 'n/a'
+        
+        # Determine duration in seconds with 1 decimal place
+        duration = None
+        if backup.overall_duration_ms:
+            duration = round(backup.overall_duration_ms / 1000, 1)
         
         activity.append({
             'id': backup.id,
+            'task_identifier': backup.task_identifier,
             'device_name': backup.device.name,
             'device_type': backup.device.device_type.name if backup.device.device_type else 'Unknown',
-            'timestamp': (backup.requested_at or backup.timestamp).isoformat() if (backup.requested_at or backup.timestamp) else None,
-            'status': status,
-            'status_display': status_display,
+            'timestamp': backup.timestamp.isoformat() if backup.timestamp else None,
+            'status': backup.status,
+            'status_display': backup.status.capitalize(),
+            'storage_status': storage_status,
+            'storage_status_display': storage_status_display,
             'duration': duration,
-            'size_bytes': backup.size_bytes
+            'log': backup.log
         })
     
     return response.Response(activity)
