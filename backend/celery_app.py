@@ -31,6 +31,11 @@ else:
 app = Celery('devicevault', broker=BROKER, backend=BACKEND)
 app.conf.update(
     broker_api=BROKER_API,
+    # Explicitly import task modules so workers started with -A celery_app
+    # register all expected tasks (storage workers run this app directly).
+    imports=(
+        'storage.tasks',
+    ),
 )
 
 # Expose simple values for other modules
