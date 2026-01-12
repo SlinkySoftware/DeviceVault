@@ -166,6 +166,7 @@ function start_backup_worker() {
         -l info \
         --concurrency=1 \
         --max-tasks-per-child=100 \
+        -n backup-worker@%h \
         > "$PID_DIR/backup-worker.log" 2>&1 &
     echo $! > "$BACKUP_WORKER_PID_FILE"
     
