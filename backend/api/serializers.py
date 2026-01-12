@@ -21,7 +21,7 @@ Includes authentication serializers for login and user profile management.
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from rest_framework import serializers
-from devices.models import DeviceType, Manufacturer, Device, CollectionGroup
+from devices.models import DeviceType, Manufacturer, Device, CollectionGroup, DeviceBackupResult
 from backups.models import Backup, StoredBackup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
@@ -171,12 +171,31 @@ class BackupSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class StoredBackupSerializer(serializers.ModelSerializer):
-    """Serializes StoredBackup model for API responses."""
+class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
+    """Serializes backup results with optional storage linkage."""
+
+    backup_status = serializers.CharField(source='status', read_only=True)
+    status = serializers.SerializerMethodField()
+    storage_status = serializers.CharField(read_only=True)
+    storage_backend = serializers.CharField(read_only=True)
+    storage_ref = serializers.CharField(read_only=True)
+    storage_timestamp = serializers.DateTimeField(read_only=True)
 
     class Meta:
-        model = StoredBackup
-        fields = '__all__'
+        model = DeviceBackupResult
+        fields = [
+            'id', 'device', 'timestamp', 'task_identifier',
+            'backup_status', 'storage_status', 'storage_backend', 'storage_ref', 'storage_timestamp', 'status'
+        ]
+
+    def get_status(self, obj):
+        backup_status = getattr(obj, 'status', '') or ''
+        storage_status = getattr(obj, 'storage_status', None)
+        if backup_status != 'success':
+            return 'failure'
+        if storage_status and storage_status != 'success':
+            return 'failure'
+        return 'success'
 
 
 class UserSerializer(serializers.ModelSerializer):

@@ -114,13 +114,8 @@ const AvgTimeWidget = defineComponent({
 
 const SuccessRateWidget = defineComponent({
   props: ['stats'],
-  computed: {
-    rate() {
-      const total = (this.stats?.success24h || 0) + (this.stats?.failed24h || 0)
-      return total > 0 ? Math.round((this.stats.success24h / total) * 100) : 0
-    }
-  },
   render() {
+    const rate = this.stats?.successRate || 0
     return h('div', { 
       class: 'full-height flex flex-center',
       style: { padding: '20px' }
@@ -128,7 +123,7 @@ const SuccessRateWidget = defineComponent({
       h('div', { 
         class: 'text-positive text-weight-bold dynamic-text',
         style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
-      }, this.rate + '%')
+      }, rate + '%')
     ])
   }
 })

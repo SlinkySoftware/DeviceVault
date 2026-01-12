@@ -40,7 +40,7 @@ from audit.models import AuditLog
 from devices.permissions import user_has_device_group_permission, user_get_device_group_permissions
 from .serializers import (
     DeviceTypeSerializer, ManufacturerSerializer, DeviceSerializer,
-    BackupSerializer, StoredBackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
+    BackupSerializer, DeviceBackupResultWithStorageSerializer, RetentionPolicySerializer, BackupLocationSerializer,
     CredentialSerializer, CredentialTypeSerializer, CollectionGroupSerializer,
     UserSerializer, AuditLogSerializer,
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
@@ -249,16 +249,23 @@ class BackupViewSet(viewsets.ModelViewSet):
 
 
 class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only ViewSet for stored backup metadata."""
+    """Read-only ViewSet for backup results with optional storage linkage."""
 
-    queryset = StoredBackup.objects.all()
-    serializer_class = StoredBackupSerializer
+    serializer_class = DeviceBackupResultWithStorageSerializer
     permission_classes = [IsAuthenticated]
+    queryset = DeviceBackupResult.objects.none()
 
     def get_queryset(self):
         from devices.permissions import user_get_accessible_device_groups
         accessible_groups = user_get_accessible_device_groups(self.request.user)
-        qs = StoredBackup.objects.filter(device__device_group__in=accessible_groups).select_related('device')
+
+        storage_qs = StoredBackup.objects.filter(
+            task_identifier=OuterRef('task_identifier'),
+            device_id=OuterRef('device_id'),
+        ).order_by('-timestamp')
+
+        qs = DeviceBackupResult.objects.filter(device__device_group__in=accessible_groups)
+
         device_id_param = self.request.query_params.get('device') or self.request.query_params.get('device_id')
         if device_id_param is not None:
             try:
@@ -267,25 +274,39 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
                 return qs.none()
             qs = qs.filter(device_id=device_id)
 
+        qs = qs.annotate(
+            storage_status=Subquery(storage_qs.values('status')[:1]),
+            storage_backend=Subquery(storage_qs.values('storage_backend')[:1]),
+            storage_ref=Subquery(storage_qs.values('storage_ref')[:1]),
+            storage_timestamp=Subquery(storage_qs.values('timestamp')[:1]),
+        ).select_related('device')
+
         return qs
 
     @decorators.action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         """Synchronously retrieve backup content via storage worker."""
-        stored_backup = self.get_object()
-        
-        # Check view_backups permission for the device's group
-        if not stored_backup.device.device_group:
+        backup_result = self.get_object()
+
+        if not backup_result.device.device_group:
             return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         from devices.permissions import user_has_device_group_django_permission
-        if not user_has_device_group_django_permission(request.user, stored_backup.device.device_group, 'view_backups'):
+        if not user_has_device_group_django_permission(request.user, backup_result.device.device_group, 'view_backups'):
             return response.Response({'error': 'Not authorized to view backups for this device group'}, status=status.HTTP_403_FORBIDDEN)
-        
-        if stored_backup.status != 'success':
+
+        storage_record = StoredBackup.objects.filter(
+            device=backup_result.device,
+            task_identifier=backup_result.task_identifier,
+        ).order_by('-timestamp').first()
+
+        if not storage_record:
+            return response.Response({'error': 'No stored backup found for this task'}, status=status.HTTP_404_NOT_FOUND)
+
+        if storage_record.status != 'success':
             return response.Response({'error': 'Storage not successful'}, status=status.HTTP_400_BAD_REQUEST)
 
-        location = stored_backup.device.backup_location
+        location = backup_result.device.backup_location
         if not location:
             return response.Response({'error': 'No backup location configured'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -293,10 +314,10 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
             from backups.storage_client import read_backup_via_worker
 
             result = read_backup_via_worker(
-                storage_backend=stored_backup.storage_backend,
-                storage_ref=stored_backup.storage_ref,
+                storage_backend=storage_record.storage_backend,
+                storage_ref=storage_record.storage_ref,
                 storage_config=location.config or {},
-                task_identifier=f'read:{stored_backup.task_identifier}',
+                task_identifier=f'read:{storage_record.task_identifier}',
                 timeout=60,
             )
             if result.get('status') != 'success':
@@ -308,7 +329,7 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
             content = result.get('content') or ''
             from django.http import HttpResponse
             resp = HttpResponse(content, content_type='text/plain')
-            resp['Content-Disposition'] = f'attachment; filename="{stored_backup.device.name}.cfg"'
+            resp['Content-Disposition'] = f'attachment; filename="{backup_result.device.name}.cfg"'
             return resp
         except Exception as exc:
             return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -482,6 +503,7 @@ def onboarding(request):
 @decorators.api_view(['GET'])
 def dashboard_stats(request):
     from devices.permissions import user_get_accessible_device_groups
+    from django.db.models import Max, Subquery, OuterRef
     
     now = timezone.now()
     yesterday = now - timedelta(days=1)
@@ -493,32 +515,49 @@ def dashboard_stats(request):
     
     device_count = user_devices.values('device_type__name', 'device_type__icon').annotate(count=Count('id'))
     
-    # Filter backups to only those from accessible devices
-    success_24h = Backup.objects.filter(
+    # Backups in last 24h - all backup results from accessible devices
+    # Use StoredBackup model which is the authoritative index of stored backups
+    success_24h = StoredBackup.objects.filter(
         device__in=user_devices,
         timestamp__gte=yesterday, 
         status='success'
     ).count()
-    failed_24h = Backup.objects.filter(
+    failed_24h = StoredBackup.objects.filter(
         device__in=user_devices,
         timestamp__gte=yesterday, 
         status='failed'
     ).count()
-    avg_duration = 0  # Would need duration field in Backup model
+    avg_duration = 0  # Would need duration field in StoredBackup model
     
-    # Get daily backup stats for chart
+    # Success rate - based on most recent backup per device
+    total_devices = user_devices.count()
+    
+    # Get the most recent backup per device using StoredBackup
+    latest_backups = StoredBackup.objects.filter(
+        device=OuterRef('pk')
+    ).order_by('-timestamp')
+    
+    devices_with_latest = user_devices.annotate(
+        latest_backup_id=Subquery(latest_backups.values('id')[:1]),
+        latest_backup_status=Subquery(latest_backups.values('status')[:1])
+    )
+    
+    successful_devices = devices_with_latest.filter(latest_backup_status='success').count()
+    success_rate_percent = (successful_devices / total_devices * 100) if total_devices > 0 else 0
+    
+    # Get daily backup stats for chart using StoredBackup
     daily_stats = []
     for i in range(7):
         day = now - timedelta(days=6-i)
         day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
-        success = Backup.objects.filter(
+        success = StoredBackup.objects.filter(
             device__in=user_devices,
             timestamp__gte=day_start, 
             timestamp__lt=day_end, 
             status='success'
         ).count()
-        failed = Backup.objects.filter(
+        failed = StoredBackup.objects.filter(
             device__in=user_devices,
             timestamp__gte=day_start, 
             timestamp__lt=day_end, 
@@ -537,6 +576,7 @@ def dashboard_stats(request):
         'success24h': success_24h,
         'failed24h': failed_24h,
         'avgDuration': avg_duration,
+        'successRate': round(success_rate_percent, 1),
         'dailyStats': daily_stats
     })
 
