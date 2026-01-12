@@ -27,7 +27,7 @@
 
 <script>
 import { defineComponent, h } from 'vue'
-import { QIcon } from 'quasar'
+import { QIcon, QSelect } from 'quasar'
 import api from '../services/api'
 import { formatRelativeTime } from '../utils/timezone'
 
@@ -145,10 +145,14 @@ const ChartWidget = defineComponent({
   data() {
     return {
       observer: null,
-      resizeObserver: null
+      resizeObserver: null,
+      selectedDays: 7,
+      chartData: [],
+      loading: false
     }
   },
   mounted() {
+    this.chartData = this.stats?.dailyStats || []
     this.$nextTick(() => this.renderChart())
     // Watch for dark mode changes via MutationObserver
     this.observer = new MutationObserver(() => {
@@ -174,10 +178,28 @@ const ChartWidget = defineComponent({
       this.resizeObserver.disconnect()
     }
   },
-  updated() {
-    this.renderChart()
+  watch: {
+    'stats.dailyStats': function(newVal) {
+      if (this.selectedDays === 7) {
+        this.chartData = newVal || []
+        this.$nextTick(() => this.renderChart())
+      }
+    }
   },
   methods: {
+    async changeDays(days) {
+      this.selectedDays = days
+      this.loading = true
+      try {
+        const res = await api.get(`/dashboard-stats/?days=${days}`)
+        this.chartData = res.data?.dailyStats || []
+        this.$nextTick(() => this.renderChart())
+      } catch (e) {
+        console.error('Failed to load chart data:', e)
+      } finally {
+        this.loading = false
+      }
+    },
     isDarkMode() {
       return document.body.classList.contains('body--dark')
     },
@@ -197,7 +219,7 @@ const ChartWidget = defineComponent({
       this.$refs.chartCanvas.style.height = height + 'px'
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, width, height)
-      const dailyStats = this.stats.dailyStats || []
+      const dailyStats = this.chartData || []
       if (dailyStats.length === 0) return
       const padding = { left: 40, right: 40, top: 40, bottom: 40 }
       const chartWidth = width - padding.left - padding.right
@@ -277,15 +299,42 @@ const ChartWidget = defineComponent({
         ctx.fillStyle = textColor
         ctx.fillText(`${Math.round(day.rate)}%`, x, y - 12)
         
-        // Draw day label below axis
-        const label = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })
-        ctx.fillText(label, x, height - padding.bottom + 20)
+        // Draw day label below axis (weekday on first line, day of month on second line)
+        const dateObj = new Date(day.date)
+        const weekday = dateObj.toLocaleDateString('en-US', { weekday: 'short' })
+        const dayOfMonth = dateObj.getDate()
+        ctx.fillText(weekday, x, height - padding.bottom + 18)
+        ctx.fillText(dayOfMonth.toString(), x, height - padding.bottom + 33)
       })
     }
   },
   render() {
-    return h('div', { class: 'chart-container', style: { width: '100%', height: '100%' } }, [
-      h('canvas', { ref: 'chartCanvas', style: { display: 'block', width: '100%', height: '100%' } })
+    const daysOptions = [
+      { label: 'Last 7 days', value: 7 },
+      { label: 'Last 14 days', value: 14 },
+      { label: 'Last 30 days', value: 30 }
+    ]
+    
+    return h('div', { style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column' } }, [
+      h('div', { class: 'row items-center q-px-md q-pb-sm', style: { flexShrink: 0 } }, [
+        h('div', { class: 'col' }),
+        h('div', { class: 'col-auto' }, [
+          h(QSelect, {
+            modelValue: this.selectedDays,
+            'onUpdate:modelValue': (val) => this.changeDays(val),
+            options: daysOptions,
+            dense: true,
+            outlined: true,
+            'options-dense': true,
+            'map-options': true,
+            'emit-value': true,
+            style: { minWidth: '140px' }
+          })
+        ])
+      ]),
+      h('div', { class: 'chart-container', style: { flex: 1, width: '100%', position: 'relative' } }, [
+        h('canvas', { ref: 'chartCanvas', style: { display: 'block', width: '100%', height: '100%' } })
+      ])
     ])
   }
 })
@@ -293,7 +342,12 @@ const ChartWidget = defineComponent({
 const ActivityWidget = defineComponent({
   props: ['stats'],
   data() {
-    return { recentActivity: [], interval: null, refreshMs: 30000 }
+    return { 
+      recentActivity: [], 
+      interval: null, 
+      refreshMs: 30000,
+      timeFilter: '1h'
+    }
   },
   mounted() {
     this.loadActivity()
@@ -307,7 +361,7 @@ const ActivityWidget = defineComponent({
   methods: {
     async loadActivity() {
       try {
-        const res = await api.get('/recent-backup-activity/?limit=15')
+        const res = await api.get(`/recent-backup-activity/?time_filter=${this.timeFilter}`)
         this.recentActivity = Array.isArray(res.data) ? res.data : res.data.results || []
         // Adjust refresh cadence: faster when any backups are in progress
         const hasInProgress = this.recentActivity.some(item => item.status === 'in_progress' || item.status === 'pending')
@@ -322,6 +376,10 @@ const ActivityWidget = defineComponent({
         clearInterval(this.interval)
       }
       this.interval = setInterval(() => this.loadActivity(), this.refreshMs)
+    },
+    async changeTimeFilter(filter) {
+      this.timeFilter = filter
+      await this.loadActivity()
     },
     formatDate(dateStr) {
       return formatRelativeTime(dateStr)
@@ -351,7 +409,30 @@ const ActivityWidget = defineComponent({
     }
   },
   render() {
+    const timeFilterOptions = [
+      { label: 'Last 1 hour', value: '1h' },
+      { label: 'Last 24 hours', value: '24h' },
+      { label: 'Last 7 days', value: '7d' }
+    ]
+    
     return h('div', { class: 'q-pa-sm', style: 'height: 100%; display: flex; flex-direction: column;' }, [
+      // Filter row
+      h('div', { class: 'row items-center q-px-md q-pb-sm', style: { flexShrink: 0 } }, [
+        h('div', { class: 'col' }),
+        h('div', { class: 'col-auto' }, [
+          h(QSelect, {
+            modelValue: this.timeFilter,
+            'onUpdate:modelValue': (val) => this.changeTimeFilter(val),
+            options: timeFilterOptions,
+            dense: true,
+            outlined: true,
+            'options-dense': true,
+            'map-options': true,
+            'emit-value': true,
+            style: { minWidth: '150px' }
+          })
+        ])
+      ]),
       // Header row
       h('div', { class: 'row items-center activity-row q-px-md q-py-sm', style: 'font-weight: 600; border-bottom: 2px solid rgba(0,0,0,0.2); flex-shrink: 0;' }, [
         h('div', { class: 'col-2', style: { fontSize: '0.875rem' } }, 'Date/Time'),
@@ -440,7 +521,7 @@ export default defineComponent({
         backups: { id: 'backups', title: 'Backups (24h)', component: BackupsWidget },
         avgtime: { id: 'avgtime', title: 'Avg Backup Time', component: AvgTimeWidget },
         successrate: { id: 'successrate', title: 'Device Success Rate', component: SuccessRateWidget },
-        chart: { id: 'chart', title: 'Backup Success Rate (Last 7 Days)', component: ChartWidget },
+        chart: { id: 'chart', title: 'Backup Success Rate', component: ChartWidget },
         activity: { id: 'activity', title: 'Recent Backup Activity', component: ActivityWidget }
       }
 

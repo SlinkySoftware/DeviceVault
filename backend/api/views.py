@@ -341,14 +341,34 @@ def recent_backup_activity(request):
     """Get recent backup activity for devices user has access to"""
     from devices.permissions import user_get_accessible_device_groups
     from datetime import datetime, timedelta
+    from django.utils import timezone
     
     accessible_groups = user_get_accessible_device_groups(request.user)
     user_devices = Device.objects.filter(device_group__in=accessible_groups)
     
+    # Get time filter from query parameter (default: 1 hour)
+    time_filter = request.GET.get('time_filter', '1h')
+    
+    # Calculate time threshold based on filter
+    now = timezone.now()
+    if time_filter == '1h':
+        time_threshold = now - timedelta(hours=1)
+        limit = int(request.GET.get('limit', 50))
+    elif time_filter == '24h':
+        time_threshold = now - timedelta(hours=24)
+        limit = int(request.GET.get('limit', 100))
+    elif time_filter == '7d':
+        time_threshold = now - timedelta(days=7)
+        limit = int(request.GET.get('limit', 200))
+    else:
+        # Default to 1 hour if invalid filter
+        time_threshold = now - timedelta(hours=1)
+        limit = int(request.GET.get('limit', 50))
+    
     # Get recent backups from DeviceBackupResult (authoritative backup collection results)
-    limit = int(request.GET.get('limit', 15))
     recent_backups = DeviceBackupResult.objects.filter(
-        device__in=user_devices
+        device__in=user_devices,
+        timestamp__gte=time_threshold
     ).select_related('device', 'device__device_type').order_by('-timestamp')[:limit]
     
     activity = []
@@ -539,6 +559,10 @@ def dashboard_stats(request):
     from django.db.models import Max, Subquery, OuterRef, Avg
     from core.timezone_utils import get_time_bounds_24h, local_now, get_day_bounds_local, get_timezone_name
     
+    # Get number of days for chart from query parameter (default 7)
+    days = int(request.GET.get('days', 7))
+    days = min(max(days, 1), 90)  # Limit between 1 and 90 days
+    
     # Get time bounds in UTC for "last 24 hours" in local timezone
     yesterday_utc, now_utc = get_time_bounds_24h()
     
@@ -611,8 +635,8 @@ def dashboard_stats(request):
     # Get daily backup stats for chart using local timezone day boundaries
     daily_stats = []
     local_today = local_now().date()
-    for i in range(7):
-        day_offset = 6 - i
+    for i in range(days):
+        day_offset = days - 1 - i
         target_date = local_today - timedelta(days=day_offset)
         day_start_utc, day_end_utc = get_day_bounds_local(target_date)
         
