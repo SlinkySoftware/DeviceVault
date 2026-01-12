@@ -42,6 +42,7 @@
           <template v-slot:body-cell-select-a="props">
             <q-td :props="props">
               <q-radio
+                v-if="props.row.status === 'success'"
                 v-model="selectedA"
                 :val="props.row.id"
                 color="primary"
@@ -52,6 +53,7 @@
           <template v-slot:body-cell-select-b="props">
             <q-td :props="props">
               <q-radio
+                v-if="props.row.status === 'success'"
                 v-model="selectedB"
                 :val="props.row.id"
                 color="primary"
@@ -76,6 +78,7 @@
           <template v-slot:body-cell-actions="props">
             <q-td :props="props">
               <q-btn
+                v-if="props.row.status === 'success'"
                 flat
                 dense
                 icon="visibility"
@@ -86,6 +89,7 @@
                 title="View backup content"
               />
               <q-btn
+                v-if="props.row.status === 'success'"
                 flat
                 dense
                 icon="download"
