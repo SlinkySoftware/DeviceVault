@@ -115,7 +115,7 @@
             <strong>Backup ID:</strong> {{ viewingBackupId }}<br>
             <strong>Date:</strong> {{ viewingBackupDate }}
           </div>
-          <div class="bg-grey-2 q-pa-md rounded-borders" style="overflow: auto; max-height: 70vh; font-family: monospace; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5;">
+          <div class="backup-content q-pa-md rounded-borders">
             {{ viewingBackupContent }}
           </div>
         </q-card-section>
@@ -287,5 +287,17 @@ onMounted(() => {
 <style scoped>
 .backup-table {
   /* Ensure table rows are properly spaced */
+}
+
+.backup-content {
+  overflow: auto;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #2d2d2d;
 }
 </style>
