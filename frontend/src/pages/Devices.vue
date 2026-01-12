@@ -154,6 +154,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
+import { formatDateTime } from '../utils/timezone'
 
 // ===== Component State =====
 
@@ -176,7 +177,7 @@ const deviceTypes = ref([])
  */
 const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
 
-const formatLastBackup = (value) => (value ? new Date(value).toLocaleString() : 'N/A')
+const formatLastBackup = (value) => (value ? formatDateTime(value) : 'N/A')
 
 /**
  * Table Column Configuration

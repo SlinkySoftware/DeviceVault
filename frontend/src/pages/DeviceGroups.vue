@@ -60,7 +60,7 @@
         <template #body-cell-created_at="props">
           <q-td :props="props">
             <span class="text-caption">
-              {{ new Date(props.row.created_at).toLocaleDateString() }}
+              {{ formatDate(props.row.created_at) }}
             </span>
           </q-td>
         </template>
@@ -69,7 +69,7 @@
         <template #body-cell-updated_at="props">
           <q-td :props="props">
             <span class="text-caption">
-              {{ new Date(props.row.updated_at).toLocaleDateString() }}
+              {{ formatDate(props.row.updated_at) }}
             </span>
           </q-td>
         </template>
@@ -167,6 +167,7 @@
 import { ref, onMounted } from 'vue'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
+import { formatDate } from '../utils/timezone'
 
 // ===== Component State =====
 

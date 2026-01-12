@@ -60,6 +60,7 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
+import { formatDateTime, utcToLocal } from '../utils/timezone'
 
 const router = useRouter()
 const route = useRoute()
@@ -75,12 +76,6 @@ const diffRows = ref([])
 const leftPane = ref(null)
 const rightPane = ref(null)
 let _syncing = false
-
-// Utility
-function formatDateTime(isoString) {
-  const date = new Date(isoString)
-  return date.toLocaleString()
-}
 
 function goBack() {
   router.back()
@@ -276,8 +271,8 @@ async function loadBackups() {
 
     // Ensure older backup is A (left) and newer is B (right)
     if (metaA && metaB) {
-      const dateA = new Date(metaA.timestamp)
-      const dateB = new Date(metaB.timestamp)
+      const dateA = utcToLocal(metaA.timestamp)
+      const dateB = utcToLocal(metaB.timestamp)
       if (dateA > dateB) {
         // Swap: A is newer, so swap to make B the newer one
         backupA.value = metaB

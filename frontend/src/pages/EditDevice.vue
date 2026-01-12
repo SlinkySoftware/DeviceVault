@@ -208,6 +208,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useQuasar } from 'quasar'
 import { useRouter, useRoute } from 'vue-router'
 import api from '../services/api'
+import { formatDateTime } from '../utils/timezone'
 
 const $q = useQuasar()
 const router = useRouter()
@@ -250,7 +251,7 @@ const statusColor = computed(() => {
 
 function formatBackupTime(time) {
   if (!time) return 'Never'
-  return new Date(time).toLocaleString()
+  return formatDateTime(time)
 }
 
 async function loadData() {

@@ -43,7 +43,10 @@ elif ENGINE=='postgres':
 elif ENGINE=='mysql':
     DATABASES={'default':{'ENGINE':'django.db.backends.mysql','NAME':DB_CFG.get('name','devicevault'),'USER':DB_CFG.get('user',''),'PASSWORD':DB_CFG.get('password',''),'HOST':DB_CFG.get('host','localhost'),'PORT':DB_CFG.get('port','3306')}}
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'Australia/Melbourne'
+# Application timezone for display - read from config.yaml or default to Australia/Sydney
+DEVICEVAULT_DISPLAY_TIMEZONE = cfg.get('timezone', 'Australia/Sydney')
+# Django timezone - always UTC for database storage
+TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'

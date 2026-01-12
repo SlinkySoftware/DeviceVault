@@ -165,14 +165,16 @@ const columns = [
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 
+// Import timezone utilities
+import { formatDateTime as formatDateTimeLocal, utcToLocal } from '../utils/timezone'
+
 // Utility functions
 function formatDateTime(isoString) {
-  const date = new Date(isoString)
-  return date.toLocaleString()
+  return formatDateTimeLocal(isoString)
 }
 
 function formatDateTimeForFilename(isoString) {
-  const date = new Date(isoString)
+  const date = utcToLocal(isoString)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -199,7 +201,7 @@ async function loadBackups() {
   try {
     const response = await api.get(`/stored-backups/?device=${deviceId.value}`)
     backups.value = (response.data || []).sort((a, b) => 
-      new Date(b.timestamp) - new Date(a.timestamp)
+      utcToLocal(b.timestamp) - utcToLocal(a.timestamp)
     )
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to fetch backups' })

@@ -385,7 +385,7 @@ def recent_backup_activity(request):
             'task_identifier': backup.task_identifier,
             'device_name': backup.device.name,
             'device_type': backup.device.device_type.name if backup.device.device_type else 'Unknown',
-            'timestamp': backup.timestamp.isoformat() if backup.timestamp else None,
+            'timestamp': backup.timestamp.isoformat() if backup.timestamp else None,  # ISO format with UTC timezone
             'status': backup.status,
             'status_display': backup.status.capitalize(),
             'storage_status': storage_status,
@@ -395,6 +395,14 @@ def recent_backup_activity(request):
         })
     
     return response.Response(activity)
+
+@decorators.api_view(['GET'])
+def timezone_config(request):
+    """Return the configured application timezone"""
+    from core.timezone_utils import get_timezone_name
+    return response.Response({
+        'timezone': get_timezone_name()
+    })
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
     queryset = RetentionPolicy.objects.all()
     serializer_class = RetentionPolicySerializer
@@ -529,10 +537,10 @@ def onboarding(request):
 def dashboard_stats(request):
     from devices.permissions import user_get_accessible_device_groups
     from django.db.models import Max, Subquery, OuterRef, Avg
+    from core.timezone_utils import get_time_bounds_24h, local_now, get_day_bounds_local, get_timezone_name
     
-    now = timezone.now()
-    yesterday = now - timedelta(days=1)
-    week_ago = now - timedelta(days=7)
+    # Get time bounds in UTC for "last 24 hours" in local timezone
+    yesterday_utc, now_utc = get_time_bounds_24h()
     
     # Filter devices by user's accessible device groups
     accessible_groups = user_get_accessible_device_groups(request.user)
@@ -544,7 +552,7 @@ def dashboard_stats(request):
     # Success: those that have successful collection
     backup_results_24h = DeviceBackupResult.objects.filter(
         device__in=user_devices,
-        timestamp__gte=yesterday
+        timestamp__gte=yesterday_utc
     )
     
     # Successful backups (collection succeeded)
@@ -559,7 +567,7 @@ def dashboard_stats(request):
     successful_task_ids = list(backup_results_24h.filter(status='success').values_list('task_identifier', flat=True))
     storage_failures = StoredBackup.objects.filter(
         task_identifier__in=successful_task_ids,
-        timestamp__gte=yesterday,
+        timestamp__gte=yesterday_utc,
         status__in=['failed', 'failure']
     ).count() if successful_task_ids else 0
     
@@ -568,7 +576,7 @@ def dashboard_stats(request):
     # In Progress: successful backups without storage result yet
     stored_task_ids = list(StoredBackup.objects.filter(
         task_identifier__in=successful_task_ids,
-        timestamp__gte=yesterday
+        timestamp__gte=yesterday_utc
     ).values_list('task_identifier', flat=True)) if successful_task_ids else []
     in_progress_24h = len(set(successful_task_ids) - set(stored_task_ids))
     
@@ -576,7 +584,7 @@ def dashboard_stats(request):
     # overall_duration_ms is the total time from initiation to completion (step 1 to 5 or 9)
     avg_result = DeviceBackupResult.objects.filter(
         device__in=user_devices,
-        timestamp__gte=yesterday,
+        timestamp__gte=yesterday_utc,
         overall_duration_ms__isnull=False
     ).aggregate(avg_ms=Avg('overall_duration_ms'))
     
@@ -600,27 +608,29 @@ def dashboard_stats(request):
     successful_devices = devices_with_latest.filter(latest_backup_status='success').count()
     success_rate_percent = (successful_devices / total_devices * 100) if total_devices > 0 else 0
     
-    # Get daily backup stats for chart using StoredBackup
+    # Get daily backup stats for chart using local timezone day boundaries
     daily_stats = []
+    local_today = local_now().date()
     for i in range(7):
-        day = now - timedelta(days=6-i)
-        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start + timedelta(days=1)
+        day_offset = 6 - i
+        target_date = local_today - timedelta(days=day_offset)
+        day_start_utc, day_end_utc = get_day_bounds_local(target_date)
+        
         success = StoredBackup.objects.filter(
             device__in=user_devices,
-            timestamp__gte=day_start, 
-            timestamp__lt=day_end, 
+            timestamp__gte=day_start_utc, 
+            timestamp__lt=day_end_utc, 
             status='success'
         ).count()
         failed = StoredBackup.objects.filter(
             device__in=user_devices,
-            timestamp__gte=day_start, 
-            timestamp__lt=day_end, 
+            timestamp__gte=day_start_utc, 
+            timestamp__lt=day_end_utc, 
             status__in=['failed', 'failure']
         ).count()
         total = success + failed
         daily_stats.append({
-            'date': day_start.strftime('%Y-%m-%d'),
+            'date': target_date.strftime('%Y-%m-%d'),
             'success': success,
             'failed': failed,
             'rate': (success / total * 100) if total > 0 else 0
@@ -633,7 +643,8 @@ def dashboard_stats(request):
         'inProgress24h': in_progress_24h,
         'avgDuration': avg_duration,
         'successRate': round(success_rate_percent, 1),
-        'dailyStats': daily_stats
+        'dailyStats': daily_stats,
+        'timezone': get_timezone_name()  # Include timezone info for frontend
     })
 
 class AuthConfigView(APIView):

@@ -29,6 +29,7 @@
 import { defineComponent, h } from 'vue'
 import { QIcon } from 'quasar'
 import api from '../services/api'
+import { formatRelativeTime } from '../utils/timezone'
 
 // Widget components - using render functions instead of templates
 const ConfiguredDevicesWidget = defineComponent({
@@ -323,17 +324,7 @@ const ActivityWidget = defineComponent({
       this.interval = setInterval(() => this.loadActivity(), this.refreshMs)
     },
     formatDate(dateStr) {
-      if (!dateStr) return ''
-      const date = new Date(dateStr)
-      const now = new Date()
-      const diffMs = now - date
-      const diffMins = Math.floor(diffMs / 60000)
-      const diffHours = Math.floor(diffMs / 3600000)
-      
-      if (diffMins < 1) return 'Just now'
-      if (diffMins < 60) return `${diffMins}m ago`
-      if (diffHours < 24) return `${diffHours}h ago`
-      return date.toLocaleDateString()
+      return formatRelativeTime(dateStr)
     },
     getStatusColor(status) {
       if (status === 'success') return 'positive'

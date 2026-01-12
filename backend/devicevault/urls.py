@@ -50,6 +50,7 @@ urlpatterns = [
     path('api/onboarding/', views.onboarding), 
     path('api/dashboard-stats/', views.dashboard_stats),
     path('api/recent-backup-activity/', views.recent_backup_activity),
+    path('api/timezone/', views.timezone_config),
     path('api/auth/config/', views.AuthConfigView.as_view()), 
     path('api/backups/compare/', views.compare_backups),
     path('api/auth/login/', views.LoginView.as_view()), 
