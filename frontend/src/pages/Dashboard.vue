@@ -402,7 +402,7 @@ export default defineComponent({
         devices: { id: 'devices', title: 'Configured Devices', component: ConfiguredDevicesWidget },
         backups: { id: 'backups', title: 'Backups (24h)', component: BackupsWidget },
         avgtime: { id: 'avgtime', title: 'Avg Backup Time', component: AvgTimeWidget },
-        successrate: { id: 'successrate', title: 'Success Rate', component: SuccessRateWidget },
+        successrate: { id: 'successrate', title: 'Device Success Rate', component: SuccessRateWidget },
         chart: { id: 'chart', title: 'Backup Success Rate (Last 7 Days)', component: ChartWidget },
         activity: { id: 'activity', title: 'Recent Backup Activity', component: ActivityWidget }
       }
