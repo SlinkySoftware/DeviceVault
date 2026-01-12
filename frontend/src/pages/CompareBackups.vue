@@ -28,20 +28,20 @@
       <q-card-section v-else-if="backupA && backupB">
         <div class="row q-col-gutter-md">
           <div class="col-12 col-md-6">
-            <div class="bg-blue-1 q-pa-md rounded-borders q-mb-md">
-              <div class="text-subtitle2 text-weight-bold">Backup A</div>
-              <div class="text-caption">{{ formatDateTime(backupA.timestamp) }}</div>
+            <div class="header-a q-pa-md rounded-borders q-mb-md">
+              <div class="text-subtitle2 text-weight-bold text-white">Backup A</div>
+              <div class="text-caption text-white">{{ formatDateTime(backupA.timestamp) }}</div>
             </div>
-            <div class="bg-grey-2 q-pa-md rounded-borders" style="overflow: auto; max-height: 65vh; font-family: monospace; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.4;">
+            <div class="backup-content q-pa-md rounded-borders">
               {{ contentA }}
             </div>
           </div>
           <div class="col-12 col-md-6">
-            <div class="bg-green-1 q-pa-md rounded-borders q-mb-md">
-              <div class="text-subtitle2 text-weight-bold">Backup B</div>
-              <div class="text-caption">{{ formatDateTime(backupB.timestamp) }}</div>
+            <div class="header-b q-pa-md rounded-borders q-mb-md">
+              <div class="text-subtitle2 text-weight-bold text-white">Backup B</div>
+              <div class="text-caption text-white">{{ formatDateTime(backupB.timestamp) }}</div>
             </div>
-            <div class="bg-grey-2 q-pa-md rounded-borders" style="overflow: auto; max-height: 65vh; font-family: monospace; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.4;">
+            <div class="backup-content q-pa-md rounded-borders">
               {{ contentB }}
             </div>
           </div>
@@ -141,5 +141,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Comparison layout styling */
+.backup-content {
+  overflow: auto;
+  max-height: 65vh;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.4;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #2d2d2d;
+}
+
+.header-a {
+  background: #12314f;
+}
+
+.header-b {
+  background: #1f4a2e;
+}
 </style>
