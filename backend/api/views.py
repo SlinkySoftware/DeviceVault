@@ -258,7 +258,16 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         from devices.permissions import user_get_accessible_device_groups
         accessible_groups = user_get_accessible_device_groups(self.request.user)
-        return StoredBackup.objects.filter(device__device_group__in=accessible_groups).select_related('device')
+        qs = StoredBackup.objects.filter(device__device_group__in=accessible_groups).select_related('device')
+        device_id_param = self.request.query_params.get('device') or self.request.query_params.get('device_id')
+        if device_id_param is not None:
+            try:
+                device_id = int(device_id_param)
+            except (TypeError, ValueError):
+                return qs.none()
+            qs = qs.filter(device_id=device_id)
+
+        return qs
 
     @decorators.action(detail=True, methods=['get'])
     def download(self, request, pk=None):
