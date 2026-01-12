@@ -74,23 +74,32 @@ const ConfiguredDevicesWidget = defineComponent({
 const BackupsWidget = defineComponent({
   props: ['stats'],
   render() {
-    return h('div', { class: 'row q-col-gutter-md q-pa-sm', style: { height: '100%' } }, [
-      h('div', { class: 'col-6', style: { display: 'flex' } }, [
-        h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-          h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '1rem', marginBottom: '8px' } }, 'Success'),
-          h('div', { 
-            class: 'text-positive text-weight-bold',
-            style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
-          }, (this.stats?.success24h || 0).toString())
-        ])
-      ]),
-      h('div', { class: 'col-6', style: { display: 'flex' } }, [
-        h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-          h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '1rem', marginBottom: '8px' } }, 'Failed'),
-          h('div', { 
-            class: 'text-negative text-weight-bold',
-            style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
-          }, (this.stats?.failed24h || 0).toString())
+    return h('div', { class: 'q-gutter-md q-pa-sm', style: { height: '100%', display: 'flex', flexDirection: 'column' } }, [
+      h('div', { class: 'row q-col-gutter-md', style: { flex: 1 } }, [
+        h('div', { class: 'col-5', style: { display: 'flex' } }, [
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '8px' } }, 'Success'),
+            h('div', { 
+              class: 'text-positive text-weight-bold',
+              style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
+            }, (this.stats?.success24h || 0).toString())
+          ])
+        ]),
+        h('div', { class: 'col-7', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, [
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '4px' } }, 'Failed'),
+            h('div', { 
+              class: 'text-negative text-weight-bold',
+              style: { fontSize: 'clamp(1.5rem, 8vw, 3rem)', lineHeight: '1' }
+            }, (this.stats?.failed24h || 0).toString())
+          ]),
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '4px' } }, 'In Progress'),
+            h('div', { 
+              class: 'text-warning text-weight-bold',
+              style: { fontSize: 'clamp(1.5rem, 8vw, 3rem)', lineHeight: '1' }
+            }, (this.stats?.inProgress24h || 0).toString())
+          ])
         ])
       ])
     ])
@@ -428,7 +437,7 @@ export default defineComponent({
     ]
 
     return {
-      stats: { devicesByType: {}, success24h: 0, failed24h: 0, avgDuration: 0, dailyStats: [] },
+      stats: { devicesByType: {}, success24h: 0, failed24h: 0, inProgress24h: 0, avgDuration: 0, dailyStats: [] },
       defaultOrder: defaultWidgets,
       widgetOrder: [...defaultWidgets]
     }
@@ -490,7 +499,7 @@ export default defineComponent({
         this.stats = res.data || this.stats
         this.widgetOrder = [...this.defaultOrder]
       } catch (e) {
-        this.stats = { devicesByType: {}, success24h: 0, failed24h: 0, avgDuration: 0, dailyStats: [] }
+        this.stats = { devicesByType: {}, success24h: 0, failed24h: 0, inProgress24h: 0, avgDuration: 0, dailyStats: [] }
         this.widgetOrder = [...this.defaultOrder]
       }
     }

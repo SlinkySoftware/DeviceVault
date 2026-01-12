@@ -540,18 +540,37 @@ def dashboard_stats(request):
     
     device_count = user_devices.values('device_type__name', 'device_type__icon').annotate(count=Count('id'))
     
-    # Backups in last 24h - all backup results from accessible devices
-    # Use StoredBackup model which is the authoritative index of stored backups
-    success_24h = StoredBackup.objects.filter(
+    # Backups in last 24h - count all DeviceBackupResult records
+    # Success: those that have successful collection
+    backup_results_24h = DeviceBackupResult.objects.filter(
         device__in=user_devices,
-        timestamp__gte=yesterday, 
-        status='success'
-    ).count()
-    failed_24h = StoredBackup.objects.filter(
-        device__in=user_devices,
-        timestamp__gte=yesterday, 
-        status='failed'
-    ).count()
+        timestamp__gte=yesterday
+    )
+    
+    # Successful backups (collection succeeded)
+    success_24h = backup_results_24h.filter(status='success').count()
+    
+    # Failed backups: collection failures + storage failures
+    # Collection failures - backups that failed during collection (status can be 'failed' or 'failure')
+    collection_failures = backup_results_24h.filter(status__in=['failed', 'failure']).count()
+    
+    # Storage failures - successful collections that failed to store
+    # Get task_identifiers of successful backups
+    successful_task_ids = list(backup_results_24h.filter(status='success').values_list('task_identifier', flat=True))
+    storage_failures = StoredBackup.objects.filter(
+        task_identifier__in=successful_task_ids,
+        timestamp__gte=yesterday,
+        status__in=['failed', 'failure']
+    ).count() if successful_task_ids else 0
+    
+    failed_24h = collection_failures + storage_failures
+    
+    # In Progress: successful backups without storage result yet
+    stored_task_ids = list(StoredBackup.objects.filter(
+        task_identifier__in=successful_task_ids,
+        timestamp__gte=yesterday
+    ).values_list('task_identifier', flat=True)) if successful_task_ids else []
+    in_progress_24h = len(set(successful_task_ids) - set(stored_task_ids))
     
     # Average overall backup time - calculate from DeviceBackupResult for last 24h
     # overall_duration_ms is the total time from initiation to completion (step 1 to 5 or 9)
@@ -597,7 +616,7 @@ def dashboard_stats(request):
             device__in=user_devices,
             timestamp__gte=day_start, 
             timestamp__lt=day_end, 
-            status='failed'
+            status__in=['failed', 'failure']
         ).count()
         total = success + failed
         daily_stats.append({
@@ -611,6 +630,7 @@ def dashboard_stats(request):
         'devicesByType': dict((item['device_type__name'], {'count': item['count'], 'icon': item['device_type__icon']}) for item in device_count),
         'success24h': success_24h,
         'failed24h': failed_24h,
+        'inProgress24h': in_progress_24h,
         'avgDuration': avg_duration,
         'successRate': round(success_rate_percent, 1),
         'dailyStats': daily_stats
