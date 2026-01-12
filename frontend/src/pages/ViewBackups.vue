@@ -38,6 +38,8 @@
           row-key="id"
           flat
           class="backup-table"
+          :pagination="pagination"
+          :rows-per-page-options="[20, 50, 100, 0]"
         >
           <template v-slot:body-cell-select-a="props">
             <q-td :props="props">
@@ -79,24 +81,18 @@
             <q-td :props="props">
               <q-btn
                 v-if="props.row.status === 'success'"
-                flat
-                dense
-                icon="visibility"
                 color="primary"
-                size="sm"
+                icon="visibility"
+                label="View"
                 @click="viewBackup(props.row)"
                 class="q-mr-sm"
-                title="View backup content"
               />
               <q-btn
                 v-if="props.row.status === 'success'"
-                flat
-                dense
-                icon="download"
                 color="primary"
-                size="sm"
+                icon="download"
+                label="Download"
                 @click="downloadBackup(props.row)"
-                title="Download backup"
               />
             </q-td>
           </template>
@@ -152,6 +148,12 @@ const showViewDialog = ref(false)
 const viewingBackupId = ref('')
 const viewingBackupDate = ref('')
 const viewingBackupContent = ref('')
+
+// Pagination settings
+const pagination = ref({
+  page: 1,
+  rowsPerPage: 20
+})
 
 // Table columns
 const columns = [
