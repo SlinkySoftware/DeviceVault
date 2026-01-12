@@ -330,6 +330,42 @@ watch(() => route.fullPath, () => {
 body.body--dark .submenu-items {
   background-color: rgba(255, 255, 255, 0.03);
 }
+
+/* Side menu color scheme - non-selected items are blue */
+:deep(.q-item) {
+  color: #479aee;
+}
+
+body.body--dark :deep(.q-item) {
+  color: #42A5F5;
+}
+
+/* Expansion items (containers/submenus) - subtle gray to differentiate from selectable items */
+:deep(.q-expansion-item__container > .q-item) {
+  color: #B0B0B0 !important;
+}
+
+body.body--dark :deep(.q-expansion-item__container > .q-item) {
+  color: #E0E0E0 !important;
+}
+
+/* Side menu - selected/active item has white text with dark blue background */
+:deep(.q-item.q-router-link--active),
+:deep(.q-item.q-router-link--exact-active) {
+  background-color: #1565C0 !important;
+  color: white !important;
+}
+
+body.body--dark :deep(.q-item.q-router-link--active),
+body.body--dark :deep(.q-item.q-router-link--exact-active) {
+  background-color: #0D47A1 !important;
+  color: white !important;
+}
+
+/* Ensure icons inherit the color */
+:deep(.q-item .q-icon) {
+  color: inherit;
+}
 </style>
 <style>
 /* Global theme styles - apply card border color across all cards */
