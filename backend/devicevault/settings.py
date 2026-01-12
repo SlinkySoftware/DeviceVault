@@ -79,3 +79,7 @@ CELERY_BROKER_API = os.environ.get(
     cfg.get('celery', {}).get('broker_api', 'http://guest:guest@localhost:15672/api/')
 )
 DEVICEVAULT_RESULTS_STREAM = cfg.get('results_stream', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results'))
+DEVICEVAULT_STORAGE_RESULTS_STREAM = os.environ.get(
+    'DEVICEVAULT_STORAGE_RESULTS_STREAM',
+    cfg.get('storage_results_stream', 'storage:results')
+)

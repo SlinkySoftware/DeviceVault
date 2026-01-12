@@ -67,3 +67,22 @@ class Backup(models.Model):
     def __str__(self):
         """Return formatted string with device ID and timestamp"""
         return f"{self.device_id} @ {self.timestamp}"
+
+
+class StoredBackup(models.Model):
+    """Authoritative index of where a collected backup was stored."""
+
+    task_id = models.CharField(max_length=64, db_index=True)
+    task_identifier = models.CharField(max_length=128, db_index=True)
+    device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, db_index=True)
+    storage_backend = models.CharField(max_length=32, db_index=True)
+    storage_ref = models.CharField(max_length=256)
+    status = models.CharField(max_length=16)
+    timestamp = models.DateTimeField()
+    log = models.TextField(help_text='JSON serialized list of log messages')
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}"

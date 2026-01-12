@@ -19,6 +19,11 @@ You can find the full text of the license in the [LICENSE](LICENSE.md) file or r
 - **Audit Logging**: Complete audit trail of all activities
 - **Dashboard**: Real-time statistics and backup success rate charts
 - **Backup Comparison**: Side-by-side diff view of configuration changes
+- **Distributed Storage Pipeline**: Celery workers offload backup storage to Git or filesystem backends with strict worker routing and synchronous retrieval
+
+## Architecture Documentation
+
+- **[Storage Pipeline](docs/STORAGE_PIPELINE.md)**: Device collection → storage → retrieval workflow with Celery worker routing
 
 ## Technology Stack
 

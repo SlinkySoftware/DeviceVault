@@ -17,14 +17,82 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import os
+from typing import Dict, Tuple
+
 from git import Repo
-class GitStorage:
-    def __init__(self, repo_path):
-        self.repo_path = repo_path
-        if not os.path.exists(repo_path): Repo.init(repo_path)
-        self.repo = Repo(repo_path)
-    def save(self, rel_path, content):
-        full = os.path.join(self.repo_path, rel_path); os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full,'w') as f: f.write(content)
-        self.repo.index.add([full]); self.repo.index.commit(f"devicevault: save {rel_path}")
-        return full
+
+
+def _ensure_repo(repo_path: str, branch: str) -> Repo:
+    """Return a Repo and ensure the requested branch exists."""
+    if not os.path.exists(repo_path):
+        os.makedirs(repo_path, exist_ok=True)
+        repo = Repo.init(repo_path)
+    else:
+        repo = Repo.init(repo_path)
+
+    try:
+        repo.git.rev_parse('--verify', branch)
+    except Exception:
+        repo.git.checkout('-b', branch)
+    else:
+        repo.git.checkout(branch)
+
+    return repo
+
+
+def _parse_storage_ref(storage_ref: str) -> Tuple[str, str, str]:
+    """Split storage_ref into branch, rel_path, commit components."""
+    commit = None
+    branch_rel = storage_ref
+    if '@' in storage_ref:
+        branch_rel, commit = storage_ref.split('@', 1)
+
+    if ':' in branch_rel:
+        branch, rel_path = branch_rel.split(':', 1)
+    else:
+        branch, rel_path = 'main', branch_rel
+
+    return branch, rel_path, commit
+
+
+def store_backup(content: str, rel_path: str, config: Dict) -> str:
+    """Persist backup content to a Git repository and return an opaque ref."""
+    repo_path = config.get('repo_path') or config.get('path')
+    if not repo_path:
+        raise ValueError('git storage requires repo_path or path')
+
+    branch = config.get('branch', 'main')
+    repo = _ensure_repo(repo_path, branch)
+
+    full_path = os.path.join(repo_path, rel_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, 'w', encoding='utf-8') as handle:
+        handle.write(content or '')
+
+    repo.index.add([full_path])
+    message = config.get('commit_message', f'devicevault: save {rel_path}')
+    commit = repo.index.commit(message)
+    storage_ref = f"{branch}:{rel_path}@{commit.hexsha}"
+    return storage_ref
+
+
+def read_backup(storage_ref: str, config: Dict) -> str:
+    """Read a stored backup from a Git repository via git show."""
+    repo_path = config.get('repo_path') or config.get('path')
+    if not repo_path:
+        raise ValueError('git storage requires repo_path or path')
+
+    branch, rel_path, commit = _parse_storage_ref(storage_ref)
+    repo = Repo(repo_path)
+
+    target = commit or branch
+    blob_ref = f"{target}:{rel_path}"
+    try:
+        return repo.git.show(blob_ref)
+    except Exception:
+        # Fallback to reading from working tree if blob lookup fails
+        full_path = os.path.join(repo_path, rel_path)
+        if not os.path.exists(full_path):
+            raise
+        with open(full_path, 'r', encoding='utf-8') as handle:
+            return handle.read()

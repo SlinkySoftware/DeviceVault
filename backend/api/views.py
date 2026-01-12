@@ -26,7 +26,7 @@ from django.db.models import Count, Avg, F, Q, Prefetch, OuterRef, Subquery
 from django.utils import timezone
 from datetime import timedelta
 from devices.models import DeviceType, Manufacturer, Device, CollectionGroup, DeviceBackupResult
-from backups.models import Backup
+from backups.models import Backup, StoredBackup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
@@ -40,7 +40,7 @@ from audit.models import AuditLog
 from devices.permissions import user_has_device_group_permission, user_get_device_group_permissions
 from .serializers import (
     DeviceTypeSerializer, ManufacturerSerializer, DeviceSerializer,
-    BackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
+    BackupSerializer, StoredBackupSerializer, RetentionPolicySerializer, BackupLocationSerializer,
     CredentialSerializer, CredentialTypeSerializer, CollectionGroupSerializer,
     UserSerializer, AuditLogSerializer,
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
@@ -246,6 +246,64 @@ class BackupViewSet(viewsets.ModelViewSet):
         from devices.permissions import user_get_accessible_device_groups
         accessible_groups = user_get_accessible_device_groups(self.request.user)
         return Backup.objects.filter(device__device_group__in=accessible_groups)
+
+
+class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only ViewSet for stored backup metadata."""
+
+    queryset = StoredBackup.objects.all()
+    serializer_class = StoredBackupSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        from devices.permissions import user_get_accessible_device_groups
+        accessible_groups = user_get_accessible_device_groups(self.request.user)
+        return StoredBackup.objects.filter(device__device_group__in=accessible_groups).select_related('device')
+
+    @decorators.action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """Synchronously retrieve backup content via storage worker."""
+        stored_backup = self.get_object()
+        
+        # Check view_backups permission for the device's group
+        if not stored_backup.device.device_group:
+            return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        from devices.permissions import user_has_device_group_django_permission
+        if not user_has_device_group_django_permission(request.user, stored_backup.device.device_group, 'view_backups'):
+            return response.Response({'error': 'Not authorized to view backups for this device group'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if stored_backup.status != 'success':
+            return response.Response({'error': 'Storage not successful'}, status=status.HTTP_400_BAD_REQUEST)
+
+        location = stored_backup.device.backup_location
+        if not location:
+            return response.Response({'error': 'No backup location configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from backups.storage_client import read_backup_via_worker
+
+            result = read_backup_via_worker(
+                storage_backend=stored_backup.storage_backend,
+                storage_ref=stored_backup.storage_ref,
+                storage_config=location.config or {},
+                task_identifier=f'read:{stored_backup.task_identifier}',
+                timeout=60,
+            )
+            if result.get('status') != 'success':
+                return response.Response(
+                    {'error': 'Failed to read backup', 'log': result.get('log', [])},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            content = result.get('content') or ''
+            from django.http import HttpResponse
+            resp = HttpResponse(content, content_type='text/plain')
+            resp['Content-Disposition'] = f'attachment; filename="{stored_backup.device.name}.cfg"'
+            return resp
+        except Exception as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @decorators.api_view(['GET'])
 @decorators.permission_classes([IsAuthenticated])

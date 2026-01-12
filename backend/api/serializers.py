@@ -22,7 +22,7 @@ Includes authentication serializers for login and user profile management.
 
 from rest_framework import serializers
 from devices.models import DeviceType, Manufacturer, Device, CollectionGroup
-from backups.models import Backup
+from backups.models import Backup, StoredBackup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
@@ -168,6 +168,14 @@ class BackupSerializer(serializers.ModelSerializer):
     """Serializes Backup model for API responses"""
     class Meta:
         model = Backup
+        fields = '__all__'
+
+
+class StoredBackupSerializer(serializers.ModelSerializer):
+    """Serializes StoredBackup model for API responses."""
+
+    class Meta:
+        model = StoredBackup
         fields = '__all__'
 
 

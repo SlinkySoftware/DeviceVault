@@ -10,10 +10,17 @@ from django.core.management.base import BaseCommand
 from redis import Redis
 
 from devices.models import Device, DeviceBackupResult
+from celery_app import app as celery_app
 
 
 class Command(BaseCommand):
     help = 'Consume device backup results from Redis Stream and persist to the DB'
+
+    storage_backend_map = {
+        'git': 'git',
+        'fs': 'fs',
+        'filesystem': 'fs',
+    }
 
     def handle(self, *args, **options):
         redis_url = os.environ.get('DEVICEVAULT_REDIS_URL', 'redis://localhost:6379/1')
@@ -61,6 +68,7 @@ class Command(BaseCommand):
                         device_id = data.get('device_id') or None
                         status = data.get('status', 'failure')
                         log_text = data.get('log', '[]')
+                        device_config = data.get('device_config', '')
 
                         # Idempotency: skip if task_identifier already persisted
                         if task_identifier and DeviceBackupResult.objects.filter(task_identifier=task_identifier).exists():
@@ -99,6 +107,14 @@ class Command(BaseCommand):
                                 log=log_text
                             )
 
+                            if status == 'success':
+                                self._enqueue_storage_task(
+                                    device_obj,
+                                    task_id=task_id,
+                                    task_identifier=task_identifier,
+                                    device_config=device_config,
+                                )
+
                             r.xack(stream, group, msg_id)
                             self.stdout.write(self.style.SUCCESS(f'Persisted result for device {device_id}: {task_identifier}'))
                         except Exception as exc:
@@ -108,3 +124,37 @@ class Command(BaseCommand):
             except Exception as exc:
                 self.stderr.write(f'Error reading stream: {exc}')
                 time.sleep(1)
+
+    def _enqueue_storage_task(self, device_obj, *, task_id: str, task_identifier: str, device_config: str) -> None:
+        """Schedule storage via Celery worker, routed by storage backend."""
+        location = device_obj.backup_location
+        if not location:
+            self.stderr.write(self.style.WARNING(f'No backup location configured for device {device_obj.pk}, skipping storage dispatch'))
+            return
+
+        backend_key = self.storage_backend_map.get((location.location_type or '').lower())
+        if not backend_key:
+            self.stderr.write(self.style.WARNING(f'Unsupported storage backend "{location.location_type}" for device {device_obj.pk}, skipping storage dispatch'))
+            return
+
+        payload = {
+            'task_id': task_id or '',
+            'task_identifier': task_identifier,
+            'device_id': device_obj.pk,
+            'storage_backend': backend_key,
+            'storage_config': location.config or {},
+            'device_config': device_config or '',
+        }
+
+        queue = f'storage.{backend_key}'
+
+        try:
+            celery_app.send_task(
+                'storage.store',
+                args=[payload],
+                queue=queue,
+                routing_key=queue,
+            )
+            self.stdout.write(self.style.SUCCESS(f'Storage task queued on {queue} for device {device_obj.pk} ({task_identifier})'))
+        except Exception as exc:
+            self.stderr.write(self.style.ERROR(f'Failed to enqueue storage task for device {device_obj.pk}: {exc}'))

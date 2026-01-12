@@ -21,6 +21,7 @@ import Dashboard from '../pages/Dashboard.vue'
 import Devices from '../pages/Devices.vue'
 import EditDevice from '../pages/EditDevice.vue'
 import ViewBackups from '../pages/ViewBackups.vue'
+import CompareBackups from '../pages/CompareBackups.vue'
 import DeviceTypes from '../pages/DeviceTypes.vue'
 import BackupMethods from '../pages/BackupMethods.vue'
 import Credentials from '../pages/Credentials.vue'
@@ -57,6 +58,7 @@ const routes = [
   { path: '/devices', component: Devices, meta: { requiresAuth: true } },
   { path: '/devices/:id', component: EditDevice, meta: { requiresAuth: true } },
   { path: '/devices/:id/backups', component: ViewBackups, meta: { requiresAuth: true } },
+  { path: '/devices/:id/backups/compare', component: CompareBackups, meta: { requiresAuth: true } },
   { path: '/profile', component: Profile, meta: { requiresAuth: true } },
   
   // ===== Admin Routes (/vaultadmin) =====
