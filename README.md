@@ -24,6 +24,10 @@ You can find the full text of the license in the [LICENSE](LICENSE.md) file or r
 ## Architecture Documentation
 
 - **[Storage Pipeline](docs/STORAGE_PIPELINE.md)**: Device collection → storage → retrieval workflow with Celery worker routing
+- **[Celery Integration](docs/CELERY_INTEGRATION.md)**: Task queue architecture and worker routing
+- **[Celery Setup](docs/CELERY_SETUP.md)**: Detailed Celery configuration and startup instructions
+- **[Authentication](docs/AUTHENTICATION.md)**: Auth methods (Local, LDAP, SAML, Entra ID)
+- **[Timezone Implementation](docs/TIMEZONE_IMPLEMENTATION.md)**: Timezone handling and configuration
 
 ## Technology Stack
 
@@ -117,36 +121,195 @@ python manage.py shell -c "from django.contrib.auth import get_user_model; User 
 
 ### Using the Management Script (Recommended)
 
+The `devicevault.sh` script provides a comprehensive management interface for all services:
+
 ```bash
 cd /opt/devicevault
 
-# Start both frontend and backend
+# Start all services (frontend, backend, workers, consumers, flower)
 ./devicevault.sh start
 
-# Check status
+# Check status of all services
 ./devicevault.sh status
 
-# View logs
-./devicevault.sh logs          # Both services
-./devicevault.sh logs backend  # Backend only
-./devicevault.sh logs frontend # Frontend only
+# View logs (all services or specific service)
+./devicevault.sh logs              # All logs
+./devicevault.sh logs backend      # Backend only
+./devicevault.sh logs frontend     # Frontend only
+./devicevault.sh logs backup-worker       # Backup worker
+./devicevault.sh logs storage-worker      # Storage worker
+./devicevault.sh logs backup-consumer     # Backup consumer
+./devicevault.sh logs storage-consumer    # Storage consumer
+./devicevault.sh logs flower              # Flower monitoring
 
-# Restart services
+# Restart all services
 ./devicevault.sh restart
 
-# Stop services
+# Stop all services
 ./devicevault.sh stop
 ```
+
+#### What the Management Script Starts
+
+The `./devicevault.sh start` command automatically starts:
+
+1. **Django Backend** (`http://localhost:8000`) — REST API and admin interface
+2. **Frontend (Quasar)** (`http://localhost:9000`) — SPA web interface
+3. **Backup Worker** — Celery worker for device backup collection (queues: `default`, `collector.group.*`)
+4. **Storage Worker** — Celery worker for backup storage operations (queues: `storage.fs`, `storage.git`)
+5. **Backup Consumer** — Django management command that consumes backup results from Redis Stream (`device:results`)
+6. **Storage Consumer** — Django management command that consumes storage results from Redis Stream (`storage:results`)
+7. **Flower Monitoring** (`http://localhost:5555`) — Celery task monitoring interface
+
+All services are managed as background processes with PID files stored in `.pids/`.
+
+### Running Individual Services Manually
+
+For development or debugging, start individual services:
+
+```bash
+# Activate virtual environment (required for all commands)
+source .venv/bin/activate
+cd backend
+
+# Start Django development server only
+python manage.py runserver 0.0.0.0:8000
+
+# Start Backup Worker (in separate terminal)
+celery -A celery_app worker \
+  -Q default,collector.group.dmz_zone_queue,collector.group.secure_zone_queue \
+  -l info --concurrency=1
+
+# Start Storage Worker (in separate terminal)
+celery -A celery_app worker \
+  -Q storage.fs,storage.git \
+  -l info --concurrency=1 \
+  -n storage-worker@%h
+
+# Start Backup Consumer (in separate terminal)
+python manage.py consume_device_results
+
+# Start Storage Consumer (in separate terminal)
+python manage.py consume_storage_results
+
+# Start Flower monitoring (in separate terminal)
+celery -A celery_app flower --broker-api=http://guest:guest@localhost:15672/api/ --port=5555
+```
+
+Convenience scripts are also provided in the repository root:
+- `start-backup-worker.sh` — Quick start for backup worker
+- `start-storage-worker.sh` — Quick start for storage worker
+- `start-flower.sh` — Quick start for Flower monitoring
 
 ## Accessing the Application
 
 - **Frontend**: http://localhost:9000
 - **Backend API**: http://localhost:8000/api/
 - **Django Admin**: http://localhost:8000/admin/
+- **Flower Monitoring**: http://localhost:5555 (Celery task monitor)
 
 **Default Credentials:**
 - Username: `admin`
 - Password: `admin`
+
+## Configuration
+
+### Backend Configuration File
+
+The backend reads configuration from `backend/config/config.yaml`. This file controls:
+
+```yaml
+# Database engine: sqlite, postgres, or mysql
+database:
+  engine: sqlite
+  name: devicevault.sqlite3      # SQLite file path
+  # For postgres/mysql, also configure:
+  # user: dbuser
+  # password: dbpass
+  # host: localhost
+  # port: 5432
+
+# Application timezone (for display; database stores UTC)
+# Valid values: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+timezone: Australia/Sydney
+
+# Local admin user seed
+local_admin:
+  username: admin
+  encrypted_password: ''
+
+# Authentication settings
+auth:
+  type: Local                     # Options: Local, LDAP, SAML, EntraID
+  local_enabled: true
+```
+
+### Environment Variables
+
+Key environment variables for configuration (override config.yaml settings):
+
+```bash
+# Django settings
+export DEVICEVAULT_CONFIG=backend/config/config.yaml
+export DEVICEVAULT_SECRET_KEY=your-secret-key
+
+# Database (overrides config.yaml)
+export DEVICEVAULT_DB_ENGINE=postgres
+export DEVICEVAULT_DB_NAME=devicevault
+export DEVICEVAULT_DB_USER=dbuser
+export DEVICEVAULT_DB_PASSWORD=dbpass
+export DEVICEVAULT_DB_HOST=localhost
+export DEVICEVAULT_DB_PORT=5432
+
+# Celery / Message Broker (RabbitMQ)
+export DEVICEVAULT_BROKER_URL=amqp://guest:guest@localhost:5672//
+
+# Redis (for locks and result streams)
+export DEVICEVAULT_REDIS_URL=redis://localhost:6379/1
+
+# Celery result backend
+export DEVICEVAULT_RESULT_BACKEND=redis://localhost:6379/1
+
+# RabbitMQ management API (for Flower monitoring)
+export DEVICEVAULT_BROKER_API=http://guest:guest@localhost:15672/api/
+
+# Result stream names (Redis Streams for worker-to-django communication)
+export DEVICEVAULT_RESULTS_STREAM=device:results
+export DEVICEVAULT_STORAGE_RESULTS_STREAM=storage:results
+
+# Logging
+export DEVICEVAULT_LOG_LEVEL=INFO
+```
+
+### Required Services for Full Operation
+
+DeviceVault requires the following services when running with Celery workers:
+
+1. **RabbitMQ** (or Redis) — Message broker for Celery tasks
+   - Default: `amqp://guest:guest@localhost:5672//`
+   - Management UI: `http://localhost:15672` (default credentials: guest/guest)
+
+2. **Redis** — Distributed locking and result streams
+   - Default: `redis://localhost:6379`
+   - Database 1 is used by default for results
+
+3. **Database** — SQLite (default), PostgreSQL, or MySQL
+   - Default: `devicevault.sqlite3` in backend directory
+
+To start RabbitMQ and Redis quickly:
+
+```bash
+# Using the dev-env docker-compose
+docker compose -f dev-env/docker-compose.yaml up -d rabbitmq redis
+
+# Or individual commands (if Docker is installed)
+docker run -d -p 5672:5672 -p 15672:15672 \
+  -e RABBITMQ_DEFAULT_USER=guest \
+  -e RABBITMQ_DEFAULT_PASS=guest \
+  rabbitmq:management
+
+docker run -d -p 6379:6379 redis:7
+```
 
 ## Admin Pages
 
@@ -158,28 +321,146 @@ cd /opt/devicevault
 6. **Backup Locations** - Configure storage backends
 7. **Retention Policies** - Define backup retention rules
 
+## Docker-Based Setup
+
+### Using Docker Compose
+
+For containerized deployment with automatic service orchestration:
+
+```bash
+cd docker-build
+
+# Build all images
+make build
+
+# Start all services (nginx, django, postgres, redis, flower)
+make up
+
+# Stop all services
+make down
+
+# Restart services
+make restart
+
+# View logs
+make logs
+
+# Celery-specific
+make logs-celery
+make logs-django
+
+# Run Django management commands in container
+make migrate
+make makemigrations
+make shell
+```
+
+Available Makefile targets:
+```
+build              - Build all Docker images
+up                 - Start all services
+down               - Stop all services
+restart            - Restart all services
+scale-celery       - Scale Celery workers (usage: make scale-celery n=5)
+migrate            - Run Django migrations
+makemigrations     - Create new migrations
+shell              - Open Django shell
+build-frontend     - Build frontend for production
+watch-frontend     - Watch and rebuild frontend on changes
+logs               - View logs (all services)
+logs-celery        - View Celery worker logs
+logs-django        - View Django logs
+clean-volumes      - Remove volumes (full reset)
+prune              - Remove unused Docker resources
+clean-build        - Clean Docker build cache
+```
+
+### Docker Services
+
+The `docker-build/docker-compose.yaml` includes:
+
+- **nginx** — Reverse proxy and static file server
+- **django** — Django application server
+- **postgres** — PostgreSQL database (default for Docker)
+- **redis** — Redis for caching and result storage
+- **flower** — Celery task monitoring UI (optional, commented out by default)
+
 ## Troubleshooting
 
 ### View Logs
 
 ```bash
+# View all logs
 ./devicevault.sh logs
+
+# View specific service logs
+./devicevault.sh logs backend
+./devicevault.sh logs frontend
+./devicevault.sh logs backup-worker
+./devicevault.sh logs storage-worker
+
+# Follow logs in real-time (Docker)
+cd docker-build && make logs
 ```
 
 ### Restart Services
 
 ```bash
+# Using management script
 ./devicevault.sh restart
+
+# Or individually stop and start
+./devicevault.sh stop
+./devicevault.sh start
+
+# Using Docker
+cd docker-build && make restart
 ```
 
 ### Database Issues
 
 ```bash
+# Run migrations (local development)
 cd backend
+source ../.venv/bin/activate
 python manage.py migrate --run-syncdb
+
+# Run migrations (Docker)
+cd docker-build && make migrate
 ```
 
-For more information, see the full documentation in this file.
+### Worker Connection Issues
+
+If workers are not processing tasks:
+
+1. **Check RabbitMQ/Redis connectivity**:
+   ```bash
+   # Test RabbitMQ
+   rabbitmq-diagnostics -q ping
+   
+   # Test Redis
+   redis-cli ping
+   ```
+
+2. **Check Redis streams** (worker-to-django communication):
+   ```bash
+   # View pending backup results
+   redis-cli -n 1 XREVRANGE device:results + - COUNT 10
+   
+   # View pending storage results
+   redis-cli -n 1 XREVRANGE storage:results + - COUNT 10
+   ```
+
+3. **Verify workers are running**:
+   ```bash
+   ./devicevault.sh status
+   ```
+
+### Celery / Flower Issues
+
+- **Flower not showing tasks**: Ensure `DEVICEVAULT_BROKER_API` points to RabbitMQ management API (port 15672, not 5672)
+- **Workers not receiving tasks**: Check queue names match device collection group configurations
+- **Tasks stuck in queue**: Check worker logs: `./devicevault.sh logs backup-worker`
 
 ## Running in Production
 
