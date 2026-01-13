@@ -147,6 +147,7 @@ def device_collect_task(self, config_json: str) -> dict:
             'device_id': device_id,
             'status': result.get('status'),
             'collection_duration_ms': collection_duration_ms,
+            'is_binary': plugin.is_binary,
         })
 
         # Publish to Redis Stream for orchestrator consumption. Keep payload small and JSON-serializable.
@@ -160,6 +161,7 @@ def device_collect_task(self, config_json: str) -> dict:
                 'device_config': result.get('device_config') or '',
                 'collection_duration_ms': str(collection_duration_ms),
                 'initiated_at': cfg.get('initiated_at', ''),
+                'is_binary': str(plugin.is_binary),  # NEW: propagate binary flag
             }
             # redis-py requires mapping values to be bytes/str
             redis_client.xadd(RESULTS_STREAM, payload)

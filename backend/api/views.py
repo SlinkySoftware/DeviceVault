@@ -99,7 +99,7 @@ class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
     Read-only ViewSet for listing available backup method plugins
     
     Returns all plugins discovered under backups.plugins with their
-    friendly_name and description.
+    friendly_name, description, and is_binary flag.
     """
     permission_classes = [IsAuthenticated]
     
@@ -110,7 +110,8 @@ class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
             {
                 'key': p.key,
                 'friendly_name': p.friendly_name,
-                'description': p.description
+                'description': p.description,
+                'is_binary': p.is_binary
             }
             for p in plugins
         ]
@@ -285,7 +286,7 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 
     @decorators.action(detail=True, methods=['get'])
     def download(self, request, pk=None):
-        """Synchronously retrieve backup content via storage worker."""
+        """Synchronously retrieve backup content via storage worker (text or binary)."""
         backup_result = self.get_object()
 
         if not backup_result.device.device_group:
@@ -312,12 +313,24 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 
         try:
             from backups.storage_client import read_backup_via_worker
+            from backups.plugins import get_plugin
+            import base64
+            import io
+            from django.http import FileResponse
 
+            # Check if backup is binary by looking up the device's backup method plugin
+            is_binary = False
+            if backup_result.device and backup_result.device.backup_method:
+                plugin = get_plugin(backup_result.device.backup_method)
+                if plugin:
+                    is_binary = plugin.is_binary
+            
             result = read_backup_via_worker(
                 storage_backend=storage_record.storage_backend,
                 storage_ref=storage_record.storage_ref,
                 storage_config=location.config or {},
                 task_identifier=f'read:{storage_record.task_identifier}',
+                is_binary=is_binary,
                 timeout=60,
             )
             if result.get('status') != 'success':
@@ -327,10 +340,33 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
                 )
 
             content = result.get('content') or ''
-            from django.http import HttpResponse
-            resp = HttpResponse(content, content_type='text/plain')
-            resp['Content-Disposition'] = f'attachment; filename="{backup_result.device.name}.cfg"'
-            return resp
+            
+            if is_binary:
+                # Binary backup: return file download
+                # Content may be base64-encoded string; decode if necessary
+                if isinstance(content, str):
+                    try:
+                        binary_data = base64.b64decode(content)
+                    except Exception:
+                        # If decode fails, encode string to bytes
+                        binary_data = content.encode('latin-1')
+                else:
+                    binary_data = content
+                
+                timestamp_str = backup_result.timestamp.isoformat().replace(':', '-').replace('.', '_')
+                filename = f"{backup_result.device.name}_{timestamp_str}.bin"
+                
+                return FileResponse(
+                    io.BytesIO(binary_data),
+                    filename=filename,
+                    content_type='application/octet-stream'
+                )
+            else:
+                # Text backup: return as text file download
+                from django.http import HttpResponse
+                resp = HttpResponse(content, content_type='text/plain')
+                resp['Content-Disposition'] = f'attachment; filename="{backup_result.device.name}.cfg"'
+                return resp
         except Exception as exc:
             return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

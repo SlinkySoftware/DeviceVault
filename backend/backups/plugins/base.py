@@ -45,8 +45,11 @@ class BackupPlugin:
       "status": "success" | "failure",
       "timestamp": "<iso8601 utc>",
       "log": ["..."],
-      "device_config": "<raw device config string or bytes representation>"
+      "device_config": "<raw device config string or bytes representation>",
+      "is_binary": bool (optional, defaults to False)
     }
+
+    For binary backups, device_config must be base64-encoded string (JSON serializable).
 
     The Celery task wrapper will populate `task_id` and persist results.
     """
@@ -54,6 +57,7 @@ class BackupPlugin:
     friendly_name: str
     description: str
     entrypoint: CollectorCallable
+    is_binary: bool = False  # True for binary backups, False for text
 
     def run(self, config: Dict, timeout: Optional[int] = None) -> Dict[str, Any]:
         """Invoke the plugin entrypoint and normalize its result.

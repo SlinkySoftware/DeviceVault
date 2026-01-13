@@ -180,12 +180,13 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
     storage_backend = serializers.CharField(read_only=True)
     storage_ref = serializers.CharField(read_only=True)
     storage_timestamp = serializers.DateTimeField(read_only=True)
+    is_text = serializers.SerializerMethodField()
 
     class Meta:
         model = DeviceBackupResult
         fields = [
             'id', 'device', 'timestamp', 'task_identifier',
-            'backup_status', 'storage_status', 'storage_backend', 'storage_ref', 'storage_timestamp', 'status'
+            'backup_status', 'storage_status', 'storage_backend', 'storage_ref', 'storage_timestamp', 'status', 'is_text'
         ]
 
     def get_status(self, obj):
@@ -196,6 +197,16 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
         if storage_status and storage_status != 'success':
             return 'failure'
         return 'success'
+    
+    def get_is_text(self, obj):
+        """Determine if backup is text or binary by checking device's backup method plugin."""
+        from backups.plugins import get_plugin
+        if not obj.device or not obj.device.backup_method:
+            return True  # Default to text if no method specified
+        plugin = get_plugin(obj.device.backup_method)
+        if not plugin:
+            return True  # Default to text if plugin not found
+        return not plugin.is_binary
 
 
 class UserSerializer(serializers.ModelSerializer):

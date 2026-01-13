@@ -12,7 +12,7 @@
               color="primary"
               label="Compare Selected"
               icon="compare_arrows"
-              :disabled="!selectedA || !selectedB || comparePending"
+              :disabled="!canCompare || comparePending"
               @click="navigateToCompare"
               :loading="comparePending"
             />
@@ -44,7 +44,7 @@
           <template v-slot:body-cell-select-a="props">
             <q-td :props="props">
               <q-radio
-                v-if="props.row.status === 'success'"
+                v-if="props.row.status === 'success' && props.row.is_text"
                 v-model="selectedA"
                 :val="props.row.id"
                 color="primary"
@@ -55,7 +55,7 @@
           <template v-slot:body-cell-select-b="props">
             <q-td :props="props">
               <q-radio
-                v-if="props.row.status === 'success'"
+                v-if="props.row.status === 'success' && props.row.is_text"
                 v-model="selectedB"
                 :val="props.row.id"
                 color="primary"
@@ -80,7 +80,7 @@
           <template v-slot:body-cell-actions="props">
             <q-td :props="props">
               <q-btn
-                v-if="props.row.status === 'success'"
+                v-if="props.row.status === 'success' && props.row.is_text"
                 color="primary"
                 icon="visibility"
                 label="View"
@@ -90,8 +90,8 @@
               <q-btn
                 v-if="props.row.status === 'success'"
                 color="primary"
-                icon="download"
-                label="Download"
+                :icon="props.row.is_text ? 'download' : 'cloud_download'"
+                :label="props.row.is_text ? 'Download' : 'Download (Binary)'"
                 @click="downloadBackup(props.row)"
               />
             </q-td>
@@ -143,6 +143,14 @@ const selectedA = ref(null)
 const selectedB = ref(null)
 const comparePending = ref(false)
 
+// Computed: can only compare if both selections are text backups
+const canCompare = computed(() => {
+  if (!selectedA.value || !selectedB.value) return false
+  const backupA = backups.value.find(b => b.id === selectedA.value)
+  const backupB = backups.value.find(b => b.id === selectedB.value)
+  return backupA && backupB && backupA.is_text && backupB.is_text
+})
+
 // View dialog state
 const showViewDialog = ref(false)
 const viewingBackupId = ref('')
@@ -160,6 +168,7 @@ const columns = [
   { name: 'select-a', label: 'A', field: 'id', align: 'center', style: 'width: 50px' },
   { name: 'select-b', label: 'B', field: 'id', align: 'center', style: 'width: 50px' },
   { name: 'timestamp', label: 'Date/Time', field: 'timestamp', align: 'left', sortable: true },
+  { name: 'is_text', label: 'Type', field: 'is_text', align: 'center', format: val => val ? 'Text' : 'Binary' },
   { name: 'storage_backend', label: 'Backend', field: 'storage_backend', align: 'left' },
   { name: 'status', label: 'Status', field: 'status', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
@@ -242,23 +251,43 @@ async function downloadBackup(backup) {
   }
 
   try {
+    // Determine response type based on backup type
+    const responseType = backup.is_text ? 'text' : 'blob'
     const response = await api.get(`/stored-backups/${backup.id}/download/`, {
-      responseType: 'text'
+      responseType: responseType
     })
-    const content = response.data
 
-    // Construct filename: devicename_backupid_YYYYMMDD-HHMMSS.txt
+    // Construct filename
     const dateTime = formatDateTimeForFilename(backup.timestamp)
-    const filename = `${deviceName.value}_${backup.id}_${dateTime}.txt`
+    
+    if (backup.is_text) {
+      // Text backup: download as .txt
+      const content = response.data
+      const filename = `${deviceName.value}_${backup.id}_${dateTime}.txt`
 
-    // Trigger download
-    const element = document.createElement('a')
-    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content))
-    element.setAttribute('download', filename)
-    element.style.display = 'none'
-    document.body.appendChild(element)
-    element.click()
-    document.body.removeChild(element)
+      // Trigger download
+      const element = document.createElement('a')
+      element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content))
+      element.setAttribute('download', filename)
+      element.style.display = 'none'
+      document.body.appendChild(element)
+      element.click()
+      document.body.removeChild(element)
+    } else {
+      // Binary backup: download as .bin
+      const filename = `${deviceName.value}_${backup.id}_${dateTime}.bin`
+      
+      // Create blob URL for download
+      const url = window.URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    }
 
     $q.notify({ type: 'positive', message: 'Backup downloaded successfully' })
   } catch (error) {

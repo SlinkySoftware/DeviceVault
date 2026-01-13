@@ -17,7 +17,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import os
-from typing import Dict, Tuple
+import base64
+from typing import Dict, Tuple, Union
 
 from git import Repo
 
@@ -55,8 +56,18 @@ def _parse_storage_ref(storage_ref: str) -> Tuple[str, str, str]:
     return branch, rel_path, commit
 
 
-def store_backup(content: str, rel_path: str, config: Dict) -> str:
-    """Persist backup content to a Git repository and return an opaque ref."""
+def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_binary: bool = False) -> str:
+    """Persist backup content to a Git repository and return an opaque ref.
+    
+    Args:
+        content: str (text) or bytes (binary, base64-decoded from plugin).
+        rel_path: Relative path under Git repo.
+        config: Storage configuration with repo_path, branch, etc.
+        is_binary: True if content is binary, False if text.
+    
+    Returns:
+        storage_ref: Opaque reference in format "branch:rel_path@commit_sha"
+    """
     repo_path = config.get('repo_path') or config.get('path')
     if not repo_path:
         raise ValueError('git storage requires repo_path or path')
@@ -66,8 +77,24 @@ def store_backup(content: str, rel_path: str, config: Dict) -> str:
 
     full_path = os.path.join(repo_path, rel_path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
-    with open(full_path, 'w', encoding='utf-8') as handle:
-        handle.write(content or '')
+    
+    if is_binary:
+        # Binary write
+        if isinstance(content, str):
+            # Assume base64-encoded string, decode to bytes
+            try:
+                binary_data = base64.b64decode(content)
+            except Exception:
+                binary_data = content.encode('latin-1')
+        else:
+            binary_data = content
+        
+        with open(full_path, 'wb') as handle:
+            handle.write(binary_data)
+    else:
+        # Text write
+        with open(full_path, 'w', encoding='utf-8') as handle:
+            handle.write(content or '')
 
     repo.index.add([full_path])
     message = config.get('commit_message', f'devicevault: save {rel_path}')
@@ -76,8 +103,17 @@ def store_backup(content: str, rel_path: str, config: Dict) -> str:
     return storage_ref
 
 
-def read_backup(storage_ref: str, config: Dict) -> str:
-    """Read a stored backup from a Git repository via git show."""
+def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Union[str, bytes]:
+    """Read a stored backup from a Git repository.
+    
+    Args:
+        storage_ref: Opaque reference in format "branch:rel_path@commit_sha".
+        config: Storage configuration with repo_path.
+        is_binary: True if backup is binary, False if text.
+    
+    Returns:
+        str (text, UTF-8 decoded) or bytes (binary).
+    """
     repo_path = config.get('repo_path') or config.get('path')
     if not repo_path:
         raise ValueError('git storage requires repo_path or path')
@@ -88,11 +124,26 @@ def read_backup(storage_ref: str, config: Dict) -> str:
     target = commit or branch
     blob_ref = f"{target}:{rel_path}"
     try:
-        return repo.git.show(blob_ref)
+        blob_bytes = repo.git.show(blob_ref, raw=True)
+        if is_binary:
+            # Return raw bytes
+            if isinstance(blob_bytes, str):
+                return blob_bytes.encode('latin-1')
+            return blob_bytes
+        else:
+            # Decode to string
+            if isinstance(blob_bytes, bytes):
+                return blob_bytes.decode('utf-8')
+            return blob_bytes
     except Exception:
         # Fallback to reading from working tree if blob lookup fails
         full_path = os.path.join(repo_path, rel_path)
         if not os.path.exists(full_path):
             raise
-        with open(full_path, 'r', encoding='utf-8') as handle:
-            return handle.read()
+        
+        if is_binary:
+            with open(full_path, 'rb') as handle:
+                return handle.read()
+        else:
+            with open(full_path, 'r', encoding='utf-8') as handle:
+                return handle.read()

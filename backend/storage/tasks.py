@@ -249,6 +249,7 @@ def storage_read_task(
     storage_ref: str,
     storage_config: Dict,
     task_identifier: Optional[str] = None,
+    is_binary: bool = False,
 ) -> Dict:
     """Retrieve backup content synchronously via the storage backend."""
     log_lines: List[str] = []
@@ -279,7 +280,7 @@ def storage_read_task(
             extra={'storage_backend': storage_backend, 'storage_ref': storage_ref},
         )
         read_fn = STORAGE_BACKENDS[storage_backend]['read']
-        content = read_fn(storage_ref, storage_config)
+        content = read_fn(storage_ref, storage_config, is_binary=is_binary)
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
