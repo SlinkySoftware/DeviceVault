@@ -18,14 +18,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import base64
+import logging
 from typing import Dict, Tuple, Union
 
 from git import Repo
+
+logger = logging.getLogger('devicevault.storage.git')
 
 
 def _ensure_repo(repo_path: str, branch: str) -> Repo:
     """Return a Repo and ensure the requested branch exists."""
     if not os.path.exists(repo_path):
+        logger.info(f'Initializing new Git repository at {repo_path}')
         os.makedirs(repo_path, exist_ok=True)
         repo = Repo.init(repo_path)
     else:
@@ -33,7 +37,9 @@ def _ensure_repo(repo_path: str, branch: str) -> Repo:
 
     try:
         repo.git.rev_parse('--verify', branch)
+        logger.debug(f'Checking out existing branch: {branch}')
     except Exception:
+        logger.info(f'Creating new branch: {branch}')
         repo.git.checkout('-b', branch)
     else:
         repo.git.checkout(branch)
@@ -73,6 +79,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
         raise ValueError('git storage requires repo_path or path')
 
     branch = config.get('branch', 'main')
+    logger.info(f'Storing backup to Git repository: {rel_path} on branch {branch} (binary={is_binary})')
     repo = _ensure_repo(repo_path, branch)
 
     full_path = os.path.join(repo_path, rel_path)
@@ -84,21 +91,28 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
             # Assume base64-encoded string, decode to bytes
             try:
                 binary_data = base64.b64decode(content)
+                logger.debug(f'Decoded base64 content ({len(binary_data)} bytes)')
             except Exception:
                 binary_data = content.encode('latin-1')
+                logger.debug(f'Encoded string as latin-1 ({len(binary_data)} bytes)')
         else:
             binary_data = content
+            logger.debug(f'Using raw binary content ({len(binary_data)} bytes)')
         
         with open(full_path, 'wb') as handle:
             handle.write(binary_data)
+        logger.debug(f'Wrote {len(binary_data)} bytes to {full_path}')
     else:
         # Text write
+        content_len = len(content or '')
         with open(full_path, 'w', encoding='utf-8') as handle:
             handle.write(content or '')
+        logger.debug(f'Wrote {content_len} characters to {full_path}')
 
     repo.index.add([full_path])
     message = config.get('commit_message', f'devicevault: save {rel_path}')
     commit = repo.index.commit(message)
+    logger.info(f'Committed to Git: {commit.hexsha[:8]} - "{message}"')
     storage_ref = f"{branch}:{rel_path}@{commit.hexsha}"
     return storage_ref
 
@@ -119,31 +133,45 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
         raise ValueError('git storage requires repo_path or path')
 
     branch, rel_path, commit = _parse_storage_ref(storage_ref)
+    logger.info(f'Reading backup from Git: {storage_ref} (binary={is_binary})')
     repo = Repo(repo_path)
 
     target = commit or branch
     blob_ref = f"{target}:{rel_path}"
     try:
+        logger.debug(f'Retrieving Git blob: {blob_ref}')
         blob_bytes = repo.git.show(blob_ref, raw=True)
         if is_binary:
             # Return raw bytes
             if isinstance(blob_bytes, str):
-                return blob_bytes.encode('latin-1')
-            return blob_bytes
+                data = blob_bytes.encode('latin-1')
+            else:
+                data = blob_bytes
+            logger.info(f'Read {len(data)} bytes from Git blob {blob_ref}')
+            return data
         else:
             # Decode to string
             if isinstance(blob_bytes, bytes):
-                return blob_bytes.decode('utf-8')
-            return blob_bytes
-    except Exception:
+                data = blob_bytes.decode('utf-8')
+            else:
+                data = blob_bytes
+            logger.info(f'Read {len(data)} characters from Git blob {blob_ref}')
+            return data
+    except Exception as e:
+        logger.warning(f'Failed to read Git blob {blob_ref}, falling back to working tree: {e}')
         # Fallback to reading from working tree if blob lookup fails
         full_path = os.path.join(repo_path, rel_path)
         if not os.path.exists(full_path):
+            logger.error(f'Backup not found in Git or working tree: {full_path}')
             raise
         
         if is_binary:
             with open(full_path, 'rb') as handle:
-                return handle.read()
+                data = handle.read()
+            logger.info(f'Read {len(data)} bytes from working tree {full_path}')
+            return data
         else:
             with open(full_path, 'r', encoding='utf-8') as handle:
-                return handle.read()
+                data = handle.read()
+            logger.info(f'Read {len(data)} characters from working tree {full_path}')
+            return data

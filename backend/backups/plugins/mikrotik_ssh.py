@@ -47,7 +47,12 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
             'task_id': None,
             'status': 'failure',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': ['missing username or password in credentials'],
+            'log': [{
+                'source': 'mikrotik_ssh',
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'severity': 'ERROR',
+                'message': 'Missing username or password in credentials'
+            }],
             'device_config': None
         }
 
@@ -71,14 +76,32 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
                 'task_id': None,
                 'status': 'failure',
                 'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'log': [f'Mikrotik export returned error: {error_text.strip()}'],
+                'log': [{
+                    'source': 'mikrotik_ssh',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'severity': 'ERROR',
+                    'message': f'Mikrotik export returned error: {error_text.strip()}'
+                }],
                 'device_config': None
             }
         return {
             'task_id': None,
             'status': 'success',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': [f'connected as {username}', f'credentials: { _mask_credentials(credentials) }'],
+            'log': [
+                {
+                    'source': 'mikrotik_ssh',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'severity': 'INFO',
+                    'message': f'Connected as {username}'
+                },
+                {
+                    'source': 'mikrotik_ssh',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'severity': 'DEBUG',
+                    'message': f'Credentials: {_mask_credentials(credentials)}'
+                }
+            ],
             'device_config': output
         }
     except Exception as exc:
@@ -86,7 +109,12 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
             'task_id': None,
             'status': 'failure',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': [f'connection_failed: {repr(exc)}'],
+            'log': [{
+                'source': 'mikrotik_ssh',
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'severity': 'ERROR',
+                'message': f'Connection failed: {repr(exc)}'
+            }],
             'device_config': None
         }
     finally:

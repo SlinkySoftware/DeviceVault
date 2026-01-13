@@ -370,6 +370,85 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as exc:
             return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @decorators.action(detail=True, methods=['get'])
+    def logs(self, request, pk=None):
+        """Retrieve structured logs for a backup."""
+        backup_result = self.get_object()
+
+        if not backup_result.device.device_group:
+            return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from devices.permissions import user_has_device_group_django_permission
+        if not user_has_device_group_django_permission(request.user, backup_result.device.device_group, 'view_backups'):
+            return response.Response({'error': 'Not authorized to view backups for this device group'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Parse the log field (JSON array of log entries) from collection
+        import json
+        try:
+            log_data = json.loads(backup_result.log) if backup_result.log else []
+        except (json.JSONDecodeError, TypeError):
+            log_data = []
+
+        # Normalize log entries: support both string (legacy) and structured formats
+        normalized_logs = []
+        from backups.plugins import get_plugin
+        plugin_key = backup_result.device.backup_method if backup_result.device else 'unknown'
+        plugin = get_plugin(plugin_key) if plugin_key else None
+        source_default = plugin.friendly_name if plugin else plugin_key
+
+        for entry in log_data:
+            if isinstance(entry, dict):
+                # Already structured
+                normalized_logs.append({
+                    'source': entry.get('source', source_default),
+                    'timestamp': entry.get('timestamp', backup_result.timestamp.isoformat() + 'Z'),
+                    'severity': entry.get('severity', 'INFO'),
+                    'message': entry.get('message', '')
+                })
+            elif isinstance(entry, str):
+                # Legacy string format - convert to structured
+                normalized_logs.append({
+                    'source': source_default,
+                    'timestamp': backup_result.timestamp.isoformat() + 'Z',
+                    'severity': 'INFO',
+                    'message': entry
+                })
+
+        # Also include storage logs if available
+        storage_record = StoredBackup.objects.filter(
+            device=backup_result.device,
+            task_identifier=backup_result.task_identifier,
+        ).order_by('-timestamp').first()
+
+        if storage_record and storage_record.log:
+            try:
+                storage_log_data = json.loads(storage_record.log) if storage_record.log else []
+            except (json.JSONDecodeError, TypeError):
+                storage_log_data = []
+
+            for entry in storage_log_data:
+                if isinstance(entry, dict):
+                    # Already structured
+                    normalized_logs.append({
+                        'source': entry.get('source', 'storage_worker'),
+                        'timestamp': entry.get('timestamp', storage_record.timestamp.isoformat() + 'Z'),
+                        'severity': entry.get('severity', 'INFO'),
+                        'message': entry.get('message', '')
+                    })
+                elif isinstance(entry, str):
+                    # Legacy string format - convert to structured
+                    normalized_logs.append({
+                        'source': 'storage_worker',
+                        'timestamp': storage_record.timestamp.isoformat() + 'Z',
+                        'severity': 'INFO',
+                        'message': entry
+                    })
+
+        # Sort logs by timestamp to show chronological order
+        normalized_logs.sort(key=lambda x: x['timestamp'])
+
+        return response.Response({'logs': normalized_logs}, status=status.HTTP_200_OK)
+
 
 @decorators.api_view(['GET'])
 @decorators.permission_classes([IsAuthenticated])

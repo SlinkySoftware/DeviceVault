@@ -18,7 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import base64
+import logging
 from typing import Dict, Union
+
+logger = logging.getLogger('devicevault.storage.fs')
 
 
 def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_binary: bool = False) -> str:
@@ -44,6 +47,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
     if not base_path:
         raise ValueError('filesystem storage requires base_path or path')
 
+    logger.info(f'Storing backup to filesystem: {rel_path} (binary={is_binary})')
     os.makedirs(base_path, exist_ok=True)
     full_path = os.path.join(base_path, rel_path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -54,19 +58,25 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
             # Assume base64-encoded string, decode to bytes
             try:
                 binary_data = base64.b64decode(content)
+                logger.debug(f'Decoded base64 content ({len(binary_data)} bytes)')
             except Exception:
                 # If decode fails, encode the string as latin-1 (preserves all bytes)
                 binary_data = content.encode('latin-1')
+                logger.debug(f'Encoded string as latin-1 ({len(binary_data)} bytes)')
         else:
             # Already bytes
             binary_data = content
+            logger.debug(f'Using raw binary content ({len(binary_data)} bytes)')
         
         with open(full_path, 'wb') as handle:
             handle.write(binary_data)
+        logger.info(f'Wrote {len(binary_data)} bytes to {full_path}')
     else:
         # Text write mode (existing behavior)
+        content_len = len(content or '')
         with open(full_path, 'w', encoding='utf-8') as handle:
             handle.write(content or '')
+        logger.info(f'Wrote {content_len} characters to {full_path}')
 
     return rel_path
 
@@ -87,14 +97,21 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
         raise ValueError('filesystem storage requires base_path or path')
 
     full_path = os.path.join(base_path, storage_ref)
+    logger.info(f'Reading backup from filesystem: {full_path} (binary={is_binary})')
+    
     if not os.path.exists(full_path):
+        logger.error(f'Backup not found at {full_path}')
         raise FileNotFoundError(f'backup not found at {full_path}')
 
     if is_binary:
         # Binary read: return raw bytes
         with open(full_path, 'rb') as handle:
-            return handle.read()
+            data = handle.read()
+        logger.info(f'Read {len(data)} bytes from {full_path}')
+        return data
     else:
         # Text read: return decoded string
         with open(full_path, 'r', encoding='utf-8') as handle:
-            return handle.read()
+            data = handle.read()
+        logger.info(f'Read {len(data)} characters from {full_path}')
+        return data

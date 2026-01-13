@@ -120,7 +120,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
 
     if not storage_backend or storage_backend not in STORAGE_BACKENDS:
         msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append(msg)
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': msg
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -137,7 +142,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
 
     if not device_config:
         msg = 'device_config missing; nothing to store'
-        log_lines.append(msg)
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': msg
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -175,7 +185,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
         storage_end_ms = int(time.time() * 1000)
         storage_duration_ms = storage_end_ms - storage_start_ms
         
-        log_lines.append(f'stored to {storage_backend}:{storage_ref}')
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'INFO',
+            'message': f'Stored to {storage_backend}:{storage_ref} in {storage_duration_ms}ms'
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -201,7 +216,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
         return result
     except SoftTimeLimitExceeded:
         msg = 'storage_task_soft_time_limit_exceeded'
-        log_lines.append(msg)
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': msg
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -217,7 +237,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
         return result
     except Exception as exc:
         logger.exception('storage_store_failure')
-        log_lines.append(f'unhandled: {repr(exc)}')
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': f'Unhandled exception: {repr(exc)}'
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -259,7 +284,12 @@ def storage_read_task(
 
     if not storage_backend or storage_backend not in STORAGE_BACKENDS:
         msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append(msg)
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': msg
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -295,7 +325,12 @@ def storage_read_task(
         return result
     except SoftTimeLimitExceeded:
         msg = 'storage_read_soft_time_limit_exceeded'
-        log_lines.append(msg)
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': msg
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -311,7 +346,12 @@ def storage_read_task(
         return result
     except Exception as exc:
         logger.exception('storage_read_failure')
-        log_lines.append(f'unhandled: {repr(exc)}')
+        log_lines.append({
+            'source': 'storage_worker',
+            'timestamp': _iso_now(),
+            'severity': 'ERROR',
+            'message': f'Unhandled exception: {repr(exc)}'
+        })
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,

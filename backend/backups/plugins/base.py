@@ -44,10 +44,19 @@ class BackupPlugin:
       "task_id": None | str,
       "status": "success" | "failure",
       "timestamp": "<iso8601 utc>",
-      "log": ["..."],
+      "log": [{"source": "plugin_name", "timestamp": "<iso8601 utc>", "severity": "INFO|WARN|ERROR|DEBUG", "message": "..."}],
       "device_config": "<raw device config string or bytes representation>",
       "is_binary": bool (optional, defaults to False)
     }
+
+    Log entries should be structured objects with:
+      - source: string identifying the plugin or component (e.g., plugin key)
+      - timestamp: ISO 8601 UTC timestamp when the log entry occurred
+      - severity: one of INFO, WARN, ERROR, DEBUG
+      - message: the actual log message text
+    
+    For backward compatibility, string log entries are supported but will be automatically
+    converted to structured format with default values.
 
     For binary backups, device_config must be base64-encoded string (JSON serializable).
 

@@ -85,7 +85,8 @@
                 icon="visibility"
                 label="View"
                 @click="viewBackup(props.row)"
-                class="q-mr-sm"
+                size="sm"
+                class="q-mr-xs"
               />
               <q-btn
                 v-if="props.row.status === 'success'"
@@ -93,6 +94,15 @@
                 :icon="props.row.is_text ? 'download' : 'cloud_download'"
                 :label="props.row.is_text ? 'Download' : 'Download (Binary)'"
                 @click="downloadBackup(props.row)"
+                size="sm"
+                class="q-mr-xs"
+              />
+              <q-btn
+                color="info"
+                icon="description"
+                label="View Logs"
+                @click="viewLogs(props.row)"
+                size="sm"
               />
             </q-td>
           </template>
@@ -121,6 +131,13 @@
         </q-card-section>
       </q-card>
     </q-dialog>
+
+    <!-- Backup Log Viewer Dialog -->
+    <BackupLogViewer
+      v-model="showLogDialog"
+      :backup-id="viewingLogBackupId"
+      :backup-info="viewingLogBackupInfo"
+    />
   </q-page>
 </template>
 
@@ -129,6 +146,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
+import BackupLogViewer from '../components/BackupLogViewer.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -156,6 +174,11 @@ const showViewDialog = ref(false)
 const viewingBackupId = ref('')
 const viewingBackupDate = ref('')
 const viewingBackupContent = ref('')
+
+// Log dialog state
+const showLogDialog = ref(false)
+const viewingLogBackupId = ref(null)
+const viewingLogBackupInfo = ref(null)
 
 // Pagination settings
 const pagination = ref({
@@ -293,6 +316,17 @@ async function downloadBackup(backup) {
   } catch (error) {
     $q.notify({ type: 'negative', message: 'Failed to download backup' })
   }
+}
+
+// View logs
+function viewLogs(backup) {
+  viewingLogBackupId.value = backup.id
+  viewingLogBackupInfo.value = {
+    deviceName: deviceName.value,
+    timestamp: formatDateTime(backup.timestamp),
+    status: backup.status
+  }
+  showLogDialog.value = true
 }
 
 // Navigate to compare page

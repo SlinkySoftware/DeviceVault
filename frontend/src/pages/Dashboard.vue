@@ -17,11 +17,18 @@
           </q-card-section>
           <q-separator />
           <q-card-section class="q-pa-sm widget-content">
-            <component :is="widget.component" :stats="stats" />
+            <component :is="widget.component" :stats="stats" @view-logs="viewLogs" />
           </q-card-section>
         </q-card>
       </div>
     </div>
+
+    <!-- Backup Log Viewer Dialog -->
+    <BackupLogViewer
+      v-model="showLogDialog"
+      :backup-id="viewingLogBackupId"
+      :backup-info="viewingLogBackupInfo"
+    />
   </q-page>
 </template>
 
@@ -30,6 +37,7 @@ import { defineComponent, h } from 'vue'
 import { QIcon, QSelect } from 'quasar'
 import api from '../services/api'
 import { formatRelativeTime } from '../utils/timezone'
+import BackupLogViewer from '../components/BackupLogViewer.vue'
 
 // Widget components - using render functions instead of templates
 const ConfiguredDevicesWidget = defineComponent({
@@ -471,12 +479,7 @@ const ActivityWidget = defineComponent({
                     class: 'q-btn q-btn-item non-selectable no-outline q-btn--flat q-btn--rectangle text-primary q-btn--actionable q-focusable q-hoverable',
                     style: { fontSize: '0.75rem', padding: '4px 8px' },
                     onClick: () => {
-                      // Show log in a dialog
-                      this.$q?.notify?.({
-                        type: 'info',
-                        message: 'Log viewer not yet implemented',
-                        position: 'top'
-                      })
+                      this.$emit('view-logs', item)
                     }
                   }, 'View Log') : null
                 ])
@@ -496,7 +499,8 @@ export default defineComponent({
     AvgTimeWidget,
     SuccessRateWidget,
     ChartWidget,
-    ActivityWidget
+    ActivityWidget,
+    BackupLogViewer
   },
   data() {
     const defaultWidgets = [
@@ -511,7 +515,10 @@ export default defineComponent({
     return {
       stats: { devicesByType: {}, success24h: 0, failed24h: 0, inProgress24h: 0, avgDuration: 0, dailyStats: [] },
       defaultOrder: defaultWidgets,
-      widgetOrder: [...defaultWidgets]
+      widgetOrder: [...defaultWidgets],
+      showLogDialog: false,
+      viewingLogBackupId: null,
+      viewingLogBackupInfo: null
     }
   },
   computed: {
@@ -574,6 +581,15 @@ export default defineComponent({
         this.stats = { devicesByType: {}, success24h: 0, failed24h: 0, inProgress24h: 0, avgDuration: 0, dailyStats: [] }
         this.widgetOrder = [...this.defaultOrder]
       }
+    },
+    viewLogs(item) {
+      this.viewingLogBackupId = item.id
+      this.viewingLogBackupInfo = {
+        deviceName: item.device_name,
+        timestamp: formatRelativeTime(item.timestamp),
+        status: item.status
+      }
+      this.showLogDialog = true
     }
   },
   async mounted() {
