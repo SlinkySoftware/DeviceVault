@@ -48,12 +48,44 @@ class Backup(models.Model):
     """
     device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, help_text='Device that was backed up')
     location = models.ForeignKey('locations.BackupLocation', on_delete=models.SET_NULL, null=True, help_text='Where this backup is stored')
-    timestamp = models.DateTimeField(auto_now_add=True, help_text='When this backup was created')
-    status = models.CharField(max_length=32, default='success', help_text='Backup status: success, failed, pending, etc.')
+    timestamp = models.DateTimeField(auto_now_add=True, help_text='When this backup record was created')
+    requested_at = models.DateTimeField(null=True, blank=True, help_text='When this backup was requested')
+    started_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution started')
+    completed_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution completed')
+    status = models.CharField(max_length=32, default='pending', help_text='Backup status: pending, in_progress, success, failed')
     size_bytes = models.BigIntegerField(null=True, blank=True, help_text='Size of configuration backup in bytes')
     artifact_path = models.CharField(max_length=256, help_text='Path or identifier of backup in storage location')
     is_text = models.BooleanField(default=True, help_text='True if text artifact (configs), False if binary')
     
+    @property
+    def duration_seconds(self):
+        """Return duration in seconds if start and completion timestamps are available."""
+        if self.started_at and self.completed_at:
+            return int((self.completed_at - self.started_at).total_seconds())
+        return None
+
     def __str__(self):
         """Return formatted string with device ID and timestamp"""
         return f"{self.device_id} @ {self.timestamp}"
+
+
+class StoredBackup(models.Model):
+    """Authoritative index of where a collected backup was stored."""
+
+    task_id = models.CharField(max_length=64, db_index=True)
+    task_identifier = models.CharField(max_length=128, db_index=True)
+    device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, db_index=True)
+    storage_backend = models.CharField(max_length=32, db_index=True)
+    storage_ref = models.CharField(max_length=256)
+    status = models.CharField(max_length=16)
+    timestamp = models.DateTimeField()
+    log = models.TextField(help_text='JSON serialized list of log messages')
+    
+    # Timing metrics (in milliseconds)
+    storage_duration_ms = models.IntegerField(null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)')
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}"

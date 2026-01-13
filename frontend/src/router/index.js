@@ -21,17 +21,20 @@ import Dashboard from '../pages/Dashboard.vue'
 import Devices from '../pages/Devices.vue'
 import EditDevice from '../pages/EditDevice.vue'
 import ViewBackups from '../pages/ViewBackups.vue'
+import CompareBackups from '../pages/CompareBackups.vue'
 import DeviceTypes from '../pages/DeviceTypes.vue'
 import BackupMethods from '../pages/BackupMethods.vue'
 import Credentials from '../pages/Credentials.vue'
 import BackupLocations from '../pages/BackupLocations.vue'
 import BackupSchedules from '../pages/BackupSchedules.vue'
 import RetentionPolicies from '../pages/RetentionPolicies.vue'
+import CollectionGroups from '../pages/CollectionGroups.vue'
 import Groups from '../pages/Groups.vue'
 import DeviceGroups from '../pages/DeviceGroups.vue'
 import Profile from '../pages/Profile.vue'
 import Users from '../pages/Users.vue'
 import Login from '../pages/Login.vue'
+import Theme from '../pages/Theme.vue'
 
 /**
  * Application Routes Configuration
@@ -55,6 +58,7 @@ const routes = [
   { path: '/devices', component: Devices, meta: { requiresAuth: true } },
   { path: '/devices/:id', component: EditDevice, meta: { requiresAuth: true } },
   { path: '/devices/:id/backups', component: ViewBackups, meta: { requiresAuth: true } },
+  { path: '/devices/:id/backups/compare', component: CompareBackups, meta: { requiresAuth: true } },
   { path: '/profile', component: Profile, meta: { requiresAuth: true } },
   
   // ===== Admin Routes (/vaultadmin) =====
@@ -64,9 +68,11 @@ const routes = [
   { path: '/vaultadmin/backup-locations', component: BackupLocations, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-schedules', component: BackupSchedules, meta: { requiresAuth: true } },
   { path: '/vaultadmin/retention-policies', component: RetentionPolicies, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/collection-groups', component: CollectionGroups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/groups', component: Groups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/device-groups', component: DeviceGroups, meta: { requiresAuth: true } },
-  { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } }
+  { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/theme', component: Theme, meta: { requiresAuth: true } }
 ]
 
 /**

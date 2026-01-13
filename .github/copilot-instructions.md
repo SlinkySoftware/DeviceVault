@@ -23,6 +23,16 @@ Purpose: give AI coding agents the minimal, actionable context to be productive 
   - Django management in containers: `make migrate` or `docker compose -f docker-compose.yaml run --rm django python3 manage.py migrate --run-syncdb`.
   - Frontend dev: `cd frontend && npm install && npm run dev` or `make watch-frontend` (Makefile target).
 
+- **Python virtual environment** (CRITICAL):
+  - A Python virtual environment exists at `.venv` (repository root) and MUST be activated before running any Python/Django commands.
+  - **Always** activate the venv first: `source .venv/bin/activate`.
+  - Correct command patterns:
+    - `source .venv/bin/activate && python manage.py shell`
+    - `source .venv/bin/activate && python -m pip install <package>`
+  - **NEVER** run `python` or `python3` directly without activating the venv — this will fail with "ModuleNotFoundError: No module named 'django'".
+  - The `devicevault.sh` script handles venv activation automatically when starting services.
+  - Comands should not be run using a full path to the Python executable.
+  - The use of PYTHONPATH is strongly discouraged. You should always modify your execution that it can be run directly from the backend directory.
 - **Project-specific conventions & patterns**:
   - Config-first: runtime behavior is driven by `backend/config/config.yaml`. Agents editing settings or DB code should check that YAML before changing defaults.
   - Pluggable storage: add new storage backends by following `backend/storage/git.py` interface (save, list, retrieve) and registering configuration via backup location models in `backups/`.
@@ -39,6 +49,8 @@ Purpose: give AI coding agents the minimal, actionable context to be productive 
 
 - **Examples (copyable patterns)**:
   - Read config in settings: check `backend/devicevault/settings.py` for `CONFIG_PATH` loading.
-  - Run migrations (local): `./devicevault.sh start` then `cd backend && python manage.py migrate --run-syncdb`.
+  - Run migrations (local): `./devicevault.sh start` then `cd backend && source ../.venv/bin/activate && python manage.py migrate --run-syncdb`.
+  - Django shell (with venv): `cd backend && source ../.venv/bin/activate && python manage.py shell`.
+  - Install packages: `source .venv/bin/activate && pip install <package>`.
 
 If anything here is unclear or you'd like more detail about a specific area (connectors, storage, or the Docker-based workflow), tell me which part and I will expand or adjust this document.

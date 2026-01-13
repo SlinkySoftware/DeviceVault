@@ -1,6 +1,6 @@
 <template>
   <q-layout view="hHh lpR fFf">
-    <q-header v-if="!isLoginRoute" elevated class="bg-primary text-white">
+    <q-header v-if="!isLoginRoute" elevated class="text-white" :style="{ backgroundColor: themeColors.titleBar }">
       <q-toolbar>
         <q-toolbar-title class="row items-center no-wrap">
           <img src="/logos/dv-mini-logo.png" alt="DeviceVault" class="logo-mini q-mr-sm" />
@@ -148,6 +148,29 @@
                 </q-item>
               </q-list>
             </q-expansion-item>
+
+            <!-- Application Settings submenu (superuser only) -->
+            <q-expansion-item v-if="isSuperuser" icon="settings_applications" label="Application Settings" dense dense-toggle class="submenu-level-1">
+              <q-list class="submenu-items">
+                <q-item clickable to="/vaultadmin/collection-groups" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="workspaces" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Collection Groups</q-item-label>
+                  </q-item-section>
+                </q-item>
+
+                <q-item clickable to="/vaultadmin/theme" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="palette" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Theme</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-expansion-item>
           </q-list>
         </q-expansion-item>
       </q-list>
@@ -172,10 +195,18 @@ const route = useRoute()
 
 // Consider both staff and superuser as admin for UI visibility
 const isAdmin = computed(() => !!(user.value && (user.value.is_staff || user.value.is_superuser)))
+const isSuperuser = computed(() => !!(user.value && user.value.is_superuser))
 const isAuthenticated = ref(!!localStorage.getItem('authToken'))
 const user = ref(null)
 const userLabel = computed(() => user.value?.username || 'Account')
 const isLoginRoute = computed(() => route.path === '/login')
+
+// Theme colors with defaults
+const themeColors = ref({
+  titleBar: '#1976D2',
+  dashboardBox: '#1976D2',
+  dashboardNestedBox: '#2196F3'
+})
 
 const logout = async () => {
   try {
@@ -188,6 +219,32 @@ const logout = async () => {
   isAuthenticated.value = false
   $q.notify({ type: 'info', message: 'Logged out', position: 'top' })
   router.push('/login')
+}
+
+// Load theme settings from API
+const loadThemeSettings = async () => {
+  try {
+    const res = await api.get('/theme-settings/')
+    if (res.data) {
+      themeColors.value = {
+        titleBar: res.data.title_bar_color || '#1976D2',
+        dashboardBox: res.data.dashboard_box_color || '#1976D2',
+        dashboardNestedBox: res.data.dashboard_nested_box_color || '#2196F3'
+      }
+      // Set CSS variables for global use
+      document.documentElement.style.setProperty('--theme-title-bar', themeColors.value.titleBar)
+      document.documentElement.style.setProperty('--theme-dashboard-box', themeColors.value.dashboardBox)
+      document.documentElement.style.setProperty('--theme-dashboard-nested-box', themeColors.value.dashboardNestedBox)
+    }
+  } catch (e) {
+    // Use defaults if fetch fails
+    console.warn('Failed to load theme settings, using defaults')
+  }
+}
+
+// Listen for theme updates from Theme.vue
+const handleThemeUpdate = () => {
+  loadThemeSettings()
 }
 
 const syncAuth = async () => {
@@ -229,10 +286,18 @@ const syncAuth = async () => {
 }
 
 onMounted(() => {
+  // Set default CSS variables immediately
+  document.documentElement.style.setProperty('--theme-title-bar', '#1976D2')
+  document.documentElement.style.setProperty('--theme-dashboard-box', '#1976D2')
+  document.documentElement.style.setProperty('--theme-dashboard-nested-box', '#2196F3')
+  
   // Initialize theme from localStorage or default to dark
   const savedTheme = localStorage.getItem('userTheme') || 'dark'
   $q.dark.set(savedTheme === 'dark')
   syncAuth()
+  loadThemeSettings()
+  // Listen for theme updates
+  window.addEventListener('theme-updated', handleThemeUpdate)
 })
 
 // Re-sync auth whenever route changes (after login redirect) to refresh dropdown state
@@ -264,5 +329,53 @@ watch(() => route.fullPath, () => {
 /* Dark mode adjustments */
 body.body--dark .submenu-items {
   background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Side menu color scheme - non-selected items are blue */
+:deep(.q-item) {
+  color: #479aee;
+}
+
+body.body--dark :deep(.q-item) {
+  color: #42A5F5;
+}
+
+/* Expansion items (containers/submenus) - subtle gray to differentiate from selectable items */
+:deep(.q-expansion-item__container > .q-item) {
+  color: #B0B0B0 !important;
+}
+
+body.body--dark :deep(.q-expansion-item__container > .q-item) {
+  color: #E0E0E0 !important;
+}
+
+/* Side menu - selected/active item has white text with dark blue background */
+:deep(.q-item.q-router-link--active),
+:deep(.q-item.q-router-link--exact-active) {
+  background-color: #1565C0 !important;
+  color: white !important;
+}
+
+body.body--dark :deep(.q-item.q-router-link--active),
+body.body--dark :deep(.q-item.q-router-link--exact-active) {
+  background-color: #0D47A1 !important;
+  color: white !important;
+}
+
+/* Ensure icons inherit the color */
+:deep(.q-item .q-icon) {
+  color: inherit;
+}
+</style>
+<style>
+/* Global theme styles - apply card border color across all cards */
+:root {
+  --theme-title-bar: #1976D2;
+  --theme-dashboard-box: #1976D2;
+  --theme-dashboard-nested-box: #2196F3;
+}
+
+.q-card {
+  border: 2px solid var(--theme-dashboard-box) !important;
 }
 </style>

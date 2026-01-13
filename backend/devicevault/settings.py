@@ -43,7 +43,10 @@ elif ENGINE=='postgres':
 elif ENGINE=='mysql':
     DATABASES={'default':{'ENGINE':'django.db.backends.mysql','NAME':DB_CFG.get('name','devicevault'),'USER':DB_CFG.get('user',''),'PASSWORD':DB_CFG.get('password',''),'HOST':DB_CFG.get('host','localhost'),'PORT':DB_CFG.get('port','3306')}}
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'Australia/Melbourne'
+# Application timezone for display - read from config.yaml or default to Australia/Sydney
+DEVICEVAULT_DISPLAY_TIMEZONE = cfg.get('timezone', 'Australia/Sydney')
+# Django timezone - always UTC for database storage
+TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'
@@ -59,3 +62,27 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated'
     ]
 }
+
+# Celery configuration: prefer explicit env var, then config.yaml 'celery' section, then sensible defaults
+CELERY_BROKER_URL = os.environ.get(
+    'DEVICEVAULT_BROKER_URL',
+    cfg.get('celery', {}).get('broker', 'amqp://guest:guest@localhost:5672//')
+)
+DEVICEVAULT_REDIS_URL = os.environ.get(
+    'DEVICEVAULT_REDIS_URL',
+    cfg.get('redis', {}).get('url', 'redis://localhost:6379/1')
+)
+CELERY_RESULT_BACKEND = os.environ.get(
+    'DEVICEVAULT_RESULT_BACKEND',
+    cfg.get('celery', {}).get('result_backend', DEVICEVAULT_REDIS_URL)
+)
+# RabbitMQ management API for Flower - uses HTTP port (15672 by default)
+CELERY_BROKER_API = os.environ.get(
+    'DEVICEVAULT_BROKER_API',
+    cfg.get('celery', {}).get('broker_api', 'http://guest:guest@localhost:15672/api/')
+)
+DEVICEVAULT_RESULTS_STREAM = cfg.get('results_stream', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results'))
+DEVICEVAULT_STORAGE_RESULTS_STREAM = os.environ.get(
+    'DEVICEVAULT_STORAGE_RESULTS_STREAM',
+    cfg.get('storage_results_stream', 'storage:results')
+)

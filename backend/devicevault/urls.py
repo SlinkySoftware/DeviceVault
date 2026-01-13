@@ -25,9 +25,11 @@ from api import views
 router = routers.DefaultRouter()
 router.register(r'device-types', views.DeviceTypeViewSet)
 router.register(r'manufacturers', views.ManufacturerViewSet)
+router.register(r'collection-groups', views.CollectionGroupViewSet)
 router.register(r'backup-methods', views.BackupMethodViewSet, basename='backup-methods')
 router.register(r'devices', views.DeviceViewSet)
 router.register(r'backups', views.BackupViewSet)
+router.register(r'stored-backups', views.StoredBackupViewSet)
 router.register(r'retention-policies', views.RetentionPolicyViewSet)
 router.register(r'backup-schedules', views.BackupScheduleViewSet)
 router.register(r'backup-locations', views.BackupLocationViewSet)
@@ -47,13 +49,14 @@ urlpatterns = [
     path('api/', include(router.urls)), 
     path('api/onboarding/', views.onboarding), 
     path('api/dashboard-stats/', views.dashboard_stats),
+    path('api/recent-backup-activity/', views.recent_backup_activity),
+    path('api/timezone/', views.timezone_config),
     path('api/auth/config/', views.AuthConfigView.as_view()), 
     path('api/backups/compare/', views.compare_backups),
     path('api/auth/login/', views.LoginView.as_view()), 
     path('api/auth/logout/', views.LogoutView.as_view()), 
     path('api/auth/user/', views.UserInfoView.as_view()),
     path('api/auth/change-password/', views.ChangePasswordView.as_view()),
-    path('api/dashboard-layout/', views.DashboardLayoutView.as_view()),
-    path('api/dashboard-layout/default/', views.DashboardDefaultLayoutView.as_view()),
-    path('api/user/preferences/', views.UserPreferencesView.as_view()),
+    path('api/theme-settings/', views.ThemeSettingsView.as_view()),
+    # Dashboard layout/customization disabled; fixed layout only
 ]

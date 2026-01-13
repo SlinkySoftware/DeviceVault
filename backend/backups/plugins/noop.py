@@ -17,13 +17,21 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from typing import Dict
+from typing import Dict, Any, Optional
+from datetime import datetime
 
 from .base import BackupPlugin
 
 
-def _noop_export(ip_address: str, credentials: Dict) -> str:
-    return ''
+def _noop_export(config: Dict[str, Any], timeout: Optional[int] = None) -> Dict[str, Any]:
+    # Return an empty successful result (keeps old demo behavior)
+    return {
+        'task_id': None,
+        'status': 'success',
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'log': ['noop_plugin_executed'],
+        'device_config': ''
+    }
 
 
 PLUGIN = BackupPlugin(

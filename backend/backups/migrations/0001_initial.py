@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('devices', '0003_device_is_example_data'),
+        ('devices', '0013_ensure_devicegroup_tables'),
         ('locations', '0001_initial'),
     ]
 

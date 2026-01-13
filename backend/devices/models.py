@@ -30,6 +30,57 @@ from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 
 
+# ===== Collection Group Models =====
+
+class CollectionGroup(models.Model):
+    """
+    CollectionGroup Model: Groups devices for collection task assignment
+    
+    Fields:
+        - name (CharField): Unique collection group name
+        - description (TextField): Description of the collection group's purpose
+        - rabbitmq_queue_id (CharField): RabbitMQ queue ID for task distribution
+        - created_at (DateTimeField): When group was created
+        - updated_at (DateTimeField): When group was last modified
+    
+    Methods:
+        - __str__(): Returns the collection group name
+        - device_count: Property that returns count of devices in this group
+    
+    Usage:
+        Collection groups are used to assign data collection tasks to specific
+        worker processes. Devices are assigned to collection groups, and workers
+        listening on the group's RabbitMQ queue will receive collection tasks.
+    """
+    name = models.CharField(max_length=128, unique=True, help_text='Unique collection group name')
+    description = models.TextField(blank=True, help_text='Description of the collection group purpose')
+    rabbitmq_queue_id = models.CharField(max_length=128, help_text='RabbitMQ queue ID for task distribution')
+    created_at = models.DateTimeField(auto_now_add=True, help_text='When group was created')
+    updated_at = models.DateTimeField(auto_now=True, help_text='When group was last modified')
+    
+    def __str__(self):
+        """Return collection group name for admin display"""
+        return self.name
+    
+    @property
+    def device_count(self):
+        """Return count of devices assigned to this collection group"""
+        return self.devices.count()
+    
+    def save(self, *args, **kwargs):
+        # Ensure name is clean and not padded with whitespace
+        if self.name is not None:
+            self.name = self.name.strip()
+        if self.rabbitmq_queue_id is not None:
+            self.rabbitmq_queue_id = self.rabbitmq_queue_id.strip()
+        super().save(*args, **kwargs)
+    
+    class Meta:
+        verbose_name = 'Collection Group'
+        verbose_name_plural = 'Collection Groups'
+        ordering = ['name']
+
+
 class DeviceType(models.Model):
     """
     DeviceType Model: Represents the category/type of network device
@@ -79,7 +130,6 @@ class Device(models.Model):
         - backup_method (CharField): Backup plugin key to use (e.g. mikrotik_ssh_export, noop, etc.)
         - device_group (ForeignKey): Device group for RBAC access control
         - enabled (BooleanField): Whether device is active for backups (default: True)
-        - is_example_data (BooleanField): If True, device is excluded from backup processing (default: False)
         - last_backup_time (DateTimeField): Timestamp of most recent successful backup
         - last_backup_status (CharField): Status of last backup attempt (success/failed/pending)
         - retention_policy (ForeignKey): Backup retention rules to apply to this device
@@ -91,7 +141,6 @@ class Device(models.Model):
     
     Usage:
         Devices are created through the Django admin or API, linked to a device group for RBAC.
-        The is_example_data flag allows marking demo devices to exclude them from production backups.
         Access to devices is controlled via device group roles and permissions.
     """
     name = models.CharField(max_length=128, help_text='Device hostname or identifier')
@@ -101,8 +150,8 @@ class Device(models.Model):
     manufacturer = models.ForeignKey(Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)')
     backup_method = models.CharField(max_length=128, default='noop', help_text='Backup plugin key to use for this device')
     device_group = models.ForeignKey('DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control')
+    collection_group = models.ForeignKey('CollectionGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices', help_text='Collection group for task distribution')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
-    is_example_data = models.BooleanField(default=False, help_text='Mark as example/demo data to exclude from backups')
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
     last_backup_status = models.CharField(max_length=32, blank=True, help_text='Status of last backup: success, failed, pending, etc.')
     retention_policy = models.ForeignKey('policies.RetentionPolicy', on_delete=models.SET_NULL, null=True, blank=True, help_text='Backup retention policy')
@@ -112,6 +161,34 @@ class Device(models.Model):
     def __str__(self):
         """Return device name for admin display"""
         return self.name
+
+
+class DeviceBackupResult(models.Model):
+    """
+    Stores the result metadata for a device backup collection task.
+
+    Note: The raw device configuration is NOT stored here; this model stores
+    references / tracing information. The `task_identifier` is intended to be
+    a logical identifier for the backup job so storage backends can retrieve
+    the actual device_config artifact if necessary.
+    """
+    task_id = models.CharField(max_length=64, db_index=True)
+    task_identifier = models.CharField(max_length=128, db_index=True)
+    device = models.ForeignKey('Device', on_delete=models.CASCADE, db_index=True)
+    status = models.CharField(max_length=16)
+    timestamp = models.DateTimeField()
+    log = models.TextField(help_text='JSON serialized list of log messages')
+    
+    # Timing metrics (in milliseconds)
+    initiated_at = models.DateTimeField(null=True, blank=True, help_text='UTC timestamp when backup was initiated (step 1)')
+    collection_duration_ms = models.IntegerField(null=True, blank=True, help_text='Collection execution time in milliseconds (step 3)')
+    overall_duration_ms = models.IntegerField(null=True, blank=True, help_text='Overall processing time from initiation to completion in milliseconds')
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.task_identifier} @ {self.device.name} -> {self.status}"
 
 
 # ===== Device Group RBAC Models =====
@@ -154,10 +231,11 @@ class DeviceGroup(models.Model):
 class DeviceGroupDjangoPermissions(models.Model):
     """
     Maps a DeviceGroup to its corresponding Django auth Permissions.
-    Creates three permissions per device group:
+    Creates four permissions per device group:
     - Device Group - {name} - Can View
     - Device Group - {name} - Can Modify
     - Device Group - {name} - Can View Backups
+    - Device Group - {name} - Can Backup Now
     """
     device_group = models.OneToOneField(DeviceGroup, on_delete=models.CASCADE, related_name='django_permissions')
     perm_view = models.ForeignKey(
@@ -184,6 +262,14 @@ class DeviceGroupDjangoPermissions(models.Model):
         blank=True,
         default=None,
     )
+    perm_backup_now = models.ForeignKey(
+        AuthPermission,
+        on_delete=models.CASCADE,
+        related_name='dg_perm_backup_now',
+        null=True,
+        blank=True,
+        default=None,
+    )
 
     def __str__(self):
         return f"RBAC|DG_{self.device_group.name}"
@@ -206,6 +292,7 @@ class DeviceGroupDjangoPermissions(models.Model):
             ('view', f'Device Group - {device_group.name} - Can View'),
             ('modify', f'Device Group - {device_group.name} - Can Modify'),
             ('view_backups', f'Device Group - {device_group.name} - Can View Backups'),
+            ('backup_now', f'Device Group - {device_group.name} - Can Backup Now'),
         ]
         
         for action, name in permission_specs:
@@ -223,6 +310,7 @@ class DeviceGroupDjangoPermissions(models.Model):
                 'perm_view': perms['view'],
                 'perm_modify': perms['modify'],
                 'perm_view_backups': perms['view_backups'],
+                'perm_backup_now': perms['backup_now'],
             }
         )
         updated = False
@@ -232,8 +320,10 @@ class DeviceGroupDjangoPermissions(models.Model):
             instance.perm_modify = perms['modify']; updated = True
         if instance.perm_view_backups_id != perms['view_backups'].id:
             instance.perm_view_backups = perms['view_backups']; updated = True
+        if instance.perm_backup_now_id != perms['backup_now'].id:
+            instance.perm_backup_now = perms['backup_now']; updated = True
         if updated:
-            instance.save(update_fields=['perm_view', 'perm_modify', 'perm_view_backups'])
+            instance.save(update_fields=['perm_view', 'perm_modify', 'perm_view_backups', 'perm_backup_now'])
         return instance
 
     def rename_to(self, new_group_name: str):
@@ -242,6 +332,7 @@ class DeviceGroupDjangoPermissions(models.Model):
             ('view', self.perm_view, f'Device Group - {new_group_name} - Can View'),
             ('modify', self.perm_modify, f'Device Group - {new_group_name} - Can Modify'),
             ('view_backups', self.perm_view_backups, f'Device Group - {new_group_name} - Can View Backups'),
+            ('backup_now', self.perm_backup_now, f'Device Group - {new_group_name} - Can Backup Now'),
         ]
         
         for action, perm, expected in permission_specs:
@@ -251,10 +342,10 @@ class DeviceGroupDjangoPermissions(models.Model):
 
     def has_any_holders(self) -> bool:
         # Any users with these permissions directly assigned
-        if self.perm_view.user_set.exists() or self.perm_modify.user_set.exists() or self.perm_view_backups.user_set.exists():
+        if self.perm_view.user_set.exists() or self.perm_modify.user_set.exists() or self.perm_view_backups.user_set.exists() or self.perm_backup_now.user_set.exists():
             return True
         # Any groups with these permissions assigned
-        if self.perm_view.group_set.exists() or self.perm_modify.group_set.exists() or self.perm_view_backups.group_set.exists():
+        if self.perm_view.group_set.exists() or self.perm_modify.group_set.exists() or self.perm_view_backups.group_set.exists() or self.perm_backup_now.group_set.exists():
             return True
         # Also consider our own role assignments as usage of this device group
         if 'UserDeviceGroupRole' in globals():
@@ -265,6 +356,14 @@ class DeviceGroupDjangoPermissions(models.Model):
                 return True
         return False
 
+@receiver(pre_delete, sender=DeviceGroup)
+def prevent_delete_if_devices_exist(sender, instance, **kwargs):
+    # Block deletion if any Device references this group
+    from devices.models import Device
+    if Device.objects.filter(device_group=instance).exists():
+        from django.core.exceptions import ValidationError
+        raise ValidationError('Cannot delete device group: devices are assigned to this group.')
+
 
 class DeviceGroupPermission(models.Model):
     """
@@ -272,6 +371,7 @@ class DeviceGroupPermission(models.Model):
     
     Fields:
         - code (CharField): Unique permission code (e.g., "view_config", "view_backups", "edit_config", etc.)
+        - name (CharField): Human-readable name for the permission
         - description (TextField): Description of what this permission allows
     
     Permission Codes:
@@ -282,8 +382,13 @@ class DeviceGroupPermission(models.Model):
         - delete_device: Can delete devices from the group
         - enable_device: Can enable/disable devices in the group
     """
-    code = models.CharField(max_length=128, unique=True, help_text='Unique permission code')
+    code = models.CharField(max_length=50, unique=True, help_text='Unique permission code')
+    name = models.CharField(max_length=100, help_text='Human-readable permission name')
     description = models.TextField(blank=True, help_text='Description of what this permission allows')
+    
+    class Meta:
+        db_table = 'devices_devicegrouppermission'
+        ordering = ['code']
     
     def __str__(self):
         """Return permission code for admin display"""
@@ -297,6 +402,7 @@ class DeviceGroupRole(models.Model):
     Fields:
         - name (CharField): Role name (e.g., "Operator", "Viewer", "Admin")
         - device_group (ForeignKey): Which device group this role applies to
+        - description (TextField): Description of the role's purpose
         - permissions (ManyToManyField): Permissions granted by this role
         - created_at (DateTimeField): When role was created
     
@@ -307,13 +413,16 @@ class DeviceGroupRole(models.Model):
         Roles are created per device group and grant specific permissions.
         Users and auth groups are then assigned these roles to control their access.
     """
-    name = models.CharField(max_length=128, help_text='Role name within the device group')
+    name = models.CharField(max_length=100, help_text='Role name within the device group')
     device_group = models.ForeignKey(DeviceGroup, on_delete=models.CASCADE, related_name='roles', help_text='Device group this role applies to')
-    permissions = models.ManyToManyField(DeviceGroupPermission, blank=True, help_text='Permissions granted by this role')
+    description = models.TextField(help_text='Description of the role')
+    permissions = models.ManyToManyField(DeviceGroupPermission, blank=True, related_name='roles', help_text='Permissions granted by this role')
     created_at = models.DateTimeField(default=timezone.now, blank=True, null=True, help_text='When role was created')
     
     class Meta:
+        db_table = 'devices_devicegrouprole'
         unique_together = ('name', 'device_group')
+        ordering = ['device_group', 'name']
         verbose_name = 'Device Group Role'
         verbose_name_plural = 'Device Group Roles'
     
@@ -396,3 +505,10 @@ def prevent_delete_if_permissions_in_use(sender, instance, **kwargs):
     if link.has_any_holders():
         from django.core.exceptions import ValidationError
         raise ValidationError('Cannot delete device group: related Django permissions are assigned to users or groups.')
+
+@receiver(pre_delete, sender=CollectionGroup)
+def prevent_delete_if_devices_in_collection_group(sender, instance, **kwargs):
+    """Block deletion of collection groups if any devices are assigned to them"""
+    if instance.device_count > 0:
+        from django.core.exceptions import ValidationError
+        raise ValidationError(f'Cannot delete collection group "{instance.name}": {instance.device_count} device(s) are assigned to this group.')

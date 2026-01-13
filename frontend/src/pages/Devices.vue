@@ -1,67 +1,80 @@
 <template>
   <q-page class="q-pa-md">
-    <div class="row justify-between items-center q-mb-md">
-      <div class="text-h4">Devices</div>
-      <q-btn 
-        v-if="canAddDevice" 
-        color="primary" 
-        label="Add Device" 
-        @click="$router.push('/devices/new')" 
-      />
-    </div>
-    
-    <div class="row q-col-gutter-md q-mb-md">
-      <div class="col-12 col-md-3">
-        <q-input 
-          v-model="filter.name" 
-          outlined 
-          label="Name"
-          clearable
-        />
-      </div>
-      <div class="col-12 col-md-3">
-        <q-select
-          v-model="filter.type"
-          :options="deviceTypes"
-          option-value="id"
-          option-label="name"
-          outlined
-          label="Device Type"
-          clearable
-          emit-value
-          map-options
-        />
-      </div>
-      <div class="col-12 col-md-3">
-        <q-select
-          v-model="filter.device_group"
-          :options="deviceGroups"
-          option-value="id"
-          option-label="name"
-          outlined
-          label="Device Group"
-          clearable
-          emit-value
-          map-options
-        />
-      </div>
-      <div class="col-12 col-md-3">
-        <q-select
-          v-model="filter.status"
-          :options="['All', 'success', 'failed']"
-          outlined
-          label="Status"
-          clearable
-        />
-      </div>
-    </div>
+    <q-card>
+      <q-card-section>
+        <div class="row items-center q-mb-sm">
+          <div class="col">
+            <div class="text-h4">Devices</div>
+          </div>
+          <div class="col-auto">
+            <q-btn 
+              v-if="canAddDevice" 
+              color="primary" 
+              label="Add Device" 
+              @click="$router.push('/devices/new')" 
+            />
+          </div>
+        </div>
+        <div class="row justify-end">
+          <div class="text-caption text-grey">
+            Manage network devices and their configurations
+          </div>
+        </div>
+      </q-card-section>
+      <q-separator />
+      
+      <q-card-section>
+        <div class="row q-col-gutter-md q-mb-md">
+          <div class="col-12 col-md-3">
+            <q-input 
+              v-model="filter.name" 
+              outlined 
+              label="Name"
+              clearable
+            />
+          </div>
+          <div class="col-12 col-md-3">
+            <q-select
+              v-model="filter.type"
+              :options="deviceTypes"
+              option-value="id"
+              option-label="name"
+              outlined
+              label="Device Type"
+              clearable
+              emit-value
+              map-options
+            />
+          </div>
+          <div class="col-12 col-md-3">
+            <q-select
+              v-model="filter.device_group"
+              :options="deviceGroups"
+              option-value="id"
+              option-label="name"
+              outlined
+              label="Device Group"
+              clearable
+              emit-value
+              map-options
+            />
+          </div>
+          <div class="col-12 col-md-3">
+            <q-select
+              v-model="filter.status"
+              :options="['All', 'success', 'failed']"
+              outlined
+              label="Status"
+              clearable
+            />
+          </div>
+        </div>
 
-    <q-table
+        <q-table
       :rows="filteredDevices"
       :columns="columns"
       row-key="id"
       flat
-      bordered
       class="device-table"
     >
       <template v-slot:body-cell-type="props">
@@ -91,29 +104,18 @@
           </q-badge>
         </q-td>
       </template>
-      <template v-slot:body-cell-is_example_data="props">
-        <q-td :props="props">
-          <q-badge :color="props.row.is_example_data ? 'warning' : 'grey'">
-            {{ props.row.is_example_data ? 'Yes' : 'No' }}
-          </q-badge>
-        </q-td>
-      </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
           <q-btn 
-            v-if="canEditDevice(props.row)"
-            flat 
-            dense 
+            v-if="canConfigureDevice(props.row)"
             color="primary" 
-            icon="edit"
-            label="Edit"
+            icon="settings"
+            label="Configure"
             :to="`/devices/${props.row.id}`"
             class="q-mr-sm"
           />
           <q-btn 
             v-if="canViewBackups(props.row)"
-            flat 
-            dense 
             color="primary" 
             icon="visibility"
             label="Backups"
@@ -121,17 +123,18 @@
             class="q-mr-sm"
           />
           <q-btn 
-            v-if="canEnableDevice(props.row)"
-            flat 
-            dense 
-            :color="props.row.enabled ? 'negative' : 'positive'"
-            :icon="props.row.enabled ? 'toggle_on' : 'toggle_off'"
-            :label="props.row.enabled ? 'Disable' : 'Enable'"
-            @click="toggleEnabled(props.row)"
+            v-if="canBackupNow(props.row)"
+            color="primary" 
+            icon="play_arrow"
+            label="Backup Now"
+            @click="backupNow(props.row)"
+            class="q-mr-sm"
           />
         </q-td>
       </template>
     </q-table>
+      </q-card-section>
+    </q-card>
   </q-page>
 </template>
 
@@ -151,6 +154,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useQuasar } from 'quasar'
 import api from '../services/api'
+import { formatDateTime } from '../utils/timezone'
 
 // ===== Component State =====
 
@@ -173,6 +177,8 @@ const deviceTypes = ref([])
  */
 const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
 
+const formatLastBackup = (value) => (value ? formatDateTime(value) : 'N/A')
+
 /**
  * Table Column Configuration
  * 
@@ -190,15 +196,14 @@ const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
  */
 const columns = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
-  { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left' },
+  { name: 'device_group', label: 'Device Group', field: row => row.device_group_name || row.device_group?.name || 'N/A', align: 'left', sortable: true },
+  { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left', sortable: true },
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'backup_method', label: 'Backup Method', field: 'backup_method_display', align: 'left', sortable: true },
-  { name: 'device_group', label: 'Device Group', field: row => row.device_group_name || row.device_group?.name || 'N/A', align: 'left', sortable: true },
-  { name: 'last_backup_time', label: 'Last Backup', field: 'last_backup_time', align: 'left' },
-  { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center' },
-  { name: 'is_example_data', label: 'Example', field: 'is_example_data', align: 'center' },
-  { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center' },
-  { name: 'actions', label: 'Actions', align: 'center' }
+  { name: 'last_backup_time', label: 'Last Backup', field: row => formatLastBackup(row.last_backup_time), align: 'left', sortable: true },
+  { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center', sortable: true },
+  { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center', sortable: true },
+  { name: 'actions', label: 'Actions', align: 'right' }
 ]
 
 // ===== Computed Properties =====
@@ -208,7 +213,10 @@ const columns = [
  * Shown if user has 'add_device' permission in at least one device group
  */
 const canAddDevice = computed(() => {
-  return devices.value.some(d => d.user_permissions && d.user_permissions.includes('add_device'))
+  // Show Add button if user has modify permission for any device group
+  // Prefer deviceGroups.can_modify (from API) to not depend on having devices
+  if (deviceGroups.value && deviceGroups.value.some(g => g.can_modify)) return true
+  return devices.value.some(d => d.user_permissions && d.user_permissions.includes('modify'))
 })
 
 /**
@@ -257,8 +265,9 @@ const filteredDevices = computed(() => {
  * Returns:
  * - true if user has 'edit_configuration' permission for device's group
  */
-function canEditDevice(device) {
-  return device.user_permissions && device.user_permissions.includes('edit_configuration')
+function canConfigureDevice(device) {
+  // Configure visible for modify OR view
+  return device.user_permissions && (device.user_permissions.includes('modify') || device.user_permissions.includes('view'))
 }
 
 /**
@@ -284,7 +293,15 @@ function canViewBackups(device) {
  * - true if user has 'enable_device' permission for device's group
  */
 function canEnableDevice(device) {
-  return device.user_permissions && device.user_permissions.includes('enable_device')
+  // Enable/Disable treated as a modify operation
+  return device.user_permissions && device.user_permissions.includes('modify')
+}
+
+/**
+ * Check if user can trigger Backup Now for a device
+ */
+function canBackupNow(device) {
+  return device.user_permissions && device.user_permissions.includes('backup_now')
 }
 
 // ===== API Functions =====
@@ -366,6 +383,19 @@ async function toggleEnabled(device) {
   }
 }
 
+/**
+ * Trigger an immediate backup via API
+ */
+async function backupNow(device) {
+  try {
+    const resp = await api.post(`/devices/${device.id}/collect/`)
+    const queuedOn = resp.data && resp.data.queued_on ? resp.data.queued_on : 'default'
+    $q.notify({ type: 'positive', message: `Backup queued on ${queuedOn}` })
+  } catch (error) {
+    $q.notify({ type: 'negative', message: 'Failed to start backup' })
+  }
+}
+
 // ===== Lifecycle Hooks =====
 
 /**
@@ -382,16 +412,31 @@ onMounted(() => {
 
 <style scoped>
 .device-table {
-  font-size: 1.1rem;
+  font-size: 1.5rem;
 }
 
 :deep(.device-table tbody td) {
   padding: 12px 8px;
-  font-size: 1.05rem;
+  font-size: 1.4rem;
 }
 
 :deep(.device-table thead th) {
-  font-size: 1.1rem;
+  font-size: 1.5rem;
   font-weight: 600;
+}
+
+:deep(.device-table tbody td[data-testid="body-cell-device_group"]),
+:deep(.device-table tbody td[data-testid="body-cell-status"]),
+:deep(.device-table tbody td[data-testid="body-cell-enabled"]) {
+  font-size: 1.6rem;
+}
+
+:deep(.device-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

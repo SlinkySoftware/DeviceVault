@@ -152,7 +152,9 @@ DeviceVault now implements a plugin-based architecture for backup methods, repla
 1. **Apply migrations**:
    ```bash
    ./devicevault.sh stop
-   .venv/bin/python backend/manage.py migrate
+   source .venv/bin/activate
+   cd backend
+   python manage.py migrate
    ```
 
 2. **Update existing devices**:

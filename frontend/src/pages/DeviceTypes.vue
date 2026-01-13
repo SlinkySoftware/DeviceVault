@@ -1,16 +1,29 @@
 <template>
   <q-page class="q-pa-md">
-    <div class="row justify-between items-center q-mb-md">
-      <div class="text-h4">Device Types</div>
-      <q-btn color="primary" label="Add Device Type" @click="showAddDialog" />
-    </div>
+    <q-card>
+      <q-card-section>
+        <div class="row items-center q-mb-sm">
+          <div class="col">
+            <div class="text-h4">Device Types</div>
+          </div>
+          <div class="col-auto">
+            <q-btn color="primary" label="Add Device Type" @click="showAddDialog" />
+          </div>
+        </div>
+        <div class="row justify-end">
+          <div class="text-caption text-grey">
+            Manage device type categories and icons
+          </div>
+        </div>
+      </q-card-section>
+      <q-separator />
 
-    <q-table
+      <q-card-section>
+        <q-table
       :rows="deviceTypes"
       :columns="columns"
       row-key="id"
       flat
-      bordered
     >
       <template v-slot:body-cell-icon="props">
         <q-td :props="props">
@@ -19,11 +32,13 @@
       </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
-          <q-btn flat dense color="primary" icon="edit" @click="editItem(props.row)" />
-          <q-btn flat dense color="negative" icon="delete" @click="deleteItem(props.row)" />
+          <q-btn color="primary" icon="edit" label="Edit" @click="editItem(props.row)" class="q-mr-sm" />
+          <q-btn color="negative" icon="delete" label="Delete" @click="deleteItem(props.row)" class="q-mr-sm" />
         </q-td>
       </template>
     </q-table>
+      </q-card-section>
+    </q-card>
 
     <q-dialog v-model="dialog">
       <q-card style="min-width: 400px">
@@ -81,7 +96,7 @@ const form = ref({ name: '' })
 const columns = [
   { name: 'icon', label: 'Icon', field: 'icon', align: 'center' },
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
-  { name: 'actions', label: 'Actions', align: 'center' }
+  { name: 'actions', label: 'Actions', align: 'right' }
 ]
 
 const commonIcons = [
@@ -152,3 +167,28 @@ onMounted(() => {
   loadData()
 })
 </script>
+
+<style scoped>
+:deep(.q-table) {
+  font-size: 1.5rem;
+}
+
+:deep(.q-table tbody td) {
+  padding: 12px 8px;
+  font-size: 1.4rem;
+}
+
+:deep(.q-table thead th) {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+:deep(.q-table .q-badge) {
+  font-size: 1.2rem;
+  padding: 6px 12px;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>
