@@ -1,7 +1,7 @@
 <template>
   <q-page class="q-pa-md">
     <div class="row justify-between items-center q-mb-md">
-      <div class="text-h4">Manufacturers</div>
+      <div class="text-h5">Manufacturers</div>
       <q-btn color="primary" label="Add Manufacturer" @click="showAddDialog" />
     </div>
 
@@ -10,6 +10,7 @@
       :columns="columns"
       row-key="id"
       flat
+      class="admin-table"
     >
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
@@ -108,28 +109,3 @@ onMounted(() => {
   loadData()
 })
 </script>
-
-<style scoped>
-:deep(.q-table) {
-  font-size: 1.5rem;
-}
-
-:deep(.q-table tbody td) {
-  padding: 12px 8px;
-  font-size: 1.4rem;
-}
-
-:deep(.q-table thead th) {
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-:deep(.q-table .q-badge) {
-  font-size: 1.2rem;
-  padding: 6px 12px;
-  min-height: 2.5rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-</style>

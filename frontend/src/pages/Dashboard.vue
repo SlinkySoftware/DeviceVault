@@ -1,7 +1,7 @@
 <template>
   <q-page class="q-pa-sm dashboard-page">
     <div class="row items-center q-mb-md">
-      <div class="col text-h4">Dashboard</div>
+      <div class="col text-h5">Dashboard</div>
     </div>
 
     <div class="dashboard-grid">
@@ -51,11 +51,11 @@ const ConfiguredDevicesWidget = defineComponent({
     return h('div', { class: 'q-gutter-md q-pa-sm', style: { height: '100%', display: 'flex', flexDirection: 'column' } }, [
       h('div', { class: 'row q-col-gutter-md', style: { flex: 1 } }, [
         h('div', { class: 'col-5', style: { display: 'flex' } }, [
-          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '8px' } }, 'Total'),
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '6px' } }, 'Total'),
             h('div', { 
               class: 'text-primary text-weight-bold',
-              style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
+              style: { fontSize: 'clamp(2rem, 8vw, 4rem)', lineHeight: '1' }
             }, this.totalDevices.toString())
           ])
         ]),
@@ -63,7 +63,7 @@ const ConfiguredDevicesWidget = defineComponent({
           ...Object.entries(this.stats?.devicesByType || {}).map(([type, data]) => {
             const count = data.count || data
             const icon = data.icon || 'router'
-            return h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px' }, key: type }, [
+            return h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '10px' }, key: type }, [
               h(QIcon, { name: icon, size: 'md', color: 'primary' }),
               h('div', { class: 'flex-1' }, [
                 h('div', { class: 'text-subtitle2 text-grey' }, type),
@@ -86,27 +86,27 @@ const BackupsWidget = defineComponent({
     return h('div', { class: 'q-gutter-md q-pa-sm', style: { height: '100%', display: 'flex', flexDirection: 'column' } }, [
       h('div', { class: 'row q-col-gutter-md', style: { flex: 1 } }, [
         h('div', { class: 'col-5', style: { display: 'flex' } }, [
-          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '18px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '8px' } }, 'Success'),
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '6px' } }, 'Success'),
             h('div', { 
               class: 'text-positive text-weight-bold',
-              style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1' }
+              style: { fontSize: 'clamp(2rem, 8vw, 4rem)', lineHeight: '1' }
             }, (this.stats?.success24h || 0).toString())
           ])
         ]),
         h('div', { class: 'col-7', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, [
-          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '4px' } }, 'Failed'),
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '3px' } }, 'Failed'),
             h('div', { 
               class: 'text-negative text-weight-bold',
-              style: { fontSize: 'clamp(1.5rem, 8vw, 3rem)', lineHeight: '1' }
+              style: { fontSize: 'clamp(1.25rem, 6vw, 2.5rem)', lineHeight: '1' }
             }, (this.stats?.failed24h || 0).toString())
           ]),
-          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '12px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
-            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '4px' } }, 'In Progress'),
+          h('div', { style: { border: '3px solid var(--theme-dashboard-nested-box, #2196F3)', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1 } }, [
+            h('div', { class: 'text-subtitle2 text-weight-medium', style: { fontSize: '0.875rem', marginBottom: '3px' } }, 'In Progress'),
             h('div', { 
               class: 'text-warning text-weight-bold',
-              style: { fontSize: 'clamp(1.5rem, 8vw, 3rem)', lineHeight: '1' }
+              style: { fontSize: 'clamp(1.25rem, 6vw, 2.5rem)', lineHeight: '1' }
             }, (this.stats?.inProgress24h || 0).toString())
           ])
         ])
@@ -122,11 +122,11 @@ const AvgTimeWidget = defineComponent({
     const formattedDuration = typeof avgDuration === 'number' ? avgDuration.toFixed(1) : '0.0'
     return h('div', { 
       class: 'full-height flex flex-center',
-      style: { padding: '20px' }
+      style: { padding: '16px' }
     }, [
       h('div', { 
         class: 'text-primary text-weight-bold dynamic-text',
-        style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
+        style: { fontSize: 'clamp(2rem, 8vw, 4rem)', lineHeight: '1.2' }
       }, formattedDuration + 's')
     ])
   }
@@ -138,11 +138,11 @@ const SuccessRateWidget = defineComponent({
     const rate = this.stats?.successRate || 0
     return h('div', { 
       class: 'full-height flex flex-center',
-      style: { padding: '20px' }
+      style: { padding: '16px' }
     }, [
       h('div', { 
         class: 'text-positive text-weight-bold dynamic-text',
-        style: { fontSize: 'clamp(3rem, 15vw, 8rem)', lineHeight: '1.2' }
+        style: { fontSize: 'clamp(2rem, 8vw, 4rem)', lineHeight: '1.2' }
       }, rate + '%')
     ])
   }

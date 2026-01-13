@@ -5,7 +5,7 @@
       <q-card-section>
         <div class="row items-center q-mb-sm">
           <div class="col">
-            <div class="text-h4">Device Groups</div>
+            <div class="text-h5">Device Groups</div>
           </div>
           <div class="col-auto">
             <q-btn
@@ -38,6 +38,7 @@
         :columns="columns"
         row-key="id"
         flat
+        class="admin-table"
       >
         <!-- Name Column -->
         <template #body-cell-name="props">
@@ -319,28 +320,3 @@ onMounted(async () => {
   await loadDeviceGroups()
 })
 </script>
-
-<style scoped>
-:deep(.q-table) {
-  font-size: 1.5rem;
-}
-
-:deep(.q-table tbody td) {
-  padding: 12px 8px;
-  font-size: 1.4rem;
-}
-
-:deep(.q-table thead th) {
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-:deep(.q-table .q-badge) {
-  font-size: 1.2rem;
-  padding: 6px 12px;
-  min-height: 2.5rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-</style>

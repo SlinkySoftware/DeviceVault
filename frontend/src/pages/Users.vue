@@ -4,7 +4,7 @@
       <q-card-section>
         <div class="row items-center q-mb-sm">
           <div class="col">
-            <div class="text-h4">Users</div>
+            <div class="text-h5">Users</div>
           </div>
           <div class="col-auto">
             <q-btn 
@@ -42,6 +42,7 @@
           row-key="id"
           flat
           :loading="loading"
+          class="admin-table"
         >
           <template v-slot:body-cell-actions="props">
             <q-td :props="props">
@@ -405,28 +406,3 @@ export default defineComponent({
   }
 })
 </script>
-
-<style scoped>
-:deep(.q-table) {
-  font-size: 1.5rem;
-}
-
-:deep(.q-table tbody td) {
-  padding: 12px 8px;
-  font-size: 1.4rem;
-}
-
-:deep(.q-table thead th) {
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-:deep(.q-table .q-badge) {
-  font-size: 1.2rem;
-  padding: 6px 12px;
-  min-height: 2.5rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-</style>

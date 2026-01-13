@@ -1,6 +1,6 @@
 <template>
   <q-page class="q-pa-md">
-    <div class="text-h4 q-mb-md">{{ isEdit ? 'Configure' : 'Add' }} Device</div>
+    <div class="text-h5 q-mb-md">{{ isEdit ? 'Configure' : 'Add' }} Device</div>
     
     <!-- Backup Status Box (only for existing devices) -->
     <q-card v-if="isEdit && form.name" class="q-mb-md" bordered>

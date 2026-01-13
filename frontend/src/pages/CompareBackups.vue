@@ -4,7 +4,7 @@
       <q-card-section>
         <div class="row items-center">
           <div class="col">
-            <div class="text-h4">Compare Backups</div>
+            <div class="text-h5">Compare Backups</div>
             <div class="text-caption text-grey">Side-by-side comparison of device configurations</div>
           </div>
           <div class="col-auto">

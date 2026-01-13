@@ -4,7 +4,7 @@
       <q-card-section>
         <div class="row items-center">
           <div class="col">
-            <div class="text-h4">Backups for {{ deviceName }}</div>
+            <div class="text-h5">Backups for {{ deviceName }}</div>
             <div class="text-caption text-grey">View and compare device backup configurations</div>
           </div>
           <div class="col-auto">
