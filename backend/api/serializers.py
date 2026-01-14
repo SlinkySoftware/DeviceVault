@@ -88,6 +88,22 @@ class BackupScheduleSerializer(serializers.ModelSerializer):
     """
     Serializes BackupSchedule model for API responses
     Used by Celery Beat to configure automated backup scheduling
+    
+    Fields:
+        - id: Primary key
+        - name: Schedule name (e.g., "Daily at 2 AM")
+        - description: Description of when schedule runs
+        - schedule_type: Type (daily, weekly, monthly, custom_cron)
+        - hour: Hour (0-23)
+        - minute: Minute (0-59)
+        - day_of_week: Day for weekly (0=Sunday, 6=Saturday)
+        - day_of_month: Day for monthly (1-31)
+        - cron_expression: Cron expression for custom schedules
+        - enabled: Whether schedule is active
+        - last_run_at: Last execution timestamp
+        - next_run_at: Next execution timestamp
+        - created_at: Creation timestamp
+        - updated_at: Last modification timestamp
     """
     class Meta:
         model = BackupSchedule
@@ -123,11 +139,13 @@ class DeviceSerializer(serializers.ModelSerializer):
         - device_type (DeviceTypeSerializer): Includes icon and name
         - manufacturer (ManufacturerSerializer): Full manufacturer details (optional)
         - collection_group (CollectionGroupSerializer): Collection group assignment (optional)
+        - backup_schedule (BackupScheduleSerializer): Automated backup schedule (optional)
         - user_permissions (SerializerMethodField): User's permissions for device's group
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
     collection_group = CollectionGroupSerializer(read_only=True)
+    backup_schedule = BackupScheduleSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     device_group_name = serializers.CharField(source='device_group.name', read_only=True)
     backup_method_display = serializers.SerializerMethodField()
@@ -139,7 +157,7 @@ class DeviceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display', 'device_group', 'device_group_name',
-            'collection_group', 'enabled', 'last_backup_time', 'last_backup_status',
+            'collection_group', 'backup_schedule', 'enabled', 'last_backup_time', 'last_backup_status',
             'retention_policy', 'backup_location', 'credential', 'user_permissions'
         ]
     
@@ -532,16 +550,21 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     """
     Serializes Device model with nested related objects and RBAC info
     
-    Nested Objects:
+    Nested Objects (read-only for display):
         - device_type (DeviceTypeSerializer): Includes icon and name
         - manufacturer (ManufacturerSerializer): Full manufacturer details
         - device_group (DeviceGroupSerializer): Device group with roles
         - collection_group (CollectionGroupSerializer): Collection group info
+    
+    Writable Fields:
+        - backup_schedule (IntegerField): FK to BackupSchedule for updates
     """
     device_type = DeviceTypeSerializer(read_only=True)
     manufacturer = ManufacturerSerializer(read_only=True)
     device_group = DeviceGroupSerializer(read_only=True)
     collection_group = CollectionGroupSerializer(read_only=True)
+    # Custom field: accepts ID on write, returns nested object on read
+    backup_schedule = serializers.SerializerMethodField()
     user_permissions = serializers.SerializerMethodField()
     backup_method_display = serializers.SerializerMethodField()
     last_backup_time = serializers.SerializerMethodField()
@@ -552,10 +575,34 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display',
-            'device_group', 'collection_group', 'enabled', 'last_backup_time',
+            'device_group', 'collection_group', 'backup_schedule', 'enabled', 'last_backup_time',
             'last_backup_status', 'retention_policy', 'backup_location', 'credential',
             'user_permissions'
         ]
+        read_only_fields = ['id', 'last_backup_time', 'last_backup_status', 'backup_method_display', 'user_permissions', 'backup_schedule']
+    
+    def to_internal_value(self, data):
+        """Custom handling for backup_schedule: accept ID, convert to instance"""
+        result = super().to_internal_value(data)
+        
+        # Handle backup_schedule ID from request
+        if 'backup_schedule' in data:
+            schedule_id = data.get('backup_schedule')
+            if schedule_id is not None:
+                try:
+                    result['backup_schedule'] = BackupSchedule.objects.get(id=schedule_id)
+                except BackupSchedule.DoesNotExist:
+                    raise serializers.ValidationError({'backup_schedule': f'BackupSchedule with id {schedule_id} does not exist.'})
+            else:
+                result['backup_schedule'] = None
+        
+        return result
+    
+    def get_backup_schedule(self, obj):
+        """Return nested backup_schedule object for read (display)"""
+        if obj.backup_schedule:
+            return BackupScheduleSerializer(obj.backup_schedule).data
+        return None
     
     def get_user_permissions(self, obj):
         """Return Django permission codes for this device's group: view, modify, view_backups, backup_now"""

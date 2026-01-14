@@ -155,6 +155,7 @@ class Device(models.Model):
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
     last_backup_status = models.CharField(max_length=32, blank=True, help_text='Status of last backup: success, failed, pending, etc.')
     retention_policy = models.ForeignKey('policies.RetentionPolicy', on_delete=models.SET_NULL, null=True, blank=True, help_text='Backup retention policy')
+    backup_schedule = models.ForeignKey('policies.BackupSchedule', on_delete=models.SET_NULL, null=True, blank=True, help_text='Automated backup schedule')
     backup_location = models.ForeignKey('locations.BackupLocation', on_delete=models.SET_NULL, null=True, blank=True, help_text='Where to store backups')
     credential = models.ForeignKey('credentials.Credential', on_delete=models.SET_NULL, null=True, blank=True, help_text='SSH/Telnet credentials for device access')
     

@@ -32,6 +32,7 @@ BACKUP_WORKER_PID_FILE="$PID_DIR/backup-worker.pid"
 STORAGE_WORKER_PID_FILE="$PID_DIR/storage-worker.pid"
 BACKUP_CONSUMER_PID_FILE="$PID_DIR/backup-consumer.pid"
 STORAGE_CONSUMER_PID_FILE="$PID_DIR/storage-consumer.pid"
+SCHEDULER_PID_FILE="$PID_DIR/scheduler.pid"
 FLOWER_PID_FILE="$PID_DIR/flower.pid"
 
 # Colors for output
@@ -236,6 +237,33 @@ function start_backup_consumer() {
     fi
 }
 
+function start_scheduler() {
+    if [ -f "$SCHEDULER_PID_FILE" ] && kill -0 $(cat "$SCHEDULER_PID_FILE") 2>/dev/null; then
+        print_warning "Scheduler is already running (PID: $(cat $SCHEDULER_PID_FILE))"
+        return 0
+    fi
+    
+    print_status "Starting backup scheduler..."
+    cd "$SCRIPT_DIR"
+    
+    # Clear any stale locks from previous runs before starting
+    # This prevents "lock held" errors on restart after crashes
+    ./start-scheduler.sh --clear-lock 2>/dev/null || true
+    
+    # Start scheduler in background using the script
+    nohup ./start-scheduler.sh > "$PID_DIR/scheduler.log" 2>&1 &
+    echo $! > "$SCHEDULER_PID_FILE"
+    
+    sleep 2
+    
+    if kill -0 $(cat "$SCHEDULER_PID_FILE") 2>/dev/null; then
+        print_status "Scheduler started successfully (PID: $(cat $SCHEDULER_PID_FILE))"
+    else
+        print_error "Failed to start scheduler. Check logs at $PID_DIR/scheduler.log"
+        return 1
+    fi
+}
+
 function start_storage_consumer() {
     if [ -f "$STORAGE_CONSUMER_PID_FILE" ] && kill -0 $(cat "$STORAGE_CONSUMER_PID_FILE") 2>/dev/null; then
         print_warning "Storage consumer is already running (PID: $(cat $STORAGE_CONSUMER_PID_FILE))"
@@ -378,6 +406,26 @@ function stop_storage_worker() {
     print_status "Storage worker stopped"
 }
 
+function stop_scheduler() {
+    print_status "Stopping scheduler..."
+    
+    if [ -f "$SCHEDULER_PID_FILE" ]; then
+        local PID=$(cat "$SCHEDULER_PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            kill -TERM $PID 2>/dev/null || true
+            sleep 2
+            kill -9 $PID 2>/dev/null || true
+        fi
+        rm -f "$SCHEDULER_PID_FILE"
+    fi
+    
+    # Kill scheduler processes as fallback
+    pkill -f "backups.scheduler" 2>/dev/null || true
+    
+    sleep 1
+    print_status "Scheduler stopped"
+}
+
 function stop_backup_consumer() {
     print_status "Stopping backup consumer..."
     
@@ -510,6 +558,7 @@ function start() {
     start_storage_worker
     start_backup_consumer
     start_storage_consumer
+    start_scheduler
     start_flower
     echo ""
     print_status "DeviceVault started successfully!"
@@ -521,6 +570,7 @@ function start() {
 
 function stop() {
     print_status "Stopping DeviceVault..."
+    stop_scheduler
     stop_flower
     stop_storage_consumer
     stop_backup_consumer

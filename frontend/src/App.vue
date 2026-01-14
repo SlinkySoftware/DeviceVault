@@ -51,6 +51,15 @@
           </q-item-section>
         </q-item>
 
+        <q-item clickable to="/schedule-calendar">
+          <q-item-section avatar>
+            <q-icon name="calendar_month" />
+          </q-item-section>
+          <q-item-section>
+            <q-item-label>Schedule Calendar</q-item-label>
+          </q-item-section>
+        </q-item>
+
         <q-expansion-item v-if="isAdmin" icon="admin_panel_settings" label="Admin Settings" header-class="text-primary">
           <q-list>
             <!-- User Settings submenu -->

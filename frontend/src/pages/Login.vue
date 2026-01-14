@@ -148,11 +148,9 @@ export default {
     if (localStorage.getItem('rememberMe') === 'true') {
       this.form.username = localStorage.getItem('username') || ''
     }
-
-    // Redirect to dashboard if already logged in
-    if (localStorage.getItem('authToken')) {
-      this.$router.push('/')
-    }
+    
+    // Note: Route guard already handles redirect if already authenticated,
+    // so we don't need to redirect here to avoid potential loops
   }
 }
 </script>

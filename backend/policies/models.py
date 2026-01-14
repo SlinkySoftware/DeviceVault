@@ -99,6 +99,8 @@ class BackupSchedule(models.Model):
     day_of_month = models.IntegerField(default=1, help_text='For monthly schedules: day of month (1-31)')
     cron_expression = models.CharField(max_length=255, blank=True, help_text='For custom schedules: cron expression (minute hour day month day_of_week)')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this schedule')
+    last_run_at = models.DateTimeField(null=True, blank=True, help_text='Last time this schedule executed backups')
+    next_run_at = models.DateTimeField(null=True, blank=True, help_text='Calculated next execution time (cached for frontend)')
     created_at = models.DateTimeField(auto_now_add=True, help_text='When this schedule was created')
     updated_at = models.DateTimeField(auto_now=True, help_text='When this schedule was last modified')
     

@@ -7,6 +7,11 @@ database:
 # Valid timezone names: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 timezone: Australia/Sydney
 
+# Backup scheduler configuration
+scheduler:
+  enabled: true
+  restart_window_minutes: 120  # Backups within this window after restart will be executed
+
 local_admin:
   username: admin
   encrypted_password: ''

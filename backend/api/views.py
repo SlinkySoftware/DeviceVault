@@ -25,6 +25,7 @@ from django.contrib.auth import authenticate
 from django.db.models import Count, Avg, F, Q, Prefetch, OuterRef, Subquery
 from django.utils import timezone
 from datetime import timedelta
+from core.timezone_utils import local_to_utc, utc_to_local
 from devices.models import DeviceType, Manufacturer, Device, CollectionGroup, DeviceBackupResult
 from backups.models import Backup, StoredBackup
 from policies.models import RetentionPolicy, BackupSchedule
@@ -1120,6 +1121,134 @@ class GroupDeviceGroupRoleViewSet(viewsets.ModelViewSet):
     queryset = GroupDeviceGroupRole.objects.all()
     serializer_class = GroupDeviceGroupRoleSerializer
     permission_classes = [IsAuthenticated]
+
+
+class ScheduledBackupsCalendarView(APIView):
+    """
+    API View for scheduled backups calendar data
+    
+    GET: Return upcoming scheduled backups for the next 30 days
+    Filters devices by user's device group permissions
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """
+        Retrieve upcoming scheduled backups grouped by date and schedule
+        
+        Returns:
+            {
+                "2026-01-15": [
+                    {
+                        "schedule_id": 1,
+                        "schedule_name": "Daily 2 AM",
+                        "time": "02:00",
+                        "device_count": 5,
+                        "devices": [
+                            {"id": 1, "name": "router-1", "ip_address": "10.0.0.1"},
+                            ...
+                        ]
+                    },
+                    ...
+                ],
+                "2026-01-16": [...],
+                ...
+            }
+        """
+        from devices.permissions import user_get_accessible_device_groups
+        from core.timezone_utils import get_display_timezone, utc_to_local, local_to_utc
+        from datetime import datetime, timedelta
+        
+        try:
+            # Get user's accessible device groups
+            user = request.user
+            if user.is_staff or user.is_superuser:
+                accessible_groups = DeviceGroup.objects.all()
+            else:
+                accessible_groups = user_get_accessible_device_groups(user)
+            
+            # Calculate 30-day window
+            now_utc = timezone.now()
+            end_date_utc = now_utc + timedelta(days=30)
+            display_tz = get_display_timezone()
+            
+            # Get all enabled schedules with devices
+            schedules = BackupSchedule.objects.filter(enabled=True).prefetch_related(
+                Prefetch(
+                    'device_set',
+                    Device.objects.filter(
+                        enabled=True,
+                        device_group__in=accessible_groups
+                    ).select_related('device_group')
+                )
+            )
+            
+            # Build calendar data structure
+            calendar_data = {}
+            
+            for schedule in schedules:
+                devices = schedule.device_set.all()
+                if not devices.exists():
+                    continue
+                
+                # Calculate all occurrences of this schedule in the 30-day window
+                check_time = now_utc
+                loop_count = 0
+                while check_time < end_date_utc:
+                    loop_count += 1
+                    # Calculate next run from check_time
+                    from backups.scheduler import SchedulerDaemon
+                    scheduler = SchedulerDaemon()
+                    next_run_display = scheduler.calculate_next_run(schedule, check_time)
+                    next_run_utc = local_to_utc(next_run_display)
+                    
+                    if next_run_utc >= end_date_utc:
+                        break
+                    
+                    # Format date string for calendar
+                    date_display = utc_to_local(next_run_utc)
+                    date_str = date_display.strftime('%Y-%m-%d')
+                    time_str = date_display.strftime('%H:%M')
+                    
+                    if date_str not in calendar_data:
+                        calendar_data[date_str] = []
+                    
+                    # Create entry for this schedule occurrence
+                    entry = {
+                        'schedule_id': schedule.id,
+                        'schedule_name': schedule.name,
+                        'time': time_str,
+                        'device_count': devices.count(),
+                        'devices': [
+                            {
+                                'id': d.id,
+                                'name': d.name,
+                                'ip_address': d.ip_address,
+                                'device_group': d.device_group.name if d.device_group else None
+                            }
+                            for d in devices
+                        ]
+                    }
+                    calendar_data[date_str].append(entry)
+                    
+                    # Move to next interval
+                    check_time = next_run_utc + timedelta(seconds=1)
+                    
+                    # Safety: don't calculate more than 365 days worth
+                    if (end_date_utc - check_time).days > 365:
+                        break
+            
+            return response.Response(calendar_data)
+        
+        except Exception as exc:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Error in scheduled backups calendar view")
+            return response.Response(
+                {'error': 'Failed to retrieve scheduled backups'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class ThemeSettingsView(APIView):
     """

@@ -16,5 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 from django.apps import AppConfig
+
 class BackupsConfig(AppConfig):
-    name='backups'
+    name = 'backups'
+    
+    def ready(self):
+        """Import signals when app is ready"""
+        from . import signals
+

@@ -48,6 +48,21 @@ services:
 #      mode: replicated
 #      replicas: 3  # adjust or scale via `docker compose up --scale celery=5`
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.django
+      args:
+      - GIT_BRANCH=${GIT_BRANCH:-master}
+    command: python -m backups.scheduler
+    env_file:
+    - ./config/django.env
+    depends_on:
+      - django
+      - postgres
+      - redis
+    restart: unless-stopped
+
   postgres:
     image: postgres:17
     env_file:

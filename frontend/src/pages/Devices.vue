@@ -104,6 +104,16 @@
           </q-badge>
         </q-td>
       </template>
+      <template v-slot:body-cell-next_scheduled_backup="props">
+        <q-td :props="props">
+          <span :class="{ 'text-weight-bold': props.row.backup_schedule }">
+            {{ formatNextScheduledBackup(props.row.backup_schedule) }}
+          </span>
+          <q-tooltip v-if="props.row.backup_schedule">
+            {{ props.row.backup_schedule.name }}
+          </q-tooltip>
+        </q-td>
+      </template>
       <template v-slot:body-cell-actions="props">
         <q-td :props="props">
           <q-btn 
@@ -179,6 +189,40 @@ const filter = ref({ name: '', type: null, device_group: '', status: 'All' })
 
 const formatLastBackup = (value) => (value ? formatDateTime(value) : 'N/A')
 
+const formatNextScheduledBackup = (schedule) => {
+  if (!schedule || !schedule.next_run_at) {
+    return 'Not scheduled'
+  }
+  
+  try {
+    const nextRunTime = new Date(schedule.next_run_at)
+    const now = new Date()
+    const diffMs = nextRunTime - now
+    
+    if (diffMs < 0) {
+      return 'Overdue'
+    }
+    
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffHours / 24)
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    
+    if (diffDays > 0) {
+      const dayName = nextRunTime.toLocaleDateString('en-US', { weekday: 'long' })
+      const timeStr = nextRunTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+      return `${dayName} at ${timeStr}`
+    } else if (diffHours > 0) {
+      return `In ${diffHours} hour${diffHours !== 1 ? 's' : ''}`
+    } else if (diffMins > 0) {
+      return `In ${diffMins} minute${diffMins !== 1 ? 's' : ''}`
+    } else {
+      return 'Soon'
+    }
+  } catch (e) {
+    return 'Invalid schedule'
+  }
+}
+
 /**
  * Table Column Configuration
  * 
@@ -201,6 +245,7 @@ const columns = [
   { name: 'type', label: 'Type', field: row => row.device_type?.name || '', align: 'left', sortable: true },
   { name: 'backup_method', label: 'Backup Method', field: 'backup_method_display', align: 'left', sortable: true },
   { name: 'last_backup_time', label: 'Last Backup', field: row => formatLastBackup(row.last_backup_time), align: 'left', sortable: true },
+  { name: 'next_scheduled_backup', label: 'Next Scheduled Backup', field: row => formatNextScheduledBackup(row.backup_schedule), align: 'left', sortable: false },
   { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center', sortable: true },
   { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center', sortable: true },
   { name: 'actions', label: 'Actions', align: 'right' }

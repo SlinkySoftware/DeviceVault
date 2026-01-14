@@ -21,6 +21,7 @@ Defines user preferences and dashboard layout configuration.
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from .theme_settings import ThemeSettings
 
 
@@ -103,4 +104,49 @@ class DashboardLayout(models.Model):
         if self.is_default:
             return "Default Dashboard Layout"
         return f"Dashboard Layout for {self.user.username}"
+
+
+class SchedulerState(models.Model):
+    """
+    SchedulerState Model: Singleton storing scheduler execution state
+    
+    Fields:
+        - last_tick (DateTimeField): Last time scheduler checked for scheduled backups
+        - is_running (BooleanField): Whether scheduler is currently active
+        - scheduler_pid (IntegerField): Process ID of running scheduler
+        - last_restart_at (DateTimeField): Last time scheduler was restarted
+        - updated_at (DateTimeField): Last update timestamp
+    
+    Only one instance exists (pk=1 singleton pattern).
+    Used to track scheduler state and detect missed backup windows on restart.
+    """
+    last_tick = models.DateTimeField(null=True, blank=True, help_text='Last time scheduler processed schedules')
+    is_running = models.BooleanField(default=False, help_text='Whether scheduler is currently running')
+    scheduler_pid = models.IntegerField(null=True, blank=True, help_text='Process ID of running scheduler')
+    last_restart_at = models.DateTimeField(null=True, blank=True, help_text='Last scheduler restart timestamp')
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Scheduler State'
+        verbose_name_plural = 'Scheduler State'
+    
+    def __str__(self):
+        return 'Scheduler State'
+    
+    def save(self, *args, **kwargs):
+        """Override save to ensure only one instance exists and clear cache"""
+        self.pk = 1
+        super().save(*args, **kwargs)
+        cache.delete('scheduler_state')
+    
+    @classmethod
+    def load(cls):
+        """Load scheduler state from database or cache"""
+        cached = cache.get('scheduler_state')
+        if cached:
+            return cached
+        
+        obj, created = cls.objects.get_or_create(pk=1)
+        cache.set('scheduler_state', obj, timeout=300)  # Cache for 5 minutes
+        return obj
 

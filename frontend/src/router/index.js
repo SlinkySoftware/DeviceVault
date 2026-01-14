@@ -27,6 +27,7 @@ import BackupMethods from '../pages/BackupMethods.vue'
 import Credentials from '../pages/Credentials.vue'
 import BackupLocations from '../pages/BackupLocations.vue'
 import BackupSchedules from '../pages/BackupSchedules.vue'
+import ScheduleCalendar from '../pages/ScheduleCalendar.vue'
 import RetentionPolicies from '../pages/RetentionPolicies.vue'
 import CollectionGroups from '../pages/CollectionGroups.vue'
 import Groups from '../pages/Groups.vue'
@@ -67,6 +68,7 @@ const routes = [
   { path: '/vaultadmin/credentials', component: Credentials, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-locations', component: BackupLocations, meta: { requiresAuth: true } },
   { path: '/vaultadmin/backup-schedules', component: BackupSchedules, meta: { requiresAuth: true } },
+  { path: '/schedule-calendar', component: ScheduleCalendar, meta: { requiresAuth: true } },
   { path: '/vaultadmin/retention-policies', component: RetentionPolicies, meta: { requiresAuth: true } },
   { path: '/vaultadmin/collection-groups', component: CollectionGroups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/groups', component: Groups, meta: { requiresAuth: true } },
@@ -108,9 +110,19 @@ router.beforeEach((to, from, next) => {
   const isAuthenticated = !!localStorage.getItem('authToken')
   const requiresAuth = to.meta.requiresAuth !== false
 
+  // Prevent redirect loops
+  if (to.path === from.path) {
+    next()
+    return
+  }
+
   if (requiresAuth && !isAuthenticated) {
     // Redirect to login if route requires auth and user is not authenticated
-    next('/login')
+    if (to.path !== '/login') {
+      next('/login')
+    } else {
+      next()
+    }
   } else if (to.path === '/login' && isAuthenticated) {
     // Redirect to dashboard if trying to access login while already authenticated
     next('/')

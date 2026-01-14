@@ -10,10 +10,10 @@
           <div class="col-12 col-md-6">
             <div class="text-subtitle2 q-mb-sm">Last Backup Status</div>
             <q-badge 
-              :color="form.last_backup_status?.toLowerCase().includes('success') ? 'positive' : 'negative'"
+              :color="lastBackupStatus?.toLowerCase().includes('success') ? 'positive' : 'negative'"
               class="backup-status-badge"
             >
-              {{ form.last_backup_status || 'Never backed up' }}
+              {{ lastBackupStatus || 'Never backed up' }}
             </q-badge>
           </div>
           <div class="col-12 col-md-6">
@@ -22,7 +22,7 @@
               color="info"
               class="backup-time-badge"
             >
-              {{ formatBackupTime(form.last_backup_time) }}
+              {{ formatBackupTime(lastBackupTime) }}
             </q-badge>
           </div>
         </div>
@@ -169,6 +169,21 @@
             :disable="!canModify"
           />
           
+          <!-- Backup Schedule -->
+          <q-select
+            v-model="form.backup_schedule"
+            :options="backupSchedules"
+            option-label="name"
+            option-value="id"
+            label="Backup Schedule"
+            outlined
+            emit-value
+            map-options
+            clearable
+            class="field-dropdown"
+            :disable="!canModify"
+          />
+          
           <!-- Retention Policy -->
           <q-select
             v-model="form.retention_policy"
@@ -223,26 +238,28 @@ const form = ref({
   backup_method: 'noop',
   credential: null,
   backup_location: null,
+  backup_schedule: null,
   retention_policy: null,
   device_group: null,
   collection_group: null,
-  enabled: true,
-  last_backup_status: null,
-  last_backup_time: null
+  enabled: true
 })
 const canModify = ref(true)
+const lastBackupStatus = ref(null)
+const lastBackupTime = ref(null)
 
 const deviceTypes = ref([])
 const backupMethods = ref([])
 const credentials = ref([])
 const backupLocations = ref([])
+const backupSchedules = ref([])
 const retentionPolicies = ref([])
 const deviceGroups = ref([])
 const deviceGroupOptions = ref([])
 const collectionGroups = ref([])
 
 const statusColor = computed(() => {
-  const status = form.value.last_backup_status
+  const status = lastBackupStatus.value
   if (!status || status === 'Never backed up') return 'text-grey'
   if (status.toLowerCase().includes('success')) return 'text-positive'
   if (status.toLowerCase().includes('fail') || status.toLowerCase().includes('error')) return 'text-negative'
@@ -256,14 +273,15 @@ function formatBackupTime(time) {
 
 async function loadData() {
   try {
-    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp, collectionResp] = await Promise.all([
+    const [typesResp, methodsResp, credsResp, locsResp, polsResp, groupsResp, collectionResp, schedulesResp] = await Promise.all([
       api.get('/device-types/'),
       api.get('/backup-methods/'),
       api.get('/credentials/'),
       api.get('/backup-locations/'),
       api.get('/retention-policies/'),
       api.get('/device-groups/'),
-      api.get('/collection-groups/')
+      api.get('/collection-groups/'),
+      api.get('/backup-schedules/')
     ])
     
     deviceTypes.value = typesResp.data
@@ -273,6 +291,7 @@ async function loadData() {
     retentionPolicies.value = polsResp.data
     deviceGroups.value = groupsResp.data || []
     collectionGroups.value = collectionResp.data || []
+    backupSchedules.value = schedulesResp.data || []
     
     // Filter device groups to only those user can modify (for new devices)
     // For editing, show all groups user has view/modify for (to see which group device belongs to)
@@ -294,13 +313,15 @@ async function loadData() {
         backup_method: data.backup_method ?? 'noop',
         credential: data.credential ?? null,
         backup_location: data.backup_location ?? null,
+        backup_schedule: data.backup_schedule?.id ?? null,
         retention_policy: data.retention_policy ?? null,
         device_group: data.device_group?.id ?? null,
         collection_group: data.collection_group?.id ?? null,
-        enabled: data.enabled ?? true,
-        last_backup_status: data.last_backup_status ?? null,
-        last_backup_time: data.last_backup_time ?? null
+        enabled: data.enabled ?? true
       }
+      // Store read-only fields separately for display only
+      lastBackupStatus.value = data.last_backup_status ?? null
+      lastBackupTime.value = data.last_backup_time ?? null
     }
   } catch (error) {
     console.error('Load error:', error)
