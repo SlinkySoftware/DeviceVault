@@ -26,6 +26,8 @@ You can find the full text of the license in the [LICENSE](LICENSE.md) file or r
 - **[Storage Pipeline](docs/STORAGE_PIPELINE.md)**: Device collection → storage → retrieval workflow with Celery worker routing
 - **[Celery Integration](docs/CELERY_INTEGRATION.md)**: Task queue architecture and worker routing
 - **[Celery Setup](docs/CELERY_SETUP.md)**: Detailed Celery configuration and startup instructions
+- **[Development Docker Integration](docs/DEVELOPMENT_DOCKER_INTEGRATION.md)**: Docker development setup with Redis & RabbitMQ
+- **[Docker Compose Comparison](docs/COMPOSE_COMPARISON.md)**: Development vs production Docker configurations
 - **[Authentication](docs/AUTHENTICATION.md)**: Auth methods (Local, LDAP, SAML, Entra ID)
 - **[Timezone Implementation](docs/TIMEZONE_IMPLEMENTATION.md)**: Timezone handling and configuration
 
@@ -65,10 +67,17 @@ sudo apt install python3 python3-pip python3-venv -y
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt install nodejs -y
 
+# Install Docker and Docker Compose (recommended for development)
+sudo apt install docker.io docker-compose-plugin -y
+sudo usermod -aG docker $USER
+# Log out and back in for group changes to take effect
+
 # Verify installations
 python3 --version  # Should be 3.13+
 node --version     # Should be 18+
 npm --version
+docker --version
+docker compose version
 ```
 
 ### Application Setup
@@ -121,12 +130,12 @@ python manage.py shell -c "from django.contrib.auth import get_user_model; User 
 
 ### Using the Management Script (Recommended)
 
-The `devicevault.sh` script provides a comprehensive management interface for all services:
+The `devicevault.sh` script provides a comprehensive management interface for all services, including automatic Docker service orchestration:
 
 ```bash
 cd /opt/devicevault
 
-# Start all services (frontend, backend, workers, consumers, flower)
+# Start all services (Docker, frontend, backend, workers, consumers, flower)
 ./devicevault.sh start
 
 # Check status of all services
@@ -141,6 +150,7 @@ cd /opt/devicevault
 ./devicevault.sh logs backup-consumer     # Backup consumer
 ./devicevault.sh logs storage-consumer    # Storage consumer
 ./devicevault.sh logs flower              # Flower monitoring
+./devicevault.sh logs docker              # Docker services (Redis & RabbitMQ)
 
 # Restart all services
 ./devicevault.sh restart
@@ -149,19 +159,54 @@ cd /opt/devicevault
 ./devicevault.sh stop
 ```
 
+> **Note**: The `devicevault.sh` script now automatically manages Docker containers for Redis and RabbitMQ using `docker-build/docker-compose.dev.yaml`. If Docker is not available, the script will warn you and continue with native services (you'll need to provide Redis and RabbitMQ separately).
+
 #### What the Management Script Starts
 
 The `./devicevault.sh start` command automatically starts:
 
-1. **Django Backend** (`http://localhost:8000`) — REST API and admin interface
-2. **Frontend (Quasar)** (`http://localhost:9000`) — SPA web interface
-3. **Backup Worker** — Celery worker for device backup collection (queues: `default`, `collector.group.*`)
-4. **Storage Worker** — Celery worker for backup storage operations (queues: `storage.fs`, `storage.git`)
-5. **Backup Consumer** — Django management command that consumes backup results from Redis Stream (`device:results`)
-6. **Storage Consumer** — Django management command that consumes storage results from Redis Stream (`storage:results`)
-7. **Flower Monitoring** (`http://localhost:5555`) — Celery task monitoring interface
+1. **Docker Services** — Redis and RabbitMQ containers (via `docker-compose.dev.yaml`)
+   - **Redis** (`localhost:6379`) — Distributed locking and result streams
+   - **RabbitMQ** (`localhost:5672`) — Message broker for Celery
+   - **RabbitMQ Management UI** (`http://localhost:15672`) — Web interface (guest/guest)
+2. **Django Backend** (`http://localhost:8000`) — REST API and admin interface
+3. **Frontend (Quasar)** (`http://localhost:9000`) — SPA web interface
+4. **Backup Worker** — Celery worker for device backup collection (queues: `default`, `collector.group.*`)
+5. **Storage Worker** — Celery worker for backup storage operations (queues: `storage.fs`, `storage.git`)
+6. **Backup Consumer** — Django management command that consumes backup results from Redis Stream (`device:results`)
+7. **Storage Consumer** — Django management command that consumes storage results from Redis Stream (`storage:results`)
+8. **Flower Monitoring** (`http://localhost:5555`) — Celery task monitoring interface
 
-All services are managed as background processes with PID files stored in `.pids/`.
+All native services are managed as background processes with PID files stored in `.pids/`. Docker services are managed via Docker Compose and can be controlled independently if needed.
+
+### Docker Development Services
+
+The development setup uses `docker-build/docker-compose.dev.yaml` to provide backing services:
+
+```bash
+# Managed automatically by devicevault.sh, or manually:
+cd docker-build
+
+# Start Redis & RabbitMQ only
+docker compose -f docker-compose.dev.yaml up -d
+
+# Check status
+docker compose -f docker-compose.dev.yaml ps
+
+# View logs
+docker compose -f docker-compose.dev.yaml logs -f
+
+# Stop services
+docker compose -f docker-compose.dev.yaml down
+```
+
+**Services provided:**
+- **redis** (port 6379) — Result backend and caching
+- **rabbitmq** (ports 5672, 15672) — Message broker with management UI
+
+Data is persisted in named Docker volumes:
+- `devicevault-dev-redis-data`
+- `devicevault-dev-rabbitmq-data`
 
 ### Running Individual Services Manually
 
@@ -207,6 +252,7 @@ Convenience scripts are also provided in the repository root:
 - **Backend API**: http://localhost:8000/api/
 - **Django Admin**: http://localhost:8000/admin/
 - **Flower Monitoring**: http://localhost:5555 (Celery task monitor)
+- **RabbitMQ Management**: http://localhost:15672 (Message broker UI, credentials: guest/guest)
 
 **Default Credentials:**
 - Username: `admin`
@@ -288,27 +334,31 @@ DeviceVault requires the following services when running with Celery workers:
 1. **RabbitMQ** (or Redis) — Message broker for Celery tasks
    - Default: `amqp://guest:guest@localhost:5672//`
    - Management UI: `http://localhost:15672` (default credentials: guest/guest)
+   - **Automatically started** by `devicevault.sh` via Docker Compose
 
 2. **Redis** — Distributed locking and result streams
    - Default: `redis://localhost:6379`
    - Database 1 is used by default for results
+   - **Automatically started** by `devicevault.sh` via Docker Compose
 
 3. **Database** — SQLite (default), PostgreSQL, or MySQL
    - Default: `devicevault.sqlite3` in backend directory
 
-To start RabbitMQ and Redis quickly:
+**Recommended Setup**: Use `./devicevault.sh start` which automatically manages Redis and RabbitMQ via Docker containers defined in `docker-build/docker-compose.dev.yaml`.
+
+**Alternative Setup** (without Docker): Install and run Redis and RabbitMQ natively:
+**Alternative Setup** (without Docker): Install and run Redis and RabbitMQ natively:
 
 ```bash
-# Using the dev-env docker-compose
-docker compose -f dev-env/docker-compose.yaml up -d rabbitmq redis
+# Install on Debian/Ubuntu
+sudo apt install redis-server rabbitmq-server -y
 
-# Or individual commands (if Docker is installed)
-docker run -d -p 5672:5672 -p 15672:15672 \
-  -e RABBITMQ_DEFAULT_USER=guest \
-  -e RABBITMQ_DEFAULT_PASS=guest \
-  rabbitmq:management
+# Enable and start services
+sudo systemctl enable redis-server rabbitmq-server
+sudo systemctl start redis-server rabbitmq-server
 
-docker run -d -p 6379:6379 redis:7
+# Enable RabbitMQ management plugin
+sudo rabbitmq-plugins enable rabbitmq_management
 ```
 
 ## Admin Pages
@@ -323,9 +373,38 @@ docker run -d -p 6379:6379 redis:7
 
 ## Docker-Based Setup
 
-### Using Docker Compose
+DeviceVault provides two Docker Compose configurations:
 
-For containerized deployment with automatic service orchestration:
+### Development (Recommended for Local Development)
+
+**File**: `docker-build/docker-compose.dev.yaml`
+
+Provides only backing services (Redis & RabbitMQ) while Django, frontend, and workers run natively for easier debugging:
+
+```bash
+# Integrated with devicevault.sh (recommended)
+./devicevault.sh start    # Automatically starts Docker services + native services
+./devicevault.sh status   # Shows status of all services including Docker
+./devicevault.sh logs docker  # View Docker service logs
+
+# Or manual Docker management
+cd docker-build
+docker compose -f docker-compose.dev.yaml up -d    # Start Redis & RabbitMQ
+docker compose -f docker-compose.dev.yaml ps       # Check status
+docker compose -f docker-compose.dev.yaml logs -f  # View logs
+docker compose -f docker-compose.dev.yaml down     # Stop services
+```
+
+**Services**: Redis (6379), RabbitMQ (5672, 15672)  
+**Volumes**: `devicevault-dev-redis-data`, `devicevault-dev-rabbitmq-data`
+
+See [docs/DEVELOPMENT_DOCKER_INTEGRATION.md](docs/DEVELOPMENT_DOCKER_INTEGRATION.md) for detailed documentation.
+
+### Production (Full Stack Deployment)
+
+**File**: `docker-build/docker-compose.yaml`
+
+For containerized deployment with all services:
 
 ```bash
 cd docker-build
@@ -375,7 +454,7 @@ prune              - Remove unused Docker resources
 clean-build        - Clean Docker build cache
 ```
 
-### Docker Services
+### Docker Services (Production)
 
 The `docker-build/docker-compose.yaml` includes:
 
@@ -384,6 +463,19 @@ The `docker-build/docker-compose.yaml` includes:
 - **postgres** — PostgreSQL database (default for Docker)
 - **redis** — Redis for caching and result storage
 - **flower** — Celery task monitoring UI (optional, commented out by default)
+
+### Comparison
+
+| Aspect | Development | Production |
+|--------|------------|------------|
+| **File** | `docker-compose.dev.yaml` | `docker-compose.yaml` |
+| **Services** | Redis, RabbitMQ only | Full stack (nginx, django, postgres, redis) |
+| **Django/Frontend** | Native (easier debugging) | Containerized |
+| **Database** | SQLite (native) | PostgreSQL (container) |
+| **Management** | `devicevault.sh` script | `docker compose` or `Makefile` |
+| **Use Case** | Local development | Production deployment |
+
+See [docs/COMPOSE_COMPARISON.md](docs/COMPOSE_COMPARISON.md) for a detailed comparison.
 
 ## Troubleshooting
 
@@ -433,16 +525,30 @@ cd docker-build && make migrate
 
 If workers are not processing tasks:
 
-1. **Check RabbitMQ/Redis connectivity**:
+1. **Check Docker services are running**:
    ```bash
-   # Test RabbitMQ
-   rabbitmq-diagnostics -q ping
+   # Via devicevault.sh
+   ./devicevault.sh status
    
-   # Test Redis
+   # Or directly
+   cd docker-build
+   docker compose -f docker-compose.dev.yaml ps
+   ```
+
+2. **Check RabbitMQ/Redis connectivity**:
+   ```bash
+   # Test RabbitMQ (in Docker)
+   docker exec devicevault-dev-rabbitmq rabbitmq-diagnostics ping
+   
+   # Test Redis (in Docker)
+   docker exec devicevault-dev-redis redis-cli ping
+   
+   # Or if running natively
+   rabbitmq-diagnostics -q ping
    redis-cli ping
    ```
 
-2. **Check Redis streams** (worker-to-django communication):
+3. **Check Redis streams** (worker-to-django communication):
    ```bash
    # View pending backup results
    redis-cli -n 1 XREVRANGE device:results + - COUNT 10

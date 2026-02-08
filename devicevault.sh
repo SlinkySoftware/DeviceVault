@@ -22,6 +22,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
+DOCKER_BUILD_DIR="$SCRIPT_DIR/docker-build"
 PID_DIR="$SCRIPT_DIR/.pids"
 
 mkdir -p "$PID_DIR"
@@ -50,6 +51,110 @@ function print_error() {
 
 function print_warning() {
     echo -e "${YELLOW}[DeviceVault]${NC} $1"
+}
+
+function check_docker() {
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is not installed or not in PATH"
+        return 1
+    fi
+    
+    if ! docker compose version &> /dev/null; then
+        print_error "Docker Compose plugin is not available"
+        return 1
+    fi
+    
+    return 0
+}
+
+function start_docker_services() {
+    if ! check_docker; then
+        print_warning "Skipping Docker services (Docker not available)"
+        return 1
+    fi
+    
+    print_status "Starting Docker development services (Redis & RabbitMQ)..."
+    cd "$DOCKER_BUILD_DIR"
+    
+    if docker compose -f docker-compose.dev.yaml up -d; then
+        print_status "Docker services started successfully"
+        print_status "Waiting for services to be ready..."
+        sleep 3
+        
+        # Check if services are healthy
+        if docker compose -f docker-compose.dev.yaml ps | grep -q "healthy"; then
+            print_status "Redis available at: localhost:6379"
+            print_status "RabbitMQ AMQP available at: localhost:5672"
+            print_status "RabbitMQ Management UI available at: http://localhost:15672"
+        else
+            print_warning "Services started but may not be fully ready yet"
+        fi
+        return 0
+    else
+        print_error "Failed to start Docker services"
+        return 1
+    fi
+}
+
+function stop_docker_services() {
+    if ! check_docker; then
+        return 0
+    fi
+    
+    print_status "Stopping Docker development services..."
+    cd "$DOCKER_BUILD_DIR"
+    
+    if docker compose -f docker-compose.dev.yaml down; then
+        print_status "Docker services stopped"
+    else
+        print_warning "Failed to stop Docker services (may not be running)"
+    fi
+}
+
+function status_docker_services() {
+    if ! check_docker; then
+        echo "  Docker Services: ${YELLOW}Not Available${NC}"
+        return 0
+    fi
+    
+    cd "$DOCKER_BUILD_DIR"
+    
+    # Check if containers are running
+    if docker compose -f docker-compose.dev.yaml ps --status running | grep -q "devicevault-dev"; then
+        # Check individual services
+        local redis_status="${RED}Stopped${NC}"
+        local rabbitmq_status="${RED}Stopped${NC}"
+        
+        if docker ps --filter "name=devicevault-dev-redis" --filter "status=running" | grep -q "devicevault-dev-redis"; then
+            redis_status="${GREEN}Running${NC}"
+        fi
+        
+        if docker ps --filter "name=devicevault-dev-rabbitmq" --filter "status=running" | grep -q "devicevault-dev-rabbitmq"; then
+            rabbitmq_status="${GREEN}Running${NC}"
+        fi
+        
+        echo "  Redis (Docker): $redis_status"
+        echo "  RabbitMQ (Docker): $rabbitmq_status"
+    else
+        echo "  Docker Services: ${RED}Stopped${NC}"
+    fi
+}
+
+function logs_docker_services() {
+    if ! check_docker; then
+        print_warning "Docker not available"
+        return 0
+    fi
+    
+    cd "$DOCKER_BUILD_DIR"
+    
+    echo "=== Docker Services Logs ==="
+    if docker compose -f docker-compose.dev.yaml ps --status running | grep -q "devicevault-dev"; then
+        docker compose -f docker-compose.dev.yaml logs --tail=50
+    else
+        print_warning "Docker services are not running"
+    fi
+    echo ""
 }
 
 function check_requirements() {
@@ -133,8 +238,8 @@ function start_frontend() {
         npm install
     fi
     
-    # Start Quasar dev server in background (using npm run dev)
-    nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
+    # Start Quasar dev server in background (using local CLI from node_modules)
+    nohup ./node_modules/.bin/quasar dev > "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID_FILE"
     
     sleep 3
@@ -443,6 +548,10 @@ function status() {
     echo "=== DeviceVault Status ==="
     echo ""
     
+    # Docker services status
+    status_docker_services
+    echo ""
+    
     # Backend status
     if [ -f "$BACKEND_PID_FILE" ] && kill -0 $(cat "$BACKEND_PID_FILE") 2>/dev/null; then
         print_status "Backend: ${GREEN}Running${NC} (PID: $(cat $BACKEND_PID_FILE))"
@@ -504,6 +613,7 @@ function restart() {
 
 function start() {
     check_requirements
+    start_docker_services
     start_backend
     start_frontend
     start_backup_worker
@@ -516,6 +626,7 @@ function start() {
     print_status "Access the application at: http://localhost:9000"
     print_status "Backend API available at: http://localhost:8000"
     print_status "Flower monitoring available at: http://localhost:5555"
+    print_status "RabbitMQ Management UI available at: http://localhost:15672"
     echo ""
 }
 
@@ -528,6 +639,7 @@ function stop() {
     stop_backup_worker
     stop_frontend
     stop_backend
+    stop_docker_services
     print_status "DeviceVault stopped"
 }
 
@@ -603,6 +715,10 @@ function logs() {
         fi
         echo ""
     fi
+    
+    if [ "$service" == "docker" ] || [ -z "$service" ]; then
+        logs_docker_services
+    fi
 }
 
 function usage() {
@@ -611,7 +727,7 @@ function usage() {
     echo "Usage: $0 {start|stop|restart|status|logs [service]}"
     echo ""
     echo "Commands:"
-    echo "  start     - Start all services (frontend, backend, workers, consumers, flower)"
+    echo "  start     - Start all services (Docker, frontend, backend, workers, consumers, flower)"
     echo "  stop      - Stop all services"
     echo "  restart   - Restart all services"
     echo "  status    - Show status of all services"
@@ -619,7 +735,11 @@ function usage() {
     echo ""
     echo "Available services for logs:"
     echo "  backend, frontend, backup-worker, storage-worker,"
-    echo "  backup-consumer, storage-consumer, flower"
+    echo "  backup-consumer, storage-consumer, flower, docker"
+    echo ""
+    echo "Note: Docker services (Redis & RabbitMQ) will be started automatically"
+    echo "      when running 'start' command. If Docker is not available, the"
+    echo "      script will continue with other services."
     echo ""
 }
 
