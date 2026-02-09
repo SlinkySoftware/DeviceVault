@@ -38,8 +38,14 @@ class BackupLocation(models.Model):
     Location Types and Config Examples:
         - git: {url, branch, username, password}
         - s3: {bucket, region, access_key, secret_key}
-        - filesystem: {path}
+        - filesystem: {path, compress (optional, bool)}
         - tftp: {host, port}
+    
+    Filesystem Compression:
+        When ``compress`` (or ``gzip``) is set to ``true`` in the config JSON
+        for a filesystem location, text backups are stored gzip-compressed on
+        disk and transparently decompressed on retrieval. Binary backups are
+        never compressed regardless of this setting.
     
     Usage:
         Devices reference a backup location to specify where their configurations

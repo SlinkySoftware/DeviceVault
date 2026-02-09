@@ -18,10 +18,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import base64
+import gzip
 import logging
 from typing import Dict, Union
 
 logger = logging.getLogger('devicevault.storage.fs')
+
+# Suffix appended to text backups when gzip compression is active.
+_GZ_SUFFIX = '.gz'
+
+
+def _should_compress(config: Dict, is_binary: bool) -> bool:
+    """Return True when text content should be gzip-compressed on disk.
+
+    Compression is enabled when *all* of the following are true:
+        1. ``compress`` (or ``gzip``) is truthy in the location config.
+        2. The content is **not** binary.
+    Binary payloads are never compressed — they are already opaque byte
+    streams and compression would add overhead for negligible savings.
+    """
+    if is_binary:
+        return False
+    return bool(config.get('compress') or config.get('gzip'))
 
 
 def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_binary: bool = False) -> str:
@@ -52,6 +70,8 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
     full_path = os.path.join(base_path, rel_path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
+    compress = _should_compress(config, is_binary)
+
     if is_binary:
         # Binary write mode
         if isinstance(content, str):
@@ -71,8 +91,17 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
         with open(full_path, 'wb') as handle:
             handle.write(binary_data)
         logger.info(f'Wrote {len(binary_data)} bytes to {full_path}')
+    elif compress:
+        # Text write mode with gzip compression
+        text_data = (content or '').encode('utf-8')
+        full_path += _GZ_SUFFIX
+        with gzip.open(full_path, 'wb') as handle:
+            handle.write(text_data)
+        logger.info(
+            f'Wrote {len(text_data)} characters (gzip-compressed) to {full_path}'
+        )
     else:
-        # Text write mode (existing behavior)
+        # Text write mode (uncompressed)
         content_len = len(content or '')
         with open(full_path, 'w', encoding='utf-8') as handle:
             handle.write(content or '')
@@ -91,27 +120,45 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
     
     Returns:
         str (text backup, UTF-8 decoded) or bytes (binary backup).
+    
+    For text backups the function automatically detects whether the file was
+    stored with gzip compression (by checking for a ``.gz`` companion file)
+    and decompresses transparently.
     """
     base_path = config.get('base_path') or config.get('path')
     if not base_path:
         raise ValueError('filesystem storage requires base_path or path')
 
     full_path = os.path.join(base_path, storage_ref)
+    gz_path = full_path + _GZ_SUFFIX
+
     logger.info(f'Reading backup from filesystem: {full_path} (binary={is_binary})')
-    
-    if not os.path.exists(full_path):
-        logger.error(f'Backup not found at {full_path}')
-        raise FileNotFoundError(f'backup not found at {full_path}')
 
     if is_binary:
-        # Binary read: return raw bytes
+        # Binary read: return raw bytes — never compressed
+        if not os.path.exists(full_path):
+            logger.error(f'Backup not found at {full_path}')
+            raise FileNotFoundError(f'backup not found at {full_path}')
         with open(full_path, 'rb') as handle:
             data = handle.read()
         logger.info(f'Read {len(data)} bytes from {full_path}')
         return data
-    else:
-        # Text read: return decoded string
-        with open(full_path, 'r', encoding='utf-8') as handle:
-            data = handle.read()
-        logger.info(f'Read {len(data)} characters from {full_path}')
+
+    # Text read: prefer the gzip-compressed variant when it exists,
+    # otherwise fall back to the plain-text file.
+    if os.path.exists(gz_path):
+        with gzip.open(gz_path, 'rb') as handle:
+            data = handle.read().decode('utf-8')
+        logger.info(
+            f'Read {len(data)} characters (gzip-decompressed) from {gz_path}'
+        )
         return data
+
+    if not os.path.exists(full_path):
+        logger.error(f'Backup not found at {full_path} (also checked {gz_path})')
+        raise FileNotFoundError(f'backup not found at {full_path}')
+
+    with open(full_path, 'r', encoding='utf-8') as handle:
+        data = handle.read()
+    logger.info(f'Read {len(data)} characters from {full_path}')
+    return data

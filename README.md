@@ -347,7 +347,6 @@ DeviceVault requires the following services when running with Celery workers:
 **Recommended Setup**: Use `./devicevault.sh start` which automatically manages Redis and RabbitMQ via Docker containers defined in `docker-build/docker-compose.dev.yaml`.
 
 **Alternative Setup** (without Docker): Install and run Redis and RabbitMQ natively:
-**Alternative Setup** (without Docker): Install and run Redis and RabbitMQ natively:
 
 ```bash
 # Install on Debian/Ubuntu
@@ -370,6 +369,28 @@ sudo rabbitmq-plugins enable rabbitmq_management
 5. **Credentials** - Credential storage and management
 6. **Backup Locations** - Configure storage backends
 7. **Retention Policies** - Define backup retention rules
+
+### Backup Location Configuration
+
+Backup locations are configured via the **Backup Locations** admin page or the API. Each location has a `location_type` and a JSON `config` field with type-specific settings.
+
+**Git storage**:
+```json
+{
+  "repo_path": "/var/backups/devicevault-repo",
+  "branch": "main"
+}
+```
+
+**Filesystem storage**:
+```json
+{
+  "path": "/var/backups/devicevault",
+  "compress": true
+}
+```
+
+The `compress` option (also accepted as `gzip`) enables gzip compression for text backups stored on the filesystem. Compressed files are transparently decompressed on retrieval. Binary backups are never compressed. See [Storage Pipeline](docs/STORAGE_PIPELINE.md) for full details.
 
 ## Docker-Based Setup
 

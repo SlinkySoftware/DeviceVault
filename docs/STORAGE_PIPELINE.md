@@ -103,15 +103,16 @@ Queue naming convention:
 
 Each storage backend (`backend/storage/git.py`, `backend/storage/fs.py`) exposes two functions:
 
-### `store_backup(content: str, rel_path: str, config: dict) -> str`
+### `store_backup(content: str | bytes, rel_path: str, config: dict, is_binary: bool = False) -> str`
 
 Persists backup content to the storage backend and returns an opaque `storage_ref` string.
 
 **Arguments:**
 
-- `content`: Raw device configuration (string).
+- `content`: Raw device configuration (str for text, bytes or base64 str for binary).
 - `rel_path`: Suggested relative path for the backup file (e.g., `123/backup_now-123-2026-01-12T12-34-56Z.txt`).
 - `config`: Storage-specific configuration (from `BackupLocation.config` JSON field).
+- `is_binary`: True if content is binary, False if text (default).
 
 **Returns:**
 
@@ -119,7 +120,7 @@ Persists backup content to the storage backend and returns an opaque `storage_re
 
 **No Django dependencies:** These functions are standalone and do not import Django models or settings.
 
-### `read_backup(storage_ref: str, config: dict) -> str`
+### `read_backup(storage_ref: str, config: dict, is_binary: bool = False) -> str | bytes`
 
 Retrieves backup content from the storage backend.
 
@@ -127,10 +128,40 @@ Retrieves backup content from the storage backend.
 
 - `storage_ref`: Opaque identifier returned by `store_backup()`.
 - `config`: Storage-specific configuration.
+- `is_binary`: True if backup is binary, False if text (default).
 
 **Returns:**
 
-- Raw backup content (string).
+- Raw backup content (str for text, bytes for binary).
+
+### Filesystem Compression (Text Backups Only)
+
+The filesystem storage backend (`backend/storage/fs.py`) supports optional gzip compression
+for **text** backups. When enabled, text content is gzip-compressed on disk and transparently
+decompressed on retrieval. Binary backups are **never** compressed regardless of configuration.
+
+**How to enable:** Set `"compress": true` (or `"gzip": true`) in the `BackupLocation.config`
+JSON field for a filesystem-type location:
+
+```json
+{
+  "path": "/backups/devices",
+  "compress": true
+}
+```
+
+**Behaviour:**
+
+- **On store**: Text content is written as `<rel_path>.gz` using `gzip.open()`. The
+  `storage_ref` returned to the caller does **not** include the `.gz` suffix — the
+  suffix is an on-disk implementation detail only.
+- **On read**: The reader checks for a `.gz` companion file first. If found, it
+  decompresses transparently. If not, it falls back to the plain-text file. This
+  means:
+  - Previously uncompressed backups remain readable after compression is enabled.
+  - Previously compressed backups remain readable even if compression is later disabled.
+- **Binary content**: The `compress` / `gzip` config keys are ignored for binary
+  payloads — they are stored and retrieved as raw bytes.
 
 ## Synchronous vs Asynchronous Tasks
 
@@ -218,14 +249,26 @@ This table is the **authoritative index** for retrieving backups. It does not st
 
 2. **Assign the backup location to a device** (via Django admin or API).
 
-3. **Trigger a backup** (via frontend or API):
+3. **Create a filesystem-based backup location with compression** (optional):
+   ```json
+   {
+     "name": "Compressed Filesystem Storage",
+     "location_type": "filesystem",
+     "config": {
+       "path": "/tmp/devicevault-backups",
+       "compress": true
+     }
+   }
+   ```
+
+4. **Trigger a backup** (via frontend or API):
    ```bash
    curl -X POST http://localhost:8000/api/devices/1/backup_now/ \
      -H "Authorization: Token <your-token>" \
      -H "Content-Type: application/json"
    ```
 
-4. **Observe the pipeline**:
+5. **Observe the pipeline**:
    - **Collection**: Watch `device:results` Redis stream:
      ```bash
      redis-cli XREAD COUNT 10 STREAMS device:results 0
@@ -237,7 +280,7 @@ This table is the **authoritative index** for retrieving backups. It does not st
      ```
    - **Storage consumption**: Check `consume_storage_results.py` logs for "Persisted storage result".
 
-5. **Verify database records**:
+6. **Verify database records**:
    ```bash
    cd backend && source ../.venv/bin/activate && python manage.py shell
    ```
@@ -252,16 +295,17 @@ This table is the **authoritative index** for retrieving backups. It does not st
    StoredBackup.objects.filter(device_id=1).order_by('-timestamp').first()
    ```
 
-6. **Test backup retrieval**:
+7. **Test backup retrieval**:
    ```bash
    curl -X GET http://localhost:8000/api/stored-backups/<id>/download/ \
      -H "Authorization: Token <your-token>" \
      -o backup.cfg
    ```
 
-7. **Verify storage on disk**:
+8. **Verify storage on disk**:
    - For Git: `cd /tmp/devicevault-git-repo && git log --oneline`
    - For filesystem: `ls -lh /tmp/devicevault-backups/`
+   - For filesystem with compression: `ls -lh /tmp/devicevault-backups/` (files end in `.gz`)
 
 ## Failure Handling
 

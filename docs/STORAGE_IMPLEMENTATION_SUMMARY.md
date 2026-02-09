@@ -98,6 +98,7 @@ Full verification steps are in `docs/STORAGE_PIPELINE.md`.
 - **RabbitMQ queues**: Used for Celery task routing (storage workers bind to specific queues).
 - **Synchronous retrieval**: Uses `task.get(timeout=60)` to block until worker returns content.
 - **Opaque storage refs**: Git backend returns `branch:path@commit`; filesystem backend returns `path`.
+- **Filesystem compression**: Text backups stored via the filesystem backend can optionally be gzip-compressed on disk by setting `"compress": true` in the `BackupLocation.config` JSON. Compressed files are transparently decompressed on retrieval. Binary backups are never compressed. See `backend/storage/fs.py` and the [Storage Pipeline](STORAGE_PIPELINE.md) documentation for details.
 - **Type hints**: Added `# type: ignore` comments for Pylance false positives (redis-py, python-json-logger).
 
 ## Running the Storage Workers
