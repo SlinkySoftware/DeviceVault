@@ -64,6 +64,12 @@ class Command(BaseCommand):
                         operation = data.get('operation', 'store')
                         storage_duration_ms = data.get('storage_duration_ms') or None
 
+                        # Encryption metadata (may be absent for unencrypted backups)
+                        enc_version_raw = data.get('enc_version') or None
+                        enc_cipher = data.get('enc_cipher') or None
+                        enc_kid = data.get('enc_kid') or None
+                        enc_edk = data.get('enc_edk') or None
+
                         if operation and operation != 'store':
                             r.xack(stream, group, msg_id)
                             self.stdout.write(f'Skipped non-store operation: {operation} ({task_identifier})')
@@ -93,6 +99,14 @@ class Command(BaseCommand):
                                 r.xack(stream, group, msg_id)
                                 continue
 
+                            # Parse encryption version to int (nullable)
+                            enc_version_int = None
+                            if enc_version_raw and enc_version_raw != '':
+                                try:
+                                    enc_version_int = int(enc_version_raw)
+                                except (ValueError, TypeError):
+                                    pass
+
                             StoredBackup.objects.create(
                                 task_id=task_id or '',
                                 task_identifier=task_identifier,
@@ -103,6 +117,11 @@ class Command(BaseCommand):
                                 timestamp=datetime.utcnow(),
                                 log=log_text,
                                 storage_duration_ms=int(storage_duration_ms) if storage_duration_ms and storage_duration_ms != '' else None,
+                                # Encryption metadata
+                                enc_version=enc_version_int,
+                                enc_cipher=enc_cipher if enc_cipher else None,
+                                enc_kid=enc_kid if enc_kid else None,
+                                enc_edk=enc_edk if enc_edk else None,
                             )
                             
                             # Update overall duration in DeviceBackupResult (step 1 to step 9)

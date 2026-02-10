@@ -176,6 +176,7 @@ class Command(BaseCommand):
             'storage_backend': backend_key,
             'storage_config': location.config or {},
             'device_config': device_config or '',
+            'encrypt_backup': device_obj.encrypt_backups,
         }
 
         queue = f'storage.{backend_key}'

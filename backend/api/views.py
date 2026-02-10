@@ -280,6 +280,8 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
             storage_backend=Subquery(storage_qs.values('storage_backend')[:1]),
             storage_ref=Subquery(storage_qs.values('storage_ref')[:1]),
             storage_timestamp=Subquery(storage_qs.values('timestamp')[:1]),
+            enc_version=Subquery(storage_qs.values('enc_version')[:1]),
+            enc_kid=Subquery(storage_qs.values('enc_kid')[:1]),
         ).select_related('device')
 
         return qs

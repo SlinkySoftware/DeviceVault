@@ -84,8 +84,21 @@ class StoredBackup(models.Model):
     # Timing metrics (in milliseconds)
     storage_duration_ms = models.IntegerField(null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)')
 
+    # Encryption metadata (nullable for backward compatibility with legacy v0 plaintext backups)
+    # When enc_version is null or 0, the stored object is plaintext (no decryption needed).
+    enc_version = models.IntegerField(null=True, blank=True, help_text='Encryption format version (null/0 = plaintext, 1 = AES-256-GCM chunked)')
+    enc_cipher = models.CharField(max_length=32, null=True, blank=True, help_text='Cipher identifier, e.g. AES-256-GCM')
+    enc_kid = models.CharField(max_length=128, null=True, blank=True, db_index=True, help_text='Master key identifier used to wrap the DEK')
+    enc_edk = models.TextField(null=True, blank=True, help_text='Encrypted DEK (base64-encoded)')
+
     class Meta:
         ordering = ['-timestamp']
 
+    @property
+    def is_encrypted(self):
+        """Return True if this backup was stored with encryption."""
+        return bool(self.enc_version and self.enc_version > 0)
+
     def __str__(self):
-        return f"{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}"
+        enc = f' [encrypted v{self.enc_version}]' if self.is_encrypted else ''
+        return f"{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}{enc}"

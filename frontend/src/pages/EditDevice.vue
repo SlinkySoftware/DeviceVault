@@ -184,6 +184,21 @@
             :disable="!canModify"
           />
           
+          <!-- Encrypt Backups at Rest -->
+          <q-toggle
+            v-model="form.encrypt_backups"
+            :disable="!canModify"
+            color="primary"
+            class="encrypt-toggle"
+          >
+            <template v-slot:default>
+              <div class="row items-center no-wrap">
+                <q-icon name="lock" :color="form.encrypt_backups ? 'primary' : 'grey-6'" class="q-mr-sm" size="sm" />
+                <span>Encrypt backups at rest</span>
+              </div>
+            </template>
+          </q-toggle>
+          
           <div class="row q-gutter-sm">
             <q-btn 
               v-if="canModify"
@@ -227,6 +242,7 @@ const form = ref({
   device_group: null,
   collection_group: null,
   enabled: true,
+  encrypt_backups: false,
   last_backup_status: null,
   last_backup_time: null
 })
@@ -298,6 +314,7 @@ async function loadData() {
         device_group: data.device_group?.id ?? null,
         collection_group: data.collection_group?.id ?? null,
         enabled: data.enabled ?? true,
+        encrypt_backups: data.encrypt_backups ?? false,
         last_backup_status: data.last_backup_status ?? null,
         last_backup_time: data.last_backup_time ?? null
       }
@@ -354,6 +371,11 @@ onMounted(() => {
 
 /* Enabled toggle styling */
 .enabled-toggle {
+  margin-bottom: 0.5rem;
+}
+
+/* Encrypt toggle styling */
+.encrypt-toggle {
   margin-bottom: 0.5rem;
 }
 

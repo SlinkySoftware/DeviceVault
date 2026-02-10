@@ -86,3 +86,8 @@ DEVICEVAULT_STORAGE_RESULTS_STREAM = os.environ.get(
     'DEVICEVAULT_STORAGE_RESULTS_STREAM',
     cfg.get('storage_results_stream', 'storage:results')
 )
+
+# Encryption configuration - loaded from config.yaml 'encryption' section / env vars.
+# The heavy lifting (key provider init, crypto wrapper) is done lazily in
+# crypto.config to keep settings.py import-time fast and fail-safe.
+DEVICEVAULT_ENCRYPTION = cfg.get('encryption', {})

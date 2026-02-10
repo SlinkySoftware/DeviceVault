@@ -77,6 +77,27 @@
             </q-td>
           </template>
 
+          <template v-slot:body-cell-encrypted="props">
+            <q-td :props="props">
+              <q-icon
+                v-if="props.row.is_encrypted"
+                name="lock"
+                color="primary"
+                size="sm"
+              >
+                <q-tooltip>Backup encrypted at rest</q-tooltip>
+              </q-icon>
+              <q-icon
+                v-else
+                name="lock_open"
+                color="grey-5"
+                size="sm"
+              >
+                <q-tooltip>Backup not encrypted</q-tooltip>
+              </q-icon>
+            </q-td>
+          </template>
+
           <template v-slot:body-cell-actions="props">
             <q-td :props="props">
               <q-btn
@@ -194,6 +215,7 @@ const columns = [
   { name: 'is_text', label: 'Type', field: 'is_text', align: 'center', format: val => val ? 'Text' : 'Binary' },
   { name: 'storage_backend', label: 'Backend', field: 'storage_backend', align: 'left' },
   { name: 'status', label: 'Status', field: 'status', align: 'center' },
+  { name: 'encrypted', label: 'Encrypted', field: 'is_encrypted', align: 'center', style: 'width: 80px' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' }
 ]
 
@@ -358,6 +380,7 @@ onMounted(() => {
 <style scoped>
 .backup-table {
   /* Ensure table rows are properly spaced */
+  width: 100%;
 }
 
 .backup-content {

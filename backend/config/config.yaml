@@ -16,3 +16,40 @@ auth:
 new_database:
   engine: ''
   name: ''
+
+# ---------------------------------------------------------------------------
+# Backup Encryption (envelope encryption with AES-256-GCM)
+# ---------------------------------------------------------------------------
+# When enabled, all new backups are encrypted at rest using envelope encryption.
+# A fresh Data Encryption Key (DEK) is generated per backup and wrapped with a
+# master key. Legacy plaintext backups remain readable (v0 compatibility).
+#
+# Environment variable overrides (take precedence over this section):
+#   DEVICEVAULT_ENCRYPTION_ENABLED   - true/false
+#   DEVICEVAULT_CHUNK_SIZE_BYTES     - integer (bytes)
+#   DEVICEVAULT_KEY_PROVIDER         - local (kms in future)
+#   DEVICEVAULT_LOCAL_MASTER_KEY     - base64-encoded 32-byte key
+#   DEVICEVAULT_ALLOW_PLAINTEXT_FALLBACK - true/false
+encryption:
+  # Master switch - set to true to encrypt all new backups
+  enabled: false
+
+  # Key provider: 'local' reads keys from this config or env vars.
+  # KMS providers (AWS KMS, Azure Key Vault) will be supported in future.
+  key_provider: local
+
+  # Named master keys (key ring). Multiple keys support rotation.
+  # Generate a key:  python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+  # keys:
+  #   mk-1: <base64-encoded-32-byte-key>
+  #   mk-2: <base64-encoded-32-byte-key>
+  keys: {}
+
+  # Which KID to use for new encryption operations (must exist in 'keys')
+  # default_key_id: mk-1
+
+  # Streaming chunk size in bytes (min 64 KiB, max 8 MiB, default 1 MiB)
+  chunk_size_bytes: 1048576
+
+  # Allow plaintext writes when encryption is disabled (emergency fallback)
+  allow_plaintext_fallback: true

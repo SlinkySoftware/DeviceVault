@@ -130,6 +130,7 @@ class Device(models.Model):
         - backup_method (CharField): Backup plugin key to use (e.g. mikrotik_ssh_export, noop, etc.)
         - device_group (ForeignKey): Device group for RBAC access control
         - enabled (BooleanField): Whether device is active for backups (default: True)
+        - encrypt_backups (BooleanField): Whether to encrypt backups at rest (default: False)
         - last_backup_time (DateTimeField): Timestamp of most recent successful backup
         - last_backup_status (CharField): Status of last backup attempt (success/failed/pending)
         - retention_policy (ForeignKey): Backup retention rules to apply to this device
@@ -152,6 +153,7 @@ class Device(models.Model):
     device_group = models.ForeignKey('DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control')
     collection_group = models.ForeignKey('CollectionGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices', help_text='Collection group for task distribution')
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
+    encrypt_backups = models.BooleanField(default=False, help_text='Encrypt backup data at rest using AES-256-GCM envelope encryption')
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
     last_backup_status = models.CharField(max_length=32, blank=True, help_text='Status of last backup: success, failed, pending, etc.')
     retention_policy = models.ForeignKey('policies.RetentionPolicy', on_delete=models.SET_NULL, null=True, blank=True, help_text='Backup retention policy')

@@ -15,7 +15,12 @@ def read_backup_via_worker(
     timeout: int = 60,
 ) -> Dict[str, Any]:
     """Fetch backup content by delegating to the storage.read Celery task.
-    
+
+    The storage worker handles decryption transparently when encryption is
+    enabled.  The CryptoStorage wrapper detects the ``DVLT`` header on the
+    stored blob and decrypts automatically — no encryption metadata needs
+    to be passed through this client.
+
     Args:
         storage_backend: Storage backend name (e.g., 'filesystem', 'git').
         storage_ref: Opaque reference to backup artifact.
@@ -23,7 +28,7 @@ def read_backup_via_worker(
         task_identifier: Optional task identifier for logging.
         is_binary: True if backup is binary, False if text (default).
         timeout: Request timeout in seconds.
-    
+
     Returns:
         Dict with 'content' (str or base64-encoded for binary) and metadata.
     """
@@ -35,7 +40,8 @@ def read_backup_via_worker(
             'storage_ref': storage_ref,
             'storage_config': storage_config,
             'task_identifier': task_identifier,
-            'is_binary': is_binary,        },
+            'is_binary': is_binary,
+        },
         queue=queue,
         routing_key=queue,
     )

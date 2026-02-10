@@ -33,6 +33,14 @@
   - API serializers and views
   - Frontend components and services
 
+### Security
+- [ENCRYPTION.md](ENCRYPTION.md) - **Backup encryption at rest**
+  - AES-256-GCM envelope encryption architecture
+  - Configuration and key management
+  - Key rotation runbook
+  - Threat model and security properties
+  - Module structure and testing
+
 ---
 
 ## 🎯 Quick Navigation
@@ -57,6 +65,9 @@
 
 ### I want code documentation
 → See [DOCUMENTATION_SUMMARY.md](DOCUMENTATION_SUMMARY.md)
+
+### I need to set up backup encryption
+→ See [ENCRYPTION.md](ENCRYPTION.md)
 
 ---
 

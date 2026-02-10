@@ -139,7 +139,7 @@ class DeviceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display', 'device_group', 'device_group_name',
-            'collection_group', 'enabled', 'last_backup_time', 'last_backup_status',
+            'collection_group', 'enabled', 'encrypt_backups', 'last_backup_time', 'last_backup_status',
             'retention_policy', 'backup_location', 'credential', 'user_permissions'
         ]
     
@@ -181,12 +181,15 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
     storage_ref = serializers.CharField(read_only=True)
     storage_timestamp = serializers.DateTimeField(read_only=True)
     is_text = serializers.SerializerMethodField()
+    is_encrypted = serializers.SerializerMethodField()
+    enc_kid = serializers.CharField(read_only=True)
 
     class Meta:
         model = DeviceBackupResult
         fields = [
             'id', 'device', 'timestamp', 'task_identifier',
-            'backup_status', 'storage_status', 'storage_backend', 'storage_ref', 'storage_timestamp', 'status', 'is_text'
+            'backup_status', 'storage_status', 'storage_backend', 'storage_ref',
+            'storage_timestamp', 'status', 'is_text', 'is_encrypted', 'enc_kid',
         ]
 
     def get_status(self, obj):
@@ -207,6 +210,16 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
         if not plugin:
             return True  # Default to text if plugin not found
         return not plugin.is_binary
+
+    def get_is_encrypted(self, obj):
+        """Return True if the stored backup is encrypted."""
+        enc_version = getattr(obj, 'enc_version', None)
+        if enc_version is not None:
+            try:
+                return int(enc_version) > 0
+            except (ValueError, TypeError):
+                pass
+        return False
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -552,8 +565,9 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'ip_address', 'dns_name', 'device_type', 'manufacturer',
             'backup_method', 'backup_method_display',
-            'device_group', 'collection_group', 'enabled', 'last_backup_time',
-            'last_backup_status', 'retention_policy', 'backup_location', 'credential',
+            'device_group', 'collection_group', 'enabled', 'encrypt_backups',
+            'last_backup_time', 'last_backup_status',
+            'retention_policy', 'backup_location', 'credential',
             'user_permissions'
         ]
     

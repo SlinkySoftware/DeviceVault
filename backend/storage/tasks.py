@@ -46,6 +46,51 @@ STORAGE_BACKENDS = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Lazy-initialised encryption layer (standalone, no Django needed)
+# ---------------------------------------------------------------------------
+_crypto_storage = None
+_crypto_checked = False
+
+
+def _get_crypto_storage():
+    """Return a CryptoStorage wrapper if a master key is configured, else None.
+
+    Lazy-initialised on first call.  The storage worker process runs
+    outside Django so we read config directly from env / YAML.
+
+    With per-device encryption, the crypto subsystem must be available
+    whenever keys are configured — regardless of the global ``enabled``
+    flag.  The per-device ``encrypt_backup`` field in the payload
+    controls whether encryption is actually applied to each backup.
+    """
+    global _crypto_storage, _crypto_checked
+    if _crypto_checked:
+        return _crypto_storage
+
+    _crypto_checked = True
+    try:
+        from crypto.config import get_key_provider, get_chunk_size
+        from crypto.wrapper import CryptoStorage
+
+        kp = get_key_provider(force=True)
+        if kp is None:
+            logger.info('No encryption key provider available — per-device encryption will be unavailable')
+            return None
+
+        chunk_size = get_chunk_size()
+        _crypto_storage = CryptoStorage(kp, chunk_size=chunk_size, encryption_enabled=True)
+        logger.info(
+            'Crypto subsystem ready: cipher=AES-256-GCM, chunk_size=%d, default_kid=%s',
+            chunk_size, kp.get_default_key_id(),
+        )
+    except Exception as exc:
+        # If crypto init fails, per-device encryption won't work.
+        logger.error('Failed to initialise crypto storage: %s', exc)
+        _crypto_storage = None
+
+    return _crypto_storage
+
 
 def _iso_now() -> str:
     return datetime.utcnow().isoformat() + 'Z'
@@ -73,6 +118,11 @@ def _publish_result(result: Dict) -> None:
             'storage_ref': result.get('storage_ref', '') or '',
             'operation': result.get('operation', '') or 'store',
             'storage_duration_ms': str(result.get('storage_duration_ms', '') or ''),
+            # Encryption metadata (empty strings for unencrypted backups)
+            'enc_version': str(result.get('enc_version', '') or ''),
+            'enc_cipher': result.get('enc_cipher', '') or '',
+            'enc_kid': result.get('enc_kid', '') or '',
+            'enc_edk': result.get('enc_edk', '') or '',
         }
         redis_client.xadd(STORAGE_RESULTS_STREAM, payload)  # type: ignore
     except Exception:
@@ -179,17 +229,61 @@ def storage_store_task(self, payload: Dict) -> Dict:
         storage_start_ms = int(time.time() * 1000)
         
         storage_fn = STORAGE_BACKENDS[storage_backend]['store']
-        storage_ref = storage_fn(str(device_config), rel_path, storage_config)
+        is_binary = payload.get('is_binary', False)
+
+        # Per-device encryption: the payload carries an 'encrypt_backup' flag
+        # set by the device configuration. Only encrypt when the device opts in
+        # AND the crypto subsystem is available (keys configured).
+        encrypt_requested = payload.get('encrypt_backup', False)
+        crypto = _get_crypto_storage() if encrypt_requested else None
+        enc_meta = None
+        if encrypt_requested and crypto is None:
+            log_lines.append({
+                'source': 'encryption',
+                'timestamp': _iso_now(),
+                'severity': 'WARNING',
+                'message': 'Encryption requested but no master key is configured — backup stored as plaintext'
+            })
+            logger.warning(
+                'encryption_requested_but_unavailable',
+                extra={'device_id': device_id, 'task_identifier': task_identifier},
+            )
+        if crypto is not None:
+            aad_fields = {
+                'device_id': device_id,
+                'task_identifier': task_identifier,
+                'storage_backend': storage_backend,
+            }
+            storage_ref, enc_meta = crypto.store(
+                str(device_config) if not is_binary else device_config,
+                rel_path,
+                storage_config,
+                is_binary=is_binary,
+                store_fn=storage_fn,
+                aad_fields=aad_fields,
+            )
+        else:
+            storage_ref = storage_fn(str(device_config), rel_path, storage_config)
         
         # Capture end time and calculate duration
         storage_end_ms = int(time.time() * 1000)
         storage_duration_ms = storage_end_ms - storage_start_ms
         
+        enc_msg = ''
+        if enc_meta:
+            enc_msg = f' [encrypted v{enc_meta["enc_version"]}, kid={enc_meta["kid"]}]'
+            log_lines.append({
+                'source': 'encryption',
+                'timestamp': _iso_now(),
+                'severity': 'INFO',
+                'message': f'Backup encrypted at rest (AES-256-GCM, key={enc_meta["kid"]})'
+            })
+        
         log_lines.append({
             'source': 'storage_worker',
             'timestamp': _iso_now(),
             'severity': 'INFO',
-            'message': f'Stored to {storage_backend}:{storage_ref} in {storage_duration_ms}ms'
+            'message': f'Stored to {storage_backend}:{storage_ref}{enc_msg} in {storage_duration_ms}ms'
         })
         result = {
             'task_id': tid,
@@ -203,6 +297,12 @@ def storage_store_task(self, payload: Dict) -> Dict:
             'operation': operation,
             'storage_duration_ms': storage_duration_ms,
         }
+        # Attach encryption metadata to the result for persistence
+        if enc_meta:
+            result['enc_version'] = enc_meta.get('enc_version')
+            result['enc_cipher'] = enc_meta.get('cipher')
+            result['enc_kid'] = enc_meta.get('kid')
+            result['enc_edk'] = enc_meta.get('edk')  # base64
         logger.info(
             'storage_store_complete',
             extra={
@@ -310,7 +410,13 @@ def storage_read_task(
             extra={'storage_backend': storage_backend, 'storage_ref': storage_ref},
         )
         read_fn = STORAGE_BACKENDS[storage_backend]['read']
-        content = read_fn(storage_ref, storage_config, is_binary=is_binary)
+
+        # Decryption: route through CryptoStorage if available (handles v0 plaintext transparently)
+        crypto = _get_crypto_storage()
+        if crypto is not None:
+            content = crypto.read(storage_ref, storage_config, is_binary, read_fn=read_fn)
+        else:
+            content = read_fn(storage_ref, storage_config, is_binary=is_binary)
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
