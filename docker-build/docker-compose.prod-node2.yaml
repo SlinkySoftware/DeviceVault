@@ -1,0 +1,208 @@
+version: '3.8'
+
+name: devicevault-prod-node2
+
+services:
+  # POSTGRESQL STANDBY (READ REPLICA)
+  postgres:
+    image: postgres:17
+    container_name: postgres-2
+    hostname: postgres-2
+    restart: unless-stopped
+    env_file:
+      - /etc/devicevault/node2/.env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-devicevault}
+      POSTGRES_USER: ${POSTGRES_USER:-devicevault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Replicate from Node 1
+      PGUSER: ${POSTGRES_REPLICATION_USER:-replicator}
+    volumes:
+      - postgres-data-2:/var/lib/postgresql/data
+      - /etc/devicevault/node2/postgres-recovery.conf:/var/lib/postgresql/recovery.conf:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - devicevault-prod
+    command: >
+      bash -c "
+      if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+        # Initial basebackup from primary
+        PGPASSWORD='${POSTGRES_REPLICATION_PASSWORD}' pg_basebackup
+          -h node1.internal
+          -D /var/lib/postgresql/data
+          -U ${POSTGRES_REPLICATION_USER:-replicator}
+          -v -P
+      fi &&
+      exec postgres
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devicevault}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - redis  # logical ordering
+
+  # REDIS REPLICA
+  redis:
+    image: redis:7
+    container_name: redis-2
+    hostname: redis-2
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --bind
+      - 0.0.0.0
+      - --slaveof
+      - node1.internal
+      - "6379"
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "2gb"
+      - --maxmemory-policy
+      - "allkeys-lru"
+    volumes:
+      - redis-data-2:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - devicevault-prod
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RABBITMQ CLUSTER NODE (MEMORY NODE)
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    container_name: rabbitmq-2
+    hostname: rabbitmq-2
+    restart: unless-stopped
+    env_file:
+      - /etc/devicevault/node2/.env
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-devicevault-cookie}
+      RABBITMQ_DEFAULT_VHOST: /
+      # Join cluster as memory node (lower resource footprint than disk node)
+      RABBITMQ_CLUSTERED: "true"
+      RABBITMQ_CLUSTER_PARTITION_HANDLING: "pause_minority"
+    volumes:
+      - rabbitmq-data-2:/var/lib/rabbitmq
+      - /etc/devicevault/node2/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    networks:
+      - devicevault-prod
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping", "-q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - redis
+
+  # DJANGO APPLICATION + NGINX (STANDBY - NOT RUNNING)
+  # This container is configured but can be manually started for failover
+  django:
+    build:
+      context: /opt/devicevault/repo/docker-build
+      dockerfile: Dockerfile.django
+    container_name: django-2
+    hostname: django-2
+    restart: "no"  # Do not auto-restart; requires manual intervention for failover
+    env_file:
+      - /etc/devicevault/node2/.env
+    environment:
+      DEVICEVAULT_CONFIG: /etc/devicevault/node2/config.yaml
+      DEVICEVAULT_BROKER_URL: ${DEVICEVAULT_BROKER_URL:-amqp://guest:guest@rabbitmq:5672//}
+      DEVICEVAULT_REDIS_URL: ${DEVICEVAULT_REDIS_URL:-redis://node1.internal:6379/1}
+      DEVICEVAULT_BROKER_API: ${DEVICEVAULT_BROKER_API:-http://guest:guest@rabbitmq:15672/api/}
+      DEBUG: "${DEBUG:-False}"
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - /etc/devicevault/node2:/etc/devicevault/node2:ro
+      - django-static:/app/static
+    ports:
+      - "8000:8000"
+    networks:
+      - devicevault-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: >
+      sh -c "
+      cd /app/repo/backend &&
+      python manage.py migrate --run-syncdb &&
+      gunicorn -w 4 -b 0.0.0.0:8000 devicevault.wsgi:application
+      "
+    # Override for standby: this service stays down until promoted
+
+  nginx:
+    build:
+      context: /opt/devicevault/repo/docker-build
+      dockerfile: Dockerfile.nginx
+    container_name: nginx-2
+    hostname: nginx-2
+    restart: "no"  # Do not auto-restart
+    depends_on:
+      - django
+    volumes:
+      - /etc/devicevault/node2/nginx.conf:/etc/nginx/nginx.conf:ro
+      - django-static:/app/static:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - devicevault-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FLOWER (CELERY MONITORING) - READ-ONLY STANDBY
+  flower:
+    image: mher/flower:2.0
+    container_name: flower-2
+    hostname: flower-2
+    restart: unless-stopped
+    environment:
+      CELERY_BROKER_URL: ${DEVICEVAULT_BROKER_URL:-amqp://guest:guest@rabbitmq:5672//}
+      CELERY_RESULT_BACKEND: ${DEVICEVAULT_REDIS_URL:-redis://redis:6379/1}
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "5555:5555"
+    networks:
+      - devicevault-prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  devicevault-prod:
+    driver: bridge
+
+volumes:
+  postgres-data-2:
+  redis-data-2:
+  rabbitmq-data-2:
+  django-static:
