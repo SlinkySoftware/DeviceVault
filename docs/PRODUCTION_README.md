@@ -238,7 +238,11 @@ docker compose -f docker-compose.prod-node1.yaml restart django
 
 ```bash
 # On Node 1, pull latest code
-cd /opt/devicevault/repo && git pull origin main
+cd /opt/devicevault/repo
+export GIT_BRANCH="${GIT_BRANCH:-master}"
+git fetch origin "$GIT_BRANCH"
+git checkout "$GIT_BRANCH"
+git pull --ff-only origin "$GIT_BRANCH"
 
 # Rebuild images
 docker compose -f docker-compose.prod-node1.yaml build --no-cache

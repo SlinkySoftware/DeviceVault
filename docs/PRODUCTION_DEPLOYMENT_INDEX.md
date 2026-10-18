@@ -149,7 +149,7 @@ curl -u guest:guest http://node1:15672/api/connections
 6. Restart collectors
 
 ### Upgrade DeviceVault
-1. Update code: `git pull origin main`
+1. Update code: `export GIT_BRANCH="${GIT_BRANCH:-master}" && git fetch origin "$GIT_BRANCH" && git checkout "$GIT_BRANCH" && git pull --ff-only origin "$GIT_BRANCH"`
 2. Rebuild images: `docker compose build --no-cache`
 3. Run migrations: `docker compose run --rm django python manage.py migrate`
 4. Restart: `docker compose restart`

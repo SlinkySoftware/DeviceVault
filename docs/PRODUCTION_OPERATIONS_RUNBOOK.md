@@ -37,10 +37,13 @@ sudo bash /path/to/setup-prod-node1.sh node1.internal <db-password> <rabbitmq-co
 # Verify configuration
 ls -la /etc/devicevault/node1/
 
+# Select the branch to deploy
+export GIT_BRANCH="${GIT_BRANCH:-master}"
+
 # Clone repository
 sudo mkdir -p /opt/devicevault
 sudo chown $(whoami):$(whoami) /opt/devicevault
-git clone https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault/repo
+git clone --single-branch --branch "$GIT_BRANCH" https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault/repo
 
 # Start services
 cd /opt/devicevault/repo
@@ -75,8 +78,11 @@ curl -u guest:guest http://localhost:15672/api/overview
 # On Node 2
 sudo bash /path/to/setup-prod-node2.sh node1.internal <db-password> <replication-password> <rabbitmq-cookie>
 
+# Select the branch to deploy
+export GIT_BRANCH="${GIT_BRANCH:-master}"
+
 # Copy repository
-git clone https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault/repo
+git clone --single-branch --branch "$GIT_BRANCH" https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault/repo
 
 # Start services (Django/Nginx will stay down)
 cd /opt/devicevault/repo
@@ -617,8 +623,10 @@ command: celery worker --concurrency=2 --queues=...
 4. **Pull latest code**
    ```bash
    cd /opt/devicevault/repo
-   git fetch origin
-   git checkout <new-version-tag>
+   export GIT_BRANCH="${GIT_BRANCH:-master}"
+   git fetch origin "$GIT_BRANCH"
+   git checkout "$GIT_BRANCH"
+   git pull --ff-only origin "$GIT_BRANCH"
    ```
 
 5. **Rebuild images**
@@ -651,7 +659,11 @@ command: celery worker --concurrency=2 --queues=...
    ```bash
    # On Node 2
    docker compose -f docker-compose.prod-node2.yaml stop django
-   cd /opt/devicevault/repo && git checkout <new-version>
+   cd /opt/devicevault/repo
+   export GIT_BRANCH="${GIT_BRANCH:-master}"
+   git fetch origin "$GIT_BRANCH"
+   git checkout "$GIT_BRANCH"
+   git pull --ff-only origin "$GIT_BRANCH"
    docker compose -f docker-compose.prod-node2.yaml build --no-cache django
    docker compose -f docker-compose.prod-node2.yaml up -d django
    ```
@@ -720,4 +732,3 @@ sudo /usr/local/bin/backup-postgres.sh
 - Database Admin: [Name] - [Phone]
 - Infrastructure: [Name] - [Phone]
 - DeviceVault Developer: [Name] - [Slack]
-

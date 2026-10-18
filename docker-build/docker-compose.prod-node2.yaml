@@ -113,6 +113,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.django
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: django-2
     hostname: django-2
     restart: "no"  # Do not auto-restart; requires manual intervention for failover
@@ -154,6 +156,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.nginx
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: nginx-2
     hostname: nginx-2
     restart: "no"  # Do not auto-restart

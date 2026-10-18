@@ -85,7 +85,8 @@ docker compose version
 0. **Clone the repository**
 ```bash
 # clone into /opt/devicevault (requires sudo to write to /opt)
-sudo git clone https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault
+export GIT_BRANCH="${GIT_BRANCH:-master}"
+sudo git clone --single-branch --branch "$GIT_BRANCH" https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault
 cd /opt/devicevault
 ```
 

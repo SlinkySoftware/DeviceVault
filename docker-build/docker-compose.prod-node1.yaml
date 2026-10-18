@@ -93,6 +93,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.django
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: django-1
     hostname: django-1
     restart: unless-stopped
@@ -135,6 +137,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.nginx
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: nginx-1
     hostname: nginx-1
     restart: unless-stopped
@@ -159,6 +163,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.celery
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: celery-backup-worker-1
     hostname: celery-backup-worker-1
     restart: unless-stopped
@@ -192,6 +198,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.celery
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: celery-storage-worker-1
     hostname: celery-storage-worker-1
     restart: unless-stopped

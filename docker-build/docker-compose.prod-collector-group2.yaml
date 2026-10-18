@@ -8,6 +8,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.celery
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: collector-group2-worker-1
     hostname: collector-group2-worker-1
     restart: unless-stopped
@@ -38,6 +40,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.celery
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: collector-group2-worker-2
     hostname: collector-group2-worker-2
     restart: unless-stopped
@@ -68,6 +72,8 @@ services:
     build:
       context: /opt/devicevault/repo/docker-build
       dockerfile: Dockerfile.celery
+      args:
+        - GIT_BRANCH=${GIT_BRANCH:-master}
     container_name: collector-group2-worker-3
     hostname: collector-group2-worker-3
     restart: unless-stopped
