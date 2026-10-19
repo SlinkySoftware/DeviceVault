@@ -28,6 +28,7 @@ You can find the full text of the license in the [LICENSE](LICENSE.md) file or r
 - **[Celery Setup](docs/CELERY_SETUP.md)**: Detailed Celery configuration and startup instructions
 - **[Development Docker Integration](docs/DEVELOPMENT_DOCKER_INTEGRATION.md)**: Docker development setup with Redis & RabbitMQ
 - **[Docker Compose Comparison](docs/COMPOSE_COMPARISON.md)**: Development vs production Docker configurations
+- **[Production Deployment](docs/PRODUCTION_README.md)**: Image-first production build and role-based deployment workflow
 - **[Authentication](docs/AUTHENTICATION.md)**: Auth methods (Local, LDAP, SAML, Entra ID)
 - **[Timezone Implementation](docs/TIMEZONE_IMPLEMENTATION.md)**: Timezone handling and configuration
 
@@ -426,7 +427,7 @@ See [docs/DEVELOPMENT_DOCKER_INTEGRATION.md](docs/DEVELOPMENT_DOCKER_INTEGRATION
 
 **File**: `docker-build/docker-compose.yaml`
 
-For containerized deployment with all services:
+For one-host containerized stack testing from a source checkout:
 
 ```bash
 cd docker-build
@@ -476,7 +477,7 @@ prune              - Remove unused Docker resources
 clean-build        - Clean Docker build cache
 ```
 
-### Docker Services (Production)
+### Docker Services (Containerized Full Stack)
 
 The `docker-build/docker-compose.yaml` includes:
 
@@ -485,6 +486,12 @@ The `docker-build/docker-compose.yaml` includes:
 - **postgres** — PostgreSQL database (default for Docker)
 - **redis** — Redis for caching and result storage
 - **flower** — Celery task monitoring UI (optional, commented out by default)
+
+For the role-based production workflow, use the dedicated scripts and docs instead:
+
+- [docs/PRODUCTION_README.md](docs/PRODUCTION_README.md)
+- [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
+- [docs/PRODUCTION_OPERATIONS_RUNBOOK.md](docs/PRODUCTION_OPERATIONS_RUNBOOK.md)
 
 ### Comparison
 
@@ -592,61 +599,16 @@ If workers are not processing tasks:
 
 ## Running in Production
 
-This project is developed for local and container-based development. For production deployments follow these concise notes:
+DeviceVault now has a dedicated production workflow:
 
-- Build the frontend with Quasar and serve the compiled files from nginx.
-	```bash
-	# from repo root
-	cd frontend
-	npm ci
-	npm run build
-	# Quasar produces a `dist/` tree (commonly `dist/spa` for SPA mode).
-	```
+1. Build the reusable production images with [scripts/build-prod-images.sh](./scripts/build-prod-images.sh).
+2. Deploy one of the four production roles with the matching setup script.
+3. Keep infrastructure and secrets in `/etc/devicevault/<role>/.env`.
+4. Keep application/domain configuration in `/etc/devicevault/<role>/config.yaml`.
+5. Run installed compose assets from `/opt/devicevault/deploy/<role>/`.
 
-- Build and run a WSGI server for Django (recommended: `gunicorn`) and ensure static files are collected.
-	```bash
-	# in a Python virtualenv on the host or container
-	pip install -r backend/requirements.txt gunicorn
-	cd backend
-	python manage.py collectstatic --noinput
-	gunicorn --bind 0.0.0.0:8000 devicevault.wsgi:application
-	```
+Start here:
 
-- Nginx should serve the frontend build directory as static files and reverse-proxy API and admin endpoints to the Django WSGI server.
-	Example (minimal) nginx site config:
-	```nginx
-	server {
-			listen 80;
-			server_name example.com;
-
-			root /opt/devicevault/frontend/dist/spa; # adjust to actual quasar dist path
-			index index.html;
-
-			location /api/ {
-					proxy_pass http://127.0.0.1:8000/api/;
-					proxy_set_header Host $host;
-					proxy_set_header X-Real-IP $remote_addr;
-					proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-					proxy_set_header X-Forwarded-Proto $scheme;
-			}
-
-			location /admin/ {
-					proxy_pass http://127.0.0.1:8000/admin/;
-					proxy_set_header Host $host;
-					proxy_set_header X-Real-IP $remote_addr;
-					proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-					proxy_set_header X-Forwarded-Proto $scheme;
-			}
-
-			# Serve the SPA (fallback to index.html for history mode)
-			location / {
-					try_files $uri $uri/ /index.html;
-			}
-	}
-	```
-
-- Notes and recommendations:
-	- Run Django behind a process manager (systemd, supervisord) or container orchestrator.
-	- Use HTTPS in front of nginx (Let's Encrypt + certbot recommended).
-	- If serving static media from object storage (S3/GCS), configure storage backends in `backend/config/config.yaml` and in `backend/settings.py` as needed.
-	- Verify `frontend/quasar.config.js` for router mode (`history`) — nginx fallback to `index.html` is required for SPA routes.
+- [docs/PRODUCTION_README.md](docs/PRODUCTION_README.md)
+- [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
+- [docs/PRODUCTION_CONFIG_EXAMPLES.md](docs/PRODUCTION_CONFIG_EXAMPLES.md)

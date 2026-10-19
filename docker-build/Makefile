@@ -1,23 +1,22 @@
 # Project variables
 COMPOSE_FILE=docker-compose.yaml
-GIT_BRANCH ?= master
 
 # Core orchestration
 build:
-	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) build --pull
+	docker compose -f $(COMPOSE_FILE) build --pull
 
 up:
-	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down
 
 restart:
-	docker compose -f $(COMPOSE_FILE) down && GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) down && docker compose -f $(COMPOSE_FILE) up -d
 
 # Celery scaling
 scale-celery:
-	GIT_BRANCH=$(GIT_BRANCH) docker compose -f $(COMPOSE_FILE) up -d --scale celery=$(n)
+	docker compose -f $(COMPOSE_FILE) up -d --scale celery=$(n)
 
 # Django utilities in containers
 migrate:
@@ -27,7 +26,7 @@ makemigrations:
 	docker compose -f $(COMPOSE_FILE) run --rm django python3 manage.py makemigrations
 
 shell:
-	docker compose -f $(COMPOSE_FILE) run --rm django /opt/venv/bin/python3 manage.py shell
+	docker compose -f $(COMPOSE_FILE) run --rm django python manage.py shell
 
 # Frontend utilities
 build-frontend:

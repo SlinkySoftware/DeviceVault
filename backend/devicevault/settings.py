@@ -14,12 +14,43 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os, yaml
+import os
 from pathlib import Path
+
+import yaml
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = os.environ.get('DEVICEVAULT_SECRET_KEY', 'dev-secret')
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+
+
+def _env_flag(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _env_list(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    parsed = [item.strip() for item in value.split(',') if item.strip()]
+    return parsed or default
+
+
+CONFIG_PATH = os.environ.get('DEVICEVAULT_CONFIG', str(BASE_DIR / 'config' / 'config.yaml'))
+if os.path.exists(CONFIG_PATH):
+    with open(CONFIG_PATH, encoding='utf-8') as config_handle:
+        cfg = yaml.safe_load(config_handle) or {}
+else:
+    cfg = {}
+
+SECRET_KEY = os.environ.get(
+    'DEVICEVAULT_SECRET_KEY',
+    cfg.get('secret_key', 'dev-secret'),
+)
+DEBUG = _env_flag('DEBUG', cfg.get('debug', True))
+ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', cfg.get('allowed_hosts', ['*']))
 INSTALLED_APPS = [
  'django.contrib.admin','django.contrib.auth','django.contrib.contenttypes','django.contrib.sessions','django.contrib.messages','django.contrib.staticfiles',
  'rest_framework','rest_framework.authtoken','corsheaders','dv_user','dv_devices','dv_backups','core','devices','backups','credentials','locations','policies','audit','api'
@@ -28,20 +59,78 @@ MIDDLEWARE = ['corsheaders.middleware.CorsMiddleware','django.middleware.securit
 ROOT_URLCONF = 'devicevault.urls'
 TEMPLATES = [{'BACKEND':'django.template.backends.django.DjangoTemplates','DIRS':[BASE_DIR/'templates'],'APP_DIRS':True,'OPTIONS':{'context_processors':['django.template.context_processors.debug','django.template.context_processors.request','django.contrib.auth.context_processors.auth','django.contrib.messages.context_processors.messages']}}]
 WSGI_APPLICATION = 'devicevault.wsgi.application'
-CONFIG_PATH = os.environ.get('DEVICEVAULT_CONFIG', str(BASE_DIR / 'config' / 'config.yaml'))
-if os.path.exists(CONFIG_PATH):
-    with open(CONFIG_PATH) as f:
-        cfg = yaml.safe_load(f) or {}
-else:
-    cfg = {}
+
 DB_CFG = cfg.get('database', {})
-ENGINE = DB_CFG.get('engine','sqlite')
-if ENGINE=='sqlite':
-    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':DB_CFG.get('name', str(BASE_DIR/'devicevault.sqlite3'))}}
-elif ENGINE=='postgres':
-    DATABASES={'default':{'ENGINE':'django.db.backends.postgresql','NAME':DB_CFG.get('name','devicevault'),'USER':DB_CFG.get('user',''),'PASSWORD':DB_CFG.get('password',''),'HOST':DB_CFG.get('host','localhost'),'PORT':DB_CFG.get('port','5432')}}
-elif ENGINE=='mysql':
-    DATABASES={'default':{'ENGINE':'django.db.backends.mysql','NAME':DB_CFG.get('name','devicevault'),'USER':DB_CFG.get('user',''),'PASSWORD':DB_CFG.get('password',''),'HOST':DB_CFG.get('host','localhost'),'PORT':DB_CFG.get('port','3306')}}
+ENGINE = (
+    os.environ.get('DEVICEVAULT_DB_ENGINE')
+    or DB_CFG.get('engine')
+    or 'sqlite'
+).strip().lower()
+
+if ENGINE == 'sqlite':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.environ.get(
+                'DEVICEVAULT_DB_NAME',
+                DB_CFG.get('name', str(BASE_DIR / 'devicevault.sqlite3')),
+            ),
+        }
+    }
+elif ENGINE == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get(
+                'DEVICEVAULT_DB_NAME',
+                os.environ.get('POSTGRES_DB', DB_CFG.get('name', 'devicevault')),
+            ),
+            'USER': os.environ.get(
+                'DEVICEVAULT_DB_USER',
+                os.environ.get('POSTGRES_USER', DB_CFG.get('user', '')),
+            ),
+            'PASSWORD': os.environ.get(
+                'DEVICEVAULT_DB_PASSWORD',
+                os.environ.get('POSTGRES_PASSWORD', DB_CFG.get('password', '')),
+            ),
+            'HOST': os.environ.get(
+                'DEVICEVAULT_DB_HOST',
+                os.environ.get('POSTGRES_HOST', DB_CFG.get('host', 'localhost')),
+            ),
+            'PORT': os.environ.get(
+                'DEVICEVAULT_DB_PORT',
+                os.environ.get('POSTGRES_PORT', DB_CFG.get('port', '5432')),
+            ),
+        }
+    }
+elif ENGINE == 'mysql':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get(
+                'DEVICEVAULT_DB_NAME',
+                os.environ.get('MYSQL_DATABASE', DB_CFG.get('name', 'devicevault')),
+            ),
+            'USER': os.environ.get(
+                'DEVICEVAULT_DB_USER',
+                os.environ.get('MYSQL_USER', DB_CFG.get('user', '')),
+            ),
+            'PASSWORD': os.environ.get(
+                'DEVICEVAULT_DB_PASSWORD',
+                os.environ.get('MYSQL_PASSWORD', DB_CFG.get('password', '')),
+            ),
+            'HOST': os.environ.get(
+                'DEVICEVAULT_DB_HOST',
+                os.environ.get('MYSQL_HOST', DB_CFG.get('host', 'localhost')),
+            ),
+            'PORT': os.environ.get(
+                'DEVICEVAULT_DB_PORT',
+                os.environ.get('MYSQL_PORT', DB_CFG.get('port', '3306')),
+            ),
+        }
+    }
+else:
+    raise ValueError(f'Unsupported database engine: {ENGINE}')
 LANGUAGE_CODE = 'en-us'
 # Application timezone for display - read from config.yaml or default to Australia/Sydney
 DEVICEVAULT_DISPLAY_TIMEZONE = cfg.get('timezone', 'Australia/Sydney')

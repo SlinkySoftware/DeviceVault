@@ -1,0 +1,219 @@
+name: ${COMPOSE_PROJECT_NAME:-devicevault-orchestrator-backup}
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-devicevault}
+      POSTGRES_USER: ${POSTGRES_USER:-devicevault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint:
+      - /bin/bash
+      - -ec
+    command: |
+      if [ ! -s "$${PGDATA}/PG_VERSION" ]; then
+        rm -rf "$${PGDATA:?}"/*
+        PGPASSWORD="$${POSTGRES_REPLICATION_PASSWORD}" pg_basebackup \
+          -h "$${DEVICEVAULT_PRIMARY_HOST}" \
+          -D "$${PGDATA}" \
+          -U "$${POSTGRES_REPLICATION_USER}" \
+          -Fp -Xs -P -R
+      fi
+      exec docker-entrypoint.sh postgres
+    ports:
+      - "${DEVICEVAULT_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devicevault}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --bind
+      - 0.0.0.0
+      - --replicaof
+      - ${DEVICEVAULT_PRIMARY_HOST}
+      - "${DEVICEVAULT_PRIMARY_REDIS_PORT:-6379}"
+    ports:
+      - "${DEVICEVAULT_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    restart: unless-stopped
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-devicevault}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
+    ports:
+      - "${DEVICEVAULT_RABBITMQ_PORT:-5672}:5672"
+      - "${DEVICEVAULT_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ${DEVICEVAULT_CONFIG_DIR}/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping", "-q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  django:
+    image: ${DEVICEVAULT_APP_IMAGE}
+    restart: unless-stopped
+    profiles: ["warm-standby", "promoted"]
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      DEVICEVAULT_CONFIG: ${DEVICEVAULT_CONFIG_DIR}/config.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}:${DEVICEVAULT_CONFIG_DIR}:ro
+    ports:
+      - "${DEVICEVAULT_DJANGO_PORT:-8000}:8000"
+    command:
+      - gunicorn
+      - --workers=4
+      - --bind=0.0.0.0:8000
+      - devicevault.wsgi:application
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: ${DEVICEVAULT_NGINX_IMAGE}
+    restart: unless-stopped
+    profiles: ["warm-standby", "promoted"]
+    depends_on:
+      django:
+        condition: service_healthy
+    ports:
+      - "${DEVICEVAULT_HTTP_PORT:-80}:80"
+      - "${DEVICEVAULT_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backup-consumer:
+    image: ${DEVICEVAULT_APP_IMAGE}
+    restart: unless-stopped
+    profiles: ["promoted"]
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      DEVICEVAULT_CONFIG: ${DEVICEVAULT_CONFIG_DIR}/config.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}:${DEVICEVAULT_CONFIG_DIR}:ro
+    command:
+      - python
+      - manage.py
+      - consume_device_results
+
+  storage-consumer:
+    image: ${DEVICEVAULT_APP_IMAGE}
+    restart: unless-stopped
+    profiles: ["promoted"]
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      DEVICEVAULT_CONFIG: ${DEVICEVAULT_CONFIG_DIR}/config.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}:${DEVICEVAULT_CONFIG_DIR}:ro
+    command:
+      - python
+      - manage.py
+      - consume_storage_results
+
+  local-collector-worker:
+    image: ${DEVICEVAULT_APP_IMAGE}
+    restart: unless-stopped
+    profiles: ["promoted"]
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      DEVICEVAULT_CONFIG: ${DEVICEVAULT_CONFIG_DIR}/config.yaml
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}:${DEVICEVAULT_CONFIG_DIR}:ro
+    command: >
+      sh -c "exec celery -A devicevault_worker worker
+      --loglevel=info
+      --queues=$${DEVICEVAULT_COLLECTOR_QUEUES:-default}
+      --concurrency=$${DEVICEVAULT_LOCAL_COLLECTOR_CONCURRENCY:-1}
+      --hostname=local-collector@%h"
+
+  local-storage-worker:
+    image: ${DEVICEVAULT_APP_IMAGE}
+    restart: unless-stopped
+    profiles: ["promoted"]
+    env_file:
+      - ${DEVICEVAULT_ENV_FILE}
+    environment:
+      DEVICEVAULT_CONFIG: ${DEVICEVAULT_CONFIG_DIR}/config.yaml
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ${DEVICEVAULT_CONFIG_DIR}:${DEVICEVAULT_CONFIG_DIR}:ro
+      - ${DEVICEVAULT_STORAGE_HOST_PATH}:${DEVICEVAULT_STORAGE_CONTAINER_PATH}
+    command: >
+      sh -c "exec celery -A celery_app worker
+      --loglevel=info
+      --queues=$${DEVICEVAULT_STORAGE_QUEUES:-storage.fs,storage.git}
+      --concurrency=$${DEVICEVAULT_LOCAL_STORAGE_CONCURRENCY:-1}
+      --hostname=local-storage@%h"
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:

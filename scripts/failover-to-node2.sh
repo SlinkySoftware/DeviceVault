@@ -1,9 +1,10 @@
-#!/bin/bash
-# DeviceVault Production - Failover from Node 1 to Node 2
-# Run this script from Node 2 when Node 1 becomes unavailable
-# Prerequisites: Node 2 is running with PostgreSQL, Redis, RabbitMQ replicas
+#!/usr/bin/env bash
+# DeviceVault Production - Failover from the primary orchestrator to the backup orchestrator.
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="/opt/devicevault/deploy/orchestrator-backup"
 
 echo "=========================================="
 echo "DeviceVault Production - Failover Script"
@@ -18,19 +19,16 @@ if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
     exit 1
 fi
 
-NODE2_HOST=${1:-node2.internal}
-DEVICES_DIR="/etc/devicevault/node2"
+NODE2_HOST=${1:-$(hostname -f 2>/dev/null || hostname)}
 
 echo "[1/5] Promoting PostgreSQL standby to primary..."
-docker exec postgres-2 bash -c "
-  touch /var/lib/postgresql/data/promote
-  sleep 2
-  pg_ctl -D /var/lib/postgresql/data restart
-"
+docker compose --env-file "$DEPLOY_DIR/compose.env" -f "$DEPLOY_DIR/compose.yaml" exec -T postgres \
+  bash -ec "pg_ctl -D \"\$PGDATA\" promote && pg_isready -U \"\$POSTGRES_USER\""
 sleep 5
 
 # Verify promotion
-if docker exec postgres-2 psql -U devicevault -d devicevault -c "SELECT version();" > /dev/null 2>&1; then
+if docker compose --env-file "$DEPLOY_DIR/compose.env" -f "$DEPLOY_DIR/compose.yaml" exec -T postgres \
+    psql -U devicevault -d devicevault -c "SELECT version();" > /dev/null 2>&1; then
     echo "✓ PostgreSQL promotion successful"
 else
     echo "✗ PostgreSQL promotion failed"
@@ -38,20 +36,21 @@ else
 fi
 
 echo "[2/5] Promoting Redis replica to master..."
-docker exec redis-2 redis-cli SLAVEOF NO ONE
+docker compose --env-file "$DEPLOY_DIR/compose.env" -f "$DEPLOY_DIR/compose.yaml" exec -T redis redis-cli REPLICAOF NO ONE
 echo "✓ Redis promotion successful"
 
-echo "[3/5] Starting Django application on Node 2..."
-docker compose -f docker-build/docker-compose.prod-node2.yaml up -d django nginx
+echo "[3/5] Starting promoted application services on the backup orchestrator..."
+docker compose --env-file "$DEPLOY_DIR/compose.env" -f "$DEPLOY_DIR/compose.yaml" --profile promoted up -d
 sleep 10
-echo "✓ Django and Nginx started"
+echo "✓ Promoted services started"
 
 echo "[4/5] Verifying application health..."
 if curl -f http://localhost:8000/api/health/ > /dev/null 2>&1; then
     echo "✓ Application health check passed"
 else
     echo "✗ Application health check failed"
-    echo "Check logs: docker logs django-2"
+    echo "Check logs:"
+    echo "  docker compose --env-file $DEPLOY_DIR/compose.env -f $DEPLOY_DIR/compose.yaml logs django"
     exit 1
 fi
 
@@ -63,15 +62,14 @@ echo ""
 echo "Manual Tasks Required:"
 echo "1. Update DNS to point to Node 2 ($NODE2_HOST or its IP)"
 echo "2. Update load balancer to route to Node 2 (port 80/443)"
-echo "3. Update collector nodes to point to Node 2:"
-echo "   - Edit: /etc/devicevault/collectors/group{1,2}/.env"
+echo "3. Update collector and storage worker nodes to point to Node 2:"
+echo "   - Edit: /etc/devicevault/collector-worker/.env and /etc/devicevault/storage-worker/.env"
 echo "   - Change: DEVICEVAULT_BROKER_URL, DEVICEVAULT_REDIS_URL"
-echo "   - Restart collectors: docker-compose restart"
+echo "   - Restart workers with their installed compose assets"
 echo ""
 echo "Service URLs (Node 2):"
 echo "  Application: http://$NODE2_HOST/"
 echo "  API: http://$NODE2_HOST/api/"
-echo "  Flower Monitor: http://$NODE2_HOST:5555/"
 echo "  RabbitMQ Admin: http://$NODE2_HOST:15672/"
 echo "  PostgreSQL: postgres://$NODE2_HOST:5432/devicevault"
 echo ""
