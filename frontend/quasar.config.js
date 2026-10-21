@@ -26,10 +26,15 @@ export default function (ctx) {
     build: {
       vueRouterMode: 'history',
       extendViteConf(viteConf) {
-        viteConf.server = viteConf.server || {};
-        viteConf.server.port = 9000;
-        viteConf.server.host = '0.0.0.0';
-        viteConf.server.allowedHosts = true;
+        // Some pages still use the Vue Options API (e.g. Login, Groups)
+        viteConf.define = {
+          ...(viteConf.define || {}),
+          __VUE_OPTIONS_API__: true
+        }
+        viteConf.server = viteConf.server || {}
+        viteConf.server.port = 9000
+        viteConf.server.host = '0.0.0.0'
+        viteConf.server.allowedHosts = true
       }
     },
     devServer: {
