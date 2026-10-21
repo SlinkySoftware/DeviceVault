@@ -160,6 +160,32 @@ function restart() {
     start
 }
 
+function reset() {
+    check_docker
+    verify_required_files
+
+    echo ""
+    print_warning "This will delete docker-dev runtime data under: $VAR_ROOT"
+    print_warning "This includes database, Redis, RabbitMQ, logs, storage data, and frontend node_modules."
+    read -r -p "Type YES to continue: " confirmation
+    if [ "$confirmation" != "YES" ]; then
+        print_status "Reset cancelled."
+        return 0
+    fi
+
+    print_status "Resetting docker-dev stack (containers, networks, and persisted runtime data)..."
+    compose down --volumes --remove-orphans
+
+    if [ -d "$VAR_ROOT" ]; then
+        print_status "Clearing persisted runtime directories under $VAR_ROOT..."
+        docker run --rm -v "$VAR_ROOT:/var-root" alpine:3.20 sh -c \
+            "rm -rf /var-root/postgres /var-root/redis /var-root/rabbitmq /var-root/logs /var-root/storage /var-root/frontend/node_modules"
+    fi
+
+    ensure_var_layout
+    print_status "Reset complete. Existing config retained at: $CONFIG_FILE"
+}
+
 function status() {
     check_docker
     verify_required_files
@@ -170,25 +196,49 @@ function logs() {
     check_docker
     verify_required_files
 
-    local service="${1:-}"
+    local follow=0
+    local service=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -f|--follow)
+                follow=1
+                ;;
+            *)
+                if [ -n "$service" ]; then
+                    print_error "Only one service name can be passed to logs"
+                    return 1
+                fi
+                service="$1"
+                ;;
+        esac
+        shift
+    done
+
+    local compose_args=(logs --tail=100)
+    if [ "$follow" -eq 1 ]; then
+        compose_args+=(--follow)
+    fi
+
     if [ -z "$service" ]; then
-        compose logs --tail=100
+        compose "${compose_args[@]}"
     else
-        compose logs --tail=100 "$service"
+        compose "${compose_args[@]}" "$service"
     fi
 }
 
 function usage() {
     echo "DeviceVault Docker Development Script"
     echo ""
-    echo "Usage: $0 {start|stop|restart|status|logs [service]}"
+    echo "Usage: $0 {start|stop|restart|reset|status|logs [-f|--follow] [service]}"
     echo ""
     echo "Commands:"
     echo "  start     Build images and start all docker-dev services"
     echo "  stop      Stop and remove all docker-dev containers"
     echo "  restart   Restart the docker-dev stack"
+    echo "  reset     Stop stack and delete persisted runtime data (keeps config)"
     echo "  status    Show container status"
-    echo "  logs      Show logs (optionally specify a service)"
+    echo "  logs      Show logs (optionally specify a service); add -f to follow"
     echo ""
     echo "Available services for logs:"
     echo "  db, redis, rabbitmq, orchestrator, frontend,"
@@ -207,11 +257,14 @@ case "${1:-}" in
     restart)
         restart
         ;;
+    reset)
+        reset
+        ;;
     status)
         status
         ;;
     logs)
-        logs "${2:-}"
+        logs "${@:2}"
         ;;
     *)
         usage

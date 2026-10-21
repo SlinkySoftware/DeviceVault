@@ -231,11 +231,15 @@ Other commands:
 ```bash
 ./devicevault-docker-dev.sh status
 ./devicevault-docker-dev.sh logs
+./devicevault-docker-dev.sh logs -f
+./devicevault-docker-dev.sh logs -f orchestrator
 ./devicevault-docker-dev.sh logs orchestrator
+./devicevault-docker-dev.sh reset
 ./devicevault-docker-dev.sh stop
 ```
 
 Persistent bind-mounted development data lives under `var/docker-dev/` (config, logs, database files, broker data, and storage data).
+The `reset` command asks for confirmation (`Type YES to continue`) and then removes containers, networks, and persisted runtime data under `var/docker-dev/` (while keeping the generated backend config file so custom config changes are retained).
 
 ### Running Individual Services Manually
 
