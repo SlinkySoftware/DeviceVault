@@ -226,6 +226,10 @@ This stack includes:
 - Flower monitoring (`http://localhost:5555`)
 - Frontend Vite dev server (`http://localhost:9000`)
 
+On startup, the orchestrator seeds a default first admin user if missing:
+- Username: `admin`
+- Password: `admin`
+
 Other commands:
 
 ```bash

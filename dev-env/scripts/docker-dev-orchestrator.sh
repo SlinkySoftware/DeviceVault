@@ -56,6 +56,9 @@ PY
     exit 1
 done
 
+echo "Ensuring default admin user exists..."
+python manage.py create_admin --username admin --password admin --email admin@example.com
+
 PIDS=()
 
 start_process() {
