@@ -128,6 +128,37 @@ function compose() {
     docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"
 }
 
+function verify_cors() {
+    local origin="http://localhost:9000"
+    local api_url="http://localhost:8000/api/"
+    local max_attempts=40
+
+    print_status "Validating CORS for ${origin} -> ${api_url} ..."
+
+    for ((attempt=1; attempt<=max_attempts; attempt++)); do
+        local headers
+        headers="$(curl -s -D - -o /dev/null \
+            -X OPTIONS \
+            -H "Origin: ${origin}" \
+            -H "Access-Control-Request-Method: GET" \
+            "${api_url}" 2>/dev/null || true)"
+
+        local allow_origin
+        allow_origin="$(printf '%s\n' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="access-control-allow-origin"{print $2}' | head -n1)"
+
+        if [ "$allow_origin" = "$origin" ]; then
+            print_status "CORS check passed (Access-Control-Allow-Origin: ${allow_origin})"
+            return 0
+        fi
+
+        sleep 2
+    done
+
+    print_error "CORS validation failed for ${origin}. Check backend logs and CORS settings."
+    print_error "Tip: run '$0 logs orchestrator' for details."
+    return 1
+}
+
 function start() {
     check_docker
     verify_required_files
@@ -135,6 +166,7 @@ function start() {
 
     print_status "Starting containerized DeviceVault development stack..."
     compose up -d --build
+    verify_cors
 
     print_status "Started successfully."
     print_status "Frontend (Vite): http://localhost:9000"

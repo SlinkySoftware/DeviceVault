@@ -17,6 +17,15 @@
 import os, yaml
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 SECRET_KEY = os.environ.get('DEVICEVAULT_SECRET_KEY', 'dev-secret')
 DEBUG = True
 ALLOWED_HOSTS = ['*']
@@ -50,8 +59,21 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = '/static/'
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = _env_bool('DEVICEVAULT_CORS_ALLOW_ALL_ORIGINS', True)
+CORS_ALLOW_CREDENTIALS = _env_bool('DEVICEVAULT_CORS_ALLOW_CREDENTIALS', True)
+
+_cors_allowed_origins_raw = os.environ.get('DEVICEVAULT_CORS_ALLOWED_ORIGINS', '')
+if _cors_allowed_origins_raw:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip().rstrip('/')
+        for origin in _cors_allowed_origins_raw.split(',')
+        if origin.strip()
+    ]
+elif not CORS_ALLOW_ALL_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        'http://localhost:9000',
+        'http://127.0.0.1:9000',
+    ]
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',

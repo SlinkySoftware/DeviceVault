@@ -8,6 +8,8 @@ x-backend-env: &backend-env
   DEVICEVAULT_BROKER_API: http://guest:guest@rabbitmq:15672/api/
   DEVICEVAULT_RESULTS_STREAM: device:results
   DEVICEVAULT_STORAGE_RESULTS_STREAM: storage:results
+  DEVICEVAULT_CORS_ALLOW_ALL_ORIGINS: "false"
+  DEVICEVAULT_CORS_ALLOWED_ORIGINS: http://localhost:9000,http://127.0.0.1:9000
 
 x-backend-volumes: &backend-volumes
   - ../:/workspace

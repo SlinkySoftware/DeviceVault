@@ -230,6 +230,12 @@ On startup, the orchestrator seeds a default first admin user if missing:
 - Username: `admin`
 - Password: `admin`
 
+For this containerized dev stack, backend CORS is explicitly configured to allow frontend origins:
+- `http://localhost:9000`
+- `http://127.0.0.1:9000`
+
+The `./devicevault-docker-dev.sh start` command performs a CORS preflight check (`OPTIONS`) from `http://localhost:9000` to `http://localhost:8000/api/` and fails startup if CORS is not correctly exposed.
+
 Other commands:
 
 ```bash
