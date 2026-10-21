@@ -208,6 +208,35 @@ Data is persisted in named Docker volumes:
 - `devicevault-dev-redis-data`
 - `devicevault-dev-rabbitmq-data`
 
+### Fully Containerized Development (Production-Like E2E)
+
+For end-to-end testing with all components containerized (while still running Django via `runserver` and frontend via Vite), use:
+
+```bash
+./devicevault-docker-dev.sh start
+```
+
+This stack includes:
+- PostgreSQL (`localhost:5432`)
+- Redis (`localhost:6379`)
+- RabbitMQ + management UI (`localhost:5672`, `http://localhost:15672`)
+- Orchestrator container (Django API + consumers + Celery Beat) (`http://localhost:8000`)
+- Two collector worker containers
+- One storage worker container
+- Flower monitoring (`http://localhost:5555`)
+- Frontend Vite dev server (`http://localhost:9000`)
+
+Other commands:
+
+```bash
+./devicevault-docker-dev.sh status
+./devicevault-docker-dev.sh logs
+./devicevault-docker-dev.sh logs orchestrator
+./devicevault-docker-dev.sh stop
+```
+
+Persistent bind-mounted development data lives under `var/docker-dev/` (config, logs, database files, broker data, and storage data).
+
 ### Running Individual Services Manually
 
 For development or debugging, start individual services:
