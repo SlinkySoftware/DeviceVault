@@ -159,6 +159,32 @@ function verify_cors() {
     return 1
 }
 
+function verify_worker_monitor() {
+    local max_attempts=20
+
+    print_status "Validating worker registration monitor in orchestrator..."
+
+    for ((attempt=1; attempt<=max_attempts; attempt++)); do
+        if compose exec -T orchestrator sh -lc "
+            for pid in /proc/[0-9]*; do
+                [ -r \"\$pid/cmdline\" ] || continue
+                if tr '\\000' ' ' < \"\$pid/cmdline\" | grep -F 'manage.py monitor_worker_registry' >/dev/null; then
+                    exit 0
+                fi
+            done
+            exit 1
+        "; then
+            print_status "Worker registration monitor is running."
+            return 0
+        fi
+        sleep 2
+    done
+
+    print_error "Worker registration monitor is not running in orchestrator."
+    print_error "Tip: run '$0 logs orchestrator' for details."
+    return 1
+}
+
 function start() {
     check_docker
     verify_required_files
@@ -167,6 +193,7 @@ function start() {
     print_status "Starting containerized DeviceVault development stack..."
     compose up -d --build
     verify_cors
+    verify_worker_monitor
 
     print_status "Started successfully."
     print_status "Frontend (Vite): http://localhost:9000"
@@ -275,6 +302,9 @@ function usage() {
     echo "Available services for logs:"
     echo "  db, redis, rabbitmq, orchestrator, frontend,"
     echo "  collector-1, collector-2, storage-worker, flower"
+    echo ""
+    echo "Note: worker registration monitor runs inside the orchestrator container."
+    echo "      Use '$0 logs orchestrator' to inspect monitor startup/log output."
     echo ""
     echo "Persistent data is stored under: $VAR_ROOT"
 }
