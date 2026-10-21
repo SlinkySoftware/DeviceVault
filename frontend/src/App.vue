@@ -161,6 +161,15 @@
                   </q-item-section>
                 </q-item>
 
+                <q-item clickable to="/vaultadmin/workers" class="submenu-item">
+                  <q-item-section avatar>
+                    <q-icon name="hub" size="xs" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>Workers</q-item-label>
+                  </q-item-section>
+                </q-item>
+
                 <q-item clickable to="/vaultadmin/theme" class="submenu-item">
                   <q-item-section avatar>
                     <q-icon name="palette" size="xs" />

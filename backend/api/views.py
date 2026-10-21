@@ -30,7 +30,7 @@ from backups.models import Backup, StoredBackup
 from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
-from core.models import DashboardLayout
+from core.models import DashboardLayout, WorkerRegistration
 from devices.models import (
     DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
     UserDeviceGroupRole, GroupDeviceGroupRole
@@ -46,7 +46,8 @@ from .serializers import (
     LoginSerializer, UserUpdateSerializer, ChangePasswordSerializer, DashboardLayoutSerializer,
     UserProfileSerializer, BackupScheduleSerializer, GroupSerializer,
     DeviceGroupSerializer, DeviceGroupRoleSerializer, DeviceGroupPermissionSerializer,
-    UserDeviceGroupRoleSerializer, GroupDeviceGroupRoleSerializer, DeviceDetailedSerializer
+    UserDeviceGroupRoleSerializer, GroupDeviceGroupRoleSerializer, DeviceDetailedSerializer,
+    WorkerRegistrationSerializer
 )
 import json
 from celery_app import app as celery_app
@@ -540,6 +541,52 @@ def timezone_config(request):
     return response.Response({
         'timezone': get_timezone_name()
     })
+
+
+class WorkerRegistryView(APIView):
+    """Return worker registration and liveliness data for the orchestrator dashboard."""
+
+    permission_classes = [IsAdminUser]
+
+    @staticmethod
+    def _read_int_env(name: str, default: int) -> int:
+        raw = os.environ.get(name, '')
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return value if value > 0 else default
+
+    def get(self, request):
+        online_timeout_sec = self._read_int_env('DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC', 90)
+        pong_grace_sec = self._read_int_env('DEVICEVAULT_WORKER_PONG_GRACE_SEC', 45)
+        now = timezone.now()
+        online_cutoff = now - timedelta(seconds=online_timeout_sec)
+        pong_cutoff = now - timedelta(seconds=pong_grace_sec)
+
+        workers = WorkerRegistration.objects.all()
+        payload = []
+
+        for worker in workers:
+            is_recently_seen = bool(worker.last_seen_at and worker.last_seen_at >= online_cutoff)
+            pong_expected = bool(worker.last_ping_at and worker.last_ping_at <= pong_cutoff)
+            pong_received = bool(worker.last_pong_at and worker.last_ping_at and worker.last_pong_at >= worker.last_ping_at)
+            is_online = is_recently_seen and (not pong_expected or pong_received)
+
+            worker_data = WorkerRegistrationSerializer(worker).data
+            worker_data['is_online'] = is_online
+            worker_data['status'] = 'online' if is_online else 'offline'
+            payload.append(worker_data)
+
+        return response.Response({
+            'workers': payload,
+            'online_timeout_seconds': online_timeout_sec,
+            'pong_grace_seconds': pong_grace_sec,
+            'generated_at': now.isoformat(),
+        })
+
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
     queryset = RetentionPolicy.objects.all()
     serializer_class = RetentionPolicySerializer

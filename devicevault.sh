@@ -33,6 +33,7 @@ BACKUP_WORKER_PID_FILE="$PID_DIR/backup-worker.pid"
 STORAGE_WORKER_PID_FILE="$PID_DIR/storage-worker.pid"
 BACKUP_CONSUMER_PID_FILE="$PID_DIR/backup-consumer.pid"
 STORAGE_CONSUMER_PID_FILE="$PID_DIR/storage-consumer.pid"
+WORKER_MONITOR_PID_FILE="$PID_DIR/worker-monitor.pid"
 FLOWER_PID_FILE="$PID_DIR/flower.pid"
 
 # Colors for output
@@ -366,6 +367,30 @@ function start_storage_consumer() {
     fi
 }
 
+function start_worker_monitor() {
+    if [ -f "$WORKER_MONITOR_PID_FILE" ] && kill -0 $(cat "$WORKER_MONITOR_PID_FILE") 2>/dev/null; then
+        print_warning "Worker monitor is already running (PID: $(cat $WORKER_MONITOR_PID_FILE))"
+        return 0
+    fi
+
+    print_status "Starting worker monitor..."
+    cd "$BACKEND_DIR"
+
+    local PYTHON="$SCRIPT_DIR/.venv/bin/python"
+
+    nohup "$PYTHON" manage.py monitor_worker_registry > "$PID_DIR/worker-monitor.log" 2>&1 &
+    echo $! > "$WORKER_MONITOR_PID_FILE"
+
+    sleep 2
+
+    if kill -0 $(cat "$WORKER_MONITOR_PID_FILE") 2>/dev/null; then
+        print_status "Worker monitor started successfully (PID: $(cat $WORKER_MONITOR_PID_FILE))"
+    else
+        print_error "Failed to start worker monitor. Check logs at $PID_DIR/worker-monitor.log"
+        return 1
+    fi
+}
+
 function start_flower() {
     if [ -f "$FLOWER_PID_FILE" ] && kill -0 $(cat "$FLOWER_PID_FILE") 2>/dev/null; then
         print_warning "Flower monitoring is already running (PID: $(cat $FLOWER_PID_FILE))"
@@ -523,6 +548,25 @@ function stop_storage_consumer() {
     print_status "Storage consumer stopped"
 }
 
+function stop_worker_monitor() {
+    print_status "Stopping worker monitor..."
+
+    if [ -f "$WORKER_MONITOR_PID_FILE" ]; then
+        local PID=$(cat "$WORKER_MONITOR_PID_FILE")
+        if kill -0 $PID 2>/dev/null; then
+            kill -TERM -$PID 2>/dev/null || true
+            sleep 2
+            kill -9 -$PID 2>/dev/null || true
+        fi
+        rm -f "$WORKER_MONITOR_PID_FILE"
+    fi
+
+    pkill -f "monitor_worker_registry" 2>/dev/null || true
+
+    sleep 1
+    print_status "Worker monitor stopped"
+}
+
 function stop_flower() {
     print_status "Stopping flower monitoring..."
     
@@ -593,6 +637,13 @@ function status() {
     else
         print_status "Storage Consumer: ${RED}Stopped${NC}"
     fi
+
+    # Worker monitor status
+    if [ -f "$WORKER_MONITOR_PID_FILE" ] && kill -0 $(cat "$WORKER_MONITOR_PID_FILE") 2>/dev/null; then
+        print_status "Worker Monitor: ${GREEN}Running${NC} (PID: $(cat $WORKER_MONITOR_PID_FILE))"
+    else
+        print_status "Worker Monitor: ${RED}Stopped${NC}"
+    fi
     
     # Flower status
     if [ -f "$FLOWER_PID_FILE" ] && kill -0 $(cat "$FLOWER_PID_FILE") 2>/dev/null; then
@@ -620,6 +671,7 @@ function start() {
     start_storage_worker
     start_backup_consumer
     start_storage_consumer
+    start_worker_monitor
     start_flower
     echo ""
     print_status "DeviceVault started successfully!"
@@ -633,6 +685,7 @@ function start() {
 function stop() {
     print_status "Stopping DeviceVault..."
     stop_flower
+    stop_worker_monitor
     stop_storage_consumer
     stop_backup_consumer
     stop_storage_worker
@@ -705,6 +758,16 @@ function logs() {
         fi
         echo ""
     fi
+
+    if [ "$service" == "worker-monitor" ] || [ -z "$service" ]; then
+        echo "=== Worker Monitor Logs ==="
+        if [ -f "$PID_DIR/worker-monitor.log" ]; then
+            tail -n 50 "$PID_DIR/worker-monitor.log"
+        else
+            print_warning "No worker monitor logs found"
+        fi
+        echo ""
+    fi
     
     if [ "$service" == "flower" ] || [ -z "$service" ]; then
         echo "=== Flower Monitoring Logs ==="
@@ -727,7 +790,7 @@ function usage() {
     echo "Usage: $0 {start|stop|restart|status|logs [service]}"
     echo ""
     echo "Commands:"
-    echo "  start     - Start all services (Docker, frontend, backend, workers, consumers, flower)"
+    echo "  start     - Start all services (Docker, frontend, backend, workers, consumers, monitor, flower)"
     echo "  stop      - Stop all services"
     echo "  restart   - Restart all services"
     echo "  status    - Show status of all services"
@@ -735,7 +798,7 @@ function usage() {
     echo ""
     echo "Available services for logs:"
     echo "  backend, frontend, backup-worker, storage-worker,"
-    echo "  backup-consumer, storage-consumer, flower, docker"
+    echo "  backup-consumer, storage-consumer, worker-monitor, flower, docker"
     echo ""
     echo "Note: Docker services (Redis & RabbitMQ) will be started automatically"
     echo "      when running 'start' command. If Docker is not available, the"
