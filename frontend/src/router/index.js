@@ -102,22 +102,23 @@ const router = createRouter({
  * Parameters:
  * - to: Destination route
  * - from: Current route
- * - next: Function to proceed or redirect
  */
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from) => {
   const isAuthenticated = !!localStorage.getItem('authToken')
   const requiresAuth = to.meta.requiresAuth !== false
 
   if (requiresAuth && !isAuthenticated) {
     // Redirect to login if route requires auth and user is not authenticated
-    next('/login')
-  } else if (to.path === '/login' && isAuthenticated) {
-    // Redirect to dashboard if trying to access login while already authenticated
-    next('/')
-  } else {
-    // Allow navigation
-    next()
+    return '/login'
   }
+
+  if (to.path === '/login' && isAuthenticated) {
+    // Redirect to dashboard if trying to access login while already authenticated
+    return '/'
+  }
+
+  // Allow navigation
+  return true
 })
 
 export default router
