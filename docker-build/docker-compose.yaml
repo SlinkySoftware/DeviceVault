@@ -3,10 +3,8 @@ name: devicevault
 services:
   nginx:
     build:
-      context: .
-      dockerfile: Dockerfile.nginx
-      args:
-      - GIT_BRANCH=${GIT_BRANCH:-master}
+      context: ..
+      dockerfile: docker-build/Dockerfile.nginx
     ports:
       - "80:80"
     depends_on:
@@ -17,14 +15,14 @@ services:
 
   django:
     build:
-      context: .
-      dockerfile: Dockerfile.django
-      args:
-      - GIT_BRANCH=${GIT_BRANCH:-master}
+      context: ..
+      dockerfile: docker-build/Dockerfile.app
     expose:
       - "8000"
     env_file:
     - ./config/django.env
+    environment:
+      DEVICEVAULT_RUN_MIGRATIONS: "1"
     depends_on:
       - postgres
       - redis
@@ -32,10 +30,8 @@ services:
 
 #  celery:
 #    build:
-#      context: .
-#      dockerfile: Dockerfile.celery
-#      args:
-#      - GIT_BRANCH=${GIT_BRANCH:-master}
+#      context: ..
+#      dockerfile: docker-build/Dockerfile.app
 #    env_file:
 #    - ./config/celery.env
 #    depends_on:

@@ -50,6 +50,7 @@ body.body--dark .q-card {
 }
 
 body.body--dark .q-table {
+  border-color: #1976D2 !important;
 }
 
 .q-table thead tr,
@@ -59,6 +60,8 @@ body.body--dark .q-table {
 
 body.body--dark .q-table thead tr,
 body.body--dark .q-table tbody td {
+  border-color: #1976D2 !important;
+}
 
 .q-table thead th {
   background: #f5f5f5;
