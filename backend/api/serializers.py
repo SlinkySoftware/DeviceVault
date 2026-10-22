@@ -27,6 +27,7 @@ from policies.models import RetentionPolicy, BackupSchedule
 from locations.models import BackupLocation
 from credentials.models import Credential, CredentialType
 from core.theme_settings import ThemeSettings
+from core.models import WorkerRegistration
 from devices.models import (
     DeviceGroup, DeviceGroupRole, DeviceGroupPermission,
     UserDeviceGroupRole, GroupDeviceGroupRole
@@ -597,3 +598,25 @@ class ThemeSettingsSerializer(serializers.ModelSerializer):
         model = ThemeSettings
         fields = ['id', 'title_bar_color', 'dashboard_box_color', 'dashboard_nested_box_color', 'updated_at']
         read_only_fields = ['id', 'updated_at']
+
+
+class WorkerRegistrationSerializer(serializers.ModelSerializer):
+    """Serializes worker registration and liveliness metadata for dashboard views."""
+
+    class Meta:
+        model = WorkerRegistration
+        fields = [
+            'worker_id',
+            'worker_name',
+            'worker_type',
+            'hostname',
+            'pid',
+            'queues',
+            'details',
+            'last_seen_at',
+            'last_heartbeat_at',
+            'last_ping_at',
+            'last_pong_at',
+            'last_probe_id',
+            'updated_at',
+        ]

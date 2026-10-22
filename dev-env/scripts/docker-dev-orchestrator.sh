@@ -86,6 +86,7 @@ trap 'shutdown TERM; wait || true; exit 0' INT TERM
 start_process "django" python manage.py runserver 0.0.0.0:8000
 start_process "device-results-consumer" python manage.py consume_device_results
 start_process "storage-results-consumer" python manage.py consume_storage_results
+start_process "worker-monitor" python manage.py monitor_worker_registry
 start_process "celery-beat" celery -A celery_app beat -l info -s /var/devicevault/logs/orchestrator/celerybeat-schedule
 
 wait -n "${PIDS[@]}"

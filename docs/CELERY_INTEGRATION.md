@@ -6,6 +6,8 @@ This document summarizes the Celery integration added to DeviceVault for distrib
 - A Celery application is initialized in `backend/devicevault_worker.py`.
 - Collectors (backup plugins) under `backend/backups/plugins/` conform to a small contract: they accept a `config` dict and optional `timeout`, and return a structured dict with the keys `task_id`, `status`, `timestamp`, `log`, and `device_config`.
 - The Celery task `device.collect` executes plugin code, enforces per-device locking via Redis, publishes the structured result to a Redis Stream (`device:results`), and returns the structured result; a separate Django consumer persists `DeviceBackupResult` rows.
+- Collection and storage workers now self-register with the orchestrator over RabbitMQ and periodically emit heartbeats.
+- The orchestrator command `python manage.py monitor_worker_registry` sends periodic RabbitMQ ping probes and records worker registration/heartbeat/pong events for the worker dashboard API (`GET /api/worker-registry/`).
 
 ## Routing Rules
 - Each `CollectionGroup` record contains `rabbitmq_queue_id`.
@@ -92,6 +94,13 @@ curl -X POST -H "Authorization: Token <token>" http://localhost:8000/api/devices
 ```
 
 5. Inspect logs and check `DeviceBackupResult` entries in Django admin or via `manage.py shell`. 
+
+6. Start the worker monitor so liveliness checks and worker registration updates are recorded:
+
+```bash
+# from repository root
+source .venv/bin/activate && cd backend && python manage.py monitor_worker_registry
+```
 
 ## Notes & Next Steps
 - This change provides the task entrypoint, locking, routing, and plugin contract. Next steps (separate PRs) could include:

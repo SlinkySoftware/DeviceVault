@@ -104,3 +104,48 @@ class DashboardLayout(models.Model):
             return "Default Dashboard Layout"
         return f"Dashboard Layout for {self.user.username}"
 
+
+class WorkerRegistration(models.Model):
+    """Tracks worker registration, queue assignments, and liveliness state."""
+
+    WORKER_TYPE_COLLECTION = 'collection'
+    WORKER_TYPE_STORAGE = 'storage'
+    WORKER_TYPE_MIXED = 'mixed'
+    WORKER_TYPE_UNKNOWN = 'unknown'
+
+    WORKER_TYPE_CHOICES = [
+        (WORKER_TYPE_COLLECTION, 'Collection'),
+        (WORKER_TYPE_STORAGE, 'Storage'),
+        (WORKER_TYPE_MIXED, 'Mixed'),
+        (WORKER_TYPE_UNKNOWN, 'Unknown'),
+    ]
+
+    worker_id = models.CharField(max_length=255, unique=True, help_text='Unique worker identifier')
+    worker_name = models.CharField(max_length=255, help_text='Worker name (for example celery node name)')
+    worker_type = models.CharField(
+        max_length=16,
+        choices=WORKER_TYPE_CHOICES,
+        default=WORKER_TYPE_UNKNOWN,
+        help_text='Worker role inferred from serviced queues',
+    )
+    hostname = models.CharField(max_length=255, blank=True, default='', help_text='Host where worker is running')
+    pid = models.IntegerField(null=True, blank=True, help_text='Worker process ID when registered')
+    queues = models.JSONField(default=list, blank=True, help_text='RabbitMQ queues serviced by this worker')
+    details = models.JSONField(default=dict, blank=True, help_text='Additional worker metadata')
+
+    last_seen_at = models.DateTimeField(null=True, blank=True, help_text='Last registration/heartbeat/pong')
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True, help_text='Last heartbeat received')
+    last_ping_at = models.DateTimeField(null=True, blank=True, help_text='Last liveliness probe sent by orchestrator')
+    last_pong_at = models.DateTimeField(null=True, blank=True, help_text='Last liveliness response from worker')
+    last_probe_id = models.CharField(max_length=64, blank=True, default='', help_text='Last ping/pong probe ID')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['worker_type', 'worker_name', 'worker_id']
+        verbose_name = 'Worker Registration'
+        verbose_name_plural = 'Worker Registrations'
+
+    def __str__(self):
+        return f"{self.worker_name} [{self.worker_type}]"

@@ -29,6 +29,7 @@ import BackupLocations from '../pages/BackupLocations.vue'
 import BackupSchedules from '../pages/BackupSchedules.vue'
 import RetentionPolicies from '../pages/RetentionPolicies.vue'
 import CollectionGroups from '../pages/CollectionGroups.vue'
+import WorkersDashboard from '../pages/WorkersDashboard.vue'
 import Groups from '../pages/Groups.vue'
 import DeviceGroups from '../pages/DeviceGroups.vue'
 import Profile from '../pages/Profile.vue'
@@ -69,6 +70,7 @@ const routes = [
   { path: '/vaultadmin/backup-schedules', component: BackupSchedules, meta: { requiresAuth: true } },
   { path: '/vaultadmin/retention-policies', component: RetentionPolicies, meta: { requiresAuth: true } },
   { path: '/vaultadmin/collection-groups', component: CollectionGroups, meta: { requiresAuth: true } },
+  { path: '/vaultadmin/workers', component: WorkersDashboard, meta: { requiresAuth: true } },
   { path: '/vaultadmin/groups', component: Groups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/device-groups', component: DeviceGroups, meta: { requiresAuth: true } },
   { path: '/vaultadmin/users', component: Users, meta: { requiresAuth: true } },
