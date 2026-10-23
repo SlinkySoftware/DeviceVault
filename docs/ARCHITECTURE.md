@@ -43,7 +43,7 @@ No component talks to another directly. Everything goes over AMQP or Redis.
 |---|---|---|
 | `api` | active/active | REST API, auth, RBAC |
 | `web` | active/active | nginx serving the built SPA, `/api` → api, `/flower/<id>/` → Flower (via `auth_request`) |
-| `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`, `read.result`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
+| `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
 | `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
 Both are in place since phase 5: `events` handles worker registration, heartbeats and the signed job events (`orchestrator.job_event`: started, retrying, collected, stored, failed); `scheduler` holds the Redis lease `dv:scheduler:leader` (60 s, renewed every tick) and creates `BackupJob`s for due schedules. Backup content travels collector → Redis (`dv:blob:job:<id>`, 24 h TTL) → storage worker; a job is `stored` only when the collector and storage worker report the same SHA-256.
@@ -124,7 +124,9 @@ collector:  lock dv:lock:device:<id> → driver.collect() → encrypt (if enable
 storage:    fetch blob, verify sha256 → driver.store() → delete blob
             → job.stored {storage_ref, size, enc meta} → dv.orchestrator
 events:     BackupJob state machine: queued→collecting→collected→stored | failed | timed_out
-read (UI):  api → read task → storage.target.<t> → blob → read.result → api decrypts
+read (UI):  api → storage.read task → storage.target.<t> → blob dv:blob:read:<uuid> (10 min TTL)
+            → Celery result {key, sha256, size} → api checks the hash, decrypts
+check (UI): api → storage.check task → storage.target.<t> → Celery result
 ```
 
 Retries: drivers raise typed errors. Transient errors (timeout, connection refused, lock held) trigger a Celery retry with backoff. Permanent errors (auth failure, unknown driver) fail the job. Each job is handled exactly once, keyed on `job_id`. Binary/text is carried as job metadata end to end, which fixes the dropped `is_binary` flag.
@@ -199,4 +201,5 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 8 | (phase 5) Secrets in transit are sealed per recipient worker rather than to collection-group keys: simpler, no key distribution or re-keying on membership change, and cheap at the expected 6-8 collectors. The vault public key and the payload-encryption switch travel in each signed task rather than in assignments. |
 | 9 | (phase 5) Collector drivers use Netmiko for SSH CLI platforms; Scrapli can be added as a second base when a platform needs it. |
 | 10 | (phase 6) Storage target settings travel in each signed storage task (sealed to the target's workers) rather than in assignments, for the same reason as decision 8: workers keep no configuration state. Assignments carry only queues. Jobs protect their storage target from deletion, and a target's driver is fixed once it holds backups. |
+| 11 | (phase 6) Reads and target checks are request/response tasks answered through the Celery result backend, not `read.result` events: the API needs the answer within the same HTTP request, which an event handled by any `events` process cannot give it. The content itself still travels through Redis, checked against the job's recorded SHA-256. |
 | — | Retention enforcement: in scope, designed in a later phase. |
