@@ -20,9 +20,9 @@ Copyright (C) 2026, Slinky Software
 License: GPLv3+
 """
 
+from crypto.engine import decrypt_backup, encrypt_backup
+from crypto.header import HEADER_MAGIC, EncryptionHeader
 from crypto.providers import KeyProvider, LocalKeyProvider
-from crypto.header import EncryptionHeader, HEADER_MAGIC
-from crypto.engine import encrypt_backup, decrypt_backup
 from crypto.wrapper import CryptoStorage
 
 __all__ = [

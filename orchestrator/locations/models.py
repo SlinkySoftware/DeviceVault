@@ -26,35 +26,36 @@ from django.db import models
 class BackupLocation(models.Model):
     """
     BackupLocation Model: Defines a storage destination for device configuration backups
-    
+
     Fields:
         - name (CharField): Display name for location (e.g., "Primary Git Repo")
         - location_type (CharField): Type of location (git, s3, filesystem, tftp, etc.)
         - config (JSONField): Location-specific configuration parameters
-    
+
     Methods:
         - __str__(): Returns formatted string with type and name
-    
+
     Location Types and Config Examples:
         - git: {url, branch, username, password}
         - s3: {bucket, region, access_key, secret_key}
         - filesystem: {path, compress (optional, bool)}
         - tftp: {host, port}
-    
+
     Filesystem Compression:
         When ``compress`` (or ``gzip``) is set to ``true`` in the config JSON
         for a filesystem location, text backups are stored gzip-compressed on
         disk and transparently decompressed on retrieval. Binary backups are
         never compressed regardless of this setting.
-    
+
     Usage:
         Devices reference a backup location to specify where their configurations
         are saved. Multiple locations allow backup redundancy and distribution.
     """
+
     name = models.CharField(max_length=128, help_text='Display name for this backup location')
     location_type = models.CharField(max_length=64, help_text='Type of location: git, s3, filesystem, tftp, etc.')
     config = models.JSONField(default=dict, help_text='Location-specific configuration (URL, credentials, path, etc.)')
-    
+
     def __str__(self):
         """Return formatted string with location type and name"""
-        return f"{self.location_type}:{self.name}"
+        return f'{self.location_type}:{self.name}'

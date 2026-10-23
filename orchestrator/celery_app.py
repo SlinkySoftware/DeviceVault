@@ -1,4 +1,5 @@
 import os
+
 from celery import Celery
 
 try:
@@ -12,13 +13,21 @@ except Exception:
 if django_settings is not None:
     BROKER = getattr(django_settings, 'CELERY_BROKER_URL', os.environ.get('DEVICEVAULT_BROKER_URL'))
     BACKEND = getattr(django_settings, 'CELERY_RESULT_BACKEND', os.environ.get('DEVICEVAULT_RESULT_BACKEND', BROKER))
-    BROKER_API = getattr(django_settings, 'CELERY_BROKER_API', os.environ.get('DEVICEVAULT_BROKER_API', 'http://guest:guest@localhost:15672/api/'))
-    REDIS_URL = getattr(django_settings, 'DEVICEVAULT_REDIS_URL', os.environ.get('DEVICEVAULT_REDIS_URL', 'redis://localhost:6379/1'))
-    RESULTS_STREAM = getattr(django_settings, 'DEVICEVAULT_RESULTS_STREAM', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results'))
+    BROKER_API = getattr(
+        django_settings,
+        'CELERY_BROKER_API',
+        os.environ.get('DEVICEVAULT_BROKER_API', 'http://guest:guest@localhost:15672/api/'),
+    )
+    REDIS_URL = getattr(
+        django_settings, 'DEVICEVAULT_REDIS_URL', os.environ.get('DEVICEVAULT_REDIS_URL', 'redis://localhost:6379/1')
+    )
+    RESULTS_STREAM = getattr(
+        django_settings, 'DEVICEVAULT_RESULTS_STREAM', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results')
+    )
     STORAGE_RESULTS_STREAM = getattr(
         django_settings,
         'DEVICEVAULT_STORAGE_RESULTS_STREAM',
-        os.environ.get('DEVICEVAULT_STORAGE_RESULTS_STREAM', 'storage:results')
+        os.environ.get('DEVICEVAULT_STORAGE_RESULTS_STREAM', 'storage:results'),
     )
 else:
     BROKER = os.environ.get('DEVICEVAULT_BROKER_URL', 'amqp://guest:guest@localhost:5672//')

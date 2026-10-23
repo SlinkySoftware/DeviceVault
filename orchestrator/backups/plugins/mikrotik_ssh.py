@@ -17,22 +17,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from typing import Dict, Any, Optional
+from datetime import datetime
+from typing import Any
 
 import paramiko
-from datetime import datetime
 
 from .base import BackupPlugin
 
 
-def _mask_credentials(creds: Dict) -> Dict:
+def _mask_credentials(creds: dict) -> dict:
     c = dict(creds or {})
     if 'password' in c and c['password']:
         c['password'] = '****'
     return c
 
 
-def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dict[str, Any]:
+def _export_config(config: dict[str, Any], timeout: int | None = None) -> dict[str, Any]:
     """New collector contract: accepts a config dict and optional timeout.
 
     Expected config keys: ip (str), credentials (dict)
@@ -47,13 +47,15 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
             'task_id': None,
             'status': 'failure',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': [{
-                'source': 'mikrotik_ssh',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'severity': 'ERROR',
-                'message': 'Missing username or password in credentials'
-            }],
-            'device_config': None
+            'log': [
+                {
+                    'source': 'mikrotik_ssh',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'severity': 'ERROR',
+                    'message': 'Missing username or password in credentials',
+                }
+            ],
+            'device_config': None,
         }
 
     client = paramiko.SSHClient()
@@ -76,13 +78,15 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
                 'task_id': None,
                 'status': 'failure',
                 'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'log': [{
-                    'source': 'mikrotik_ssh',
-                    'timestamp': datetime.utcnow().isoformat() + 'Z',
-                    'severity': 'ERROR',
-                    'message': f'Mikrotik export returned error: {error_text.strip()}'
-                }],
-                'device_config': None
+                'log': [
+                    {
+                        'source': 'mikrotik_ssh',
+                        'timestamp': datetime.utcnow().isoformat() + 'Z',
+                        'severity': 'ERROR',
+                        'message': f'Mikrotik export returned error: {error_text.strip()}',
+                    }
+                ],
+                'device_config': None,
             }
         return {
             'task_id': None,
@@ -93,29 +97,31 @@ def _export_config(config: Dict[str, Any], timeout: Optional[int] = None) -> Dic
                     'source': 'mikrotik_ssh',
                     'timestamp': datetime.utcnow().isoformat() + 'Z',
                     'severity': 'INFO',
-                    'message': f'Connected as {username}'
+                    'message': f'Connected as {username}',
                 },
                 {
                     'source': 'mikrotik_ssh',
                     'timestamp': datetime.utcnow().isoformat() + 'Z',
                     'severity': 'DEBUG',
-                    'message': f'Credentials: {_mask_credentials(credentials)}'
-                }
+                    'message': f'Credentials: {_mask_credentials(credentials)}',
+                },
             ],
-            'device_config': output
+            'device_config': output,
         }
     except Exception as exc:
         return {
             'task_id': None,
             'status': 'failure',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': [{
-                'source': 'mikrotik_ssh',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'severity': 'ERROR',
-                'message': f'Connection failed: {repr(exc)}'
-            }],
-            'device_config': None
+            'log': [
+                {
+                    'source': 'mikrotik_ssh',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'severity': 'ERROR',
+                    'message': f'Connection failed: {repr(exc)}',
+                }
+            ],
+            'device_config': None,
         }
     finally:
         try:

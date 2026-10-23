@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import os
-import json
-import time
 import signal
+import time
 from datetime import datetime
 
 from django.core.management.base import BaseCommand
 from redis import Redis
 
-from devices.models import Device
 from backups.models import StoredBackup
+from devices.models import Device
 
 
 class Command(BaseCommand):
@@ -39,7 +38,11 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, _signal)
         signal.signal(signal.SIGTERM, _signal)
 
-        self.stdout.write(self.style.SUCCESS(f'Listening for storage results on stream "{stream}" as group "{group}" consumer "{consumer}"'))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f'Listening for storage results on stream "{stream}" as group "{group}" consumer "{consumer}"'
+            )
+        )
 
         while running:
             try:
@@ -47,7 +50,7 @@ class Command(BaseCommand):
                 if not resp:
                     continue
 
-                for sname, messages in resp:
+                for _stream, messages in resp:
                     for msg_id, fields in messages:
                         try:
                             data = {k.decode(): v.decode() for k, v in fields.items()}
@@ -91,7 +94,9 @@ class Command(BaseCommand):
                             try:
                                 device_obj = Device.objects.get(pk=int(device_id))
                             except Device.DoesNotExist:
-                                self.stderr.write(self.style.WARNING(f'Device {device_id} not found for storage message {msg_id}'))
+                                self.stderr.write(
+                                    self.style.WARNING(f'Device {device_id} not found for storage message {msg_id}')
+                                )
                                 r.xack(stream, group, msg_id)
                                 continue
                             except Exception as exc:
@@ -104,7 +109,7 @@ class Command(BaseCommand):
                             if enc_version_raw and enc_version_raw != '':
                                 try:
                                     enc_version_int = int(enc_version_raw)
-                                except (ValueError, TypeError):
+                                except ValueError, TypeError:
                                     pass
 
                             StoredBackup.objects.create(
@@ -116,20 +121,25 @@ class Command(BaseCommand):
                                 status=status,
                                 timestamp=datetime.utcnow(),
                                 log=log_text,
-                                storage_duration_ms=int(storage_duration_ms) if storage_duration_ms and storage_duration_ms != '' else None,
+                                storage_duration_ms=int(storage_duration_ms)
+                                if storage_duration_ms and storage_duration_ms != ''
+                                else None,
                                 # Encryption metadata
                                 enc_version=enc_version_int,
                                 enc_cipher=enc_cipher if enc_cipher else None,
                                 enc_kid=enc_kid if enc_kid else None,
                                 enc_edk=enc_edk if enc_edk else None,
                             )
-                            
+
                             # Update overall duration in DeviceBackupResult (step 1 to step 9)
                             # Find the related DeviceBackupResult and update overall_duration_ms
                             if task_identifier and status == 'success':
                                 try:
                                     from devices.models import DeviceBackupResult
-                                    backup_result = DeviceBackupResult.objects.filter(task_identifier=task_identifier).first()
+
+                                    backup_result = DeviceBackupResult.objects.filter(
+                                        task_identifier=task_identifier
+                                    ).first()
                                     if backup_result and backup_result.initiated_at:
                                         now_timestamp_ms = int(datetime.utcnow().timestamp() * 1000)
                                         initiated_timestamp_ms = int(backup_result.initiated_at.timestamp() * 1000)
@@ -137,10 +147,18 @@ class Command(BaseCommand):
                                         backup_result.overall_duration_ms = overall_duration_ms
                                         backup_result.save(update_fields=['overall_duration_ms'])
                                 except Exception as exc:
-                                    self.stderr.write(self.style.WARNING(f'Failed to update overall duration for {task_identifier}: {exc}'))
-                            
+                                    self.stderr.write(
+                                        self.style.WARNING(
+                                            f'Failed to update overall duration for {task_identifier}: {exc}'
+                                        )
+                                    )
+
                             r.xack(stream, group, msg_id)
-                            self.stdout.write(self.style.SUCCESS(f'Persisted storage result for device {device_id}: {task_identifier} -> {storage_backend}'))
+                            self.stdout.write(
+                                self.style.SUCCESS(
+                                    f'Persisted storage result for device {device_id}: {task_identifier} -> {storage_backend}'
+                                )
+                            )
                         except Exception as exc:
                             self.stderr.write(self.style.ERROR(f'Failed to persist storage message {msg_id}: {exc}'))
                             r.xack(stream, group, msg_id)

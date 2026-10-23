@@ -137,8 +137,11 @@ Retries: drivers raise typed errors. Transient errors (timeout, connection refus
 **Collector driver** (`worker/collectors/`):
 ```python
 class CollectorDriver(Protocol):
-    key: str; version: str; mode: Literal["pull"]   # "push" reserved
-    Params: type[BaseModel]                           # → JSON Schema → UI form
+    key: str
+    version: str
+    mode: Literal['pull']  # "push" reserved
+    Params: type[BaseModel]  # → JSON Schema → UI form
+
     def collect(self, target: Target, creds: Creds, params: Params, timeout: int) -> Collected: ...
 ```
 Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a command list plus a cleanup regex). The first drivers are ported from today's: Mikrotik, plus `noop` and `binary_dummy` for tests. Cisco IOS/ASA etc. come later from your specs.

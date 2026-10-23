@@ -5,7 +5,7 @@ import os
 import socket
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from celery.signals import worker_ready, worker_shutdown
@@ -29,7 +29,7 @@ _presence_lock = threading.Lock()
 
 
 def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _read_int_env(name: str, default: int) -> int:
@@ -84,10 +84,7 @@ def _extract_queue_names(sender: Any) -> list[str]:
 
 def _infer_worker_type(queues: list[str]) -> str:
     has_storage = any(queue.startswith('storage.') for queue in queues)
-    has_collection = any(
-        queue.startswith('collector.group.') or queue == 'default'
-        for queue in queues
-    )
+    has_collection = any(queue.startswith('collector.group.') or queue == 'default' for queue in queues)
     if has_storage and has_collection:
         return 'mixed'
     if has_storage:
@@ -98,7 +95,9 @@ def _infer_worker_type(queues: list[str]) -> str:
 
 
 class WorkerPresenceAgent:
-    def __init__(self, *, broker_url: str, worker_id: str, worker_name: str, hostname: str, pid: int, queues: list[str]):
+    def __init__(
+        self, *, broker_url: str, worker_id: str, worker_name: str, hostname: str, pid: int, queues: list[str]
+    ):
         self.broker_url = broker_url
         self.worker_id = worker_id
         self.worker_name = worker_name
@@ -197,7 +196,11 @@ class WorkerPresenceAgent:
                         consumer = Consumer(
                             channel,
                             queues=[control_queue],
-                            callbacks=[lambda body, message: self._handle_control_message(body, message, producer, event_exchange)],
+                            callbacks=[
+                                lambda body, message: self._handle_control_message(
+                                    body, message, producer, event_exchange
+                                )
+                            ],
                             accept=['json'],
                         )
                         consumer.consume()
@@ -206,7 +209,7 @@ class WorkerPresenceAgent:
                             timeout = max(0.5, min(1.0, next_heartbeat_at - time.monotonic()))
                             try:
                                 connection.drain_events(timeout=timeout)
-                            except socket.timeout:
+                            except TimeoutError:
                                 pass
 
                             now = time.monotonic()
@@ -230,7 +233,9 @@ def _on_worker_ready(sender=None, **kwargs):
         if _presence_agent is not None:
             return
 
-        worker_name = getattr(sender, 'hostname', '') or getattr(sender, 'name', '') or os.environ.get('HOSTNAME', 'worker')
+        worker_name = (
+            getattr(sender, 'hostname', '') or getattr(sender, 'name', '') or os.environ.get('HOSTNAME', 'worker')
+        )
         queues = _extract_queue_names(sender)
         hostname = os.environ.get('HOSTNAME', socket.gethostname())
         pid = os.getpid()

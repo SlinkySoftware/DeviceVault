@@ -26,26 +26,25 @@ License: GPLv3+
 import json
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from crypto.constants import (
     AES_KEY_BYTES,
+    CIPHER_ID,
+    DEFAULT_CHUNK_SIZE,
+    ENC_VERSION,
     GCM_NONCE_BYTES,
     GCM_TAG_BYTES,
-    DEFAULT_CHUNK_SIZE,
     MAX_CHUNK_COUNT,
-    CIPHER_ID,
-    ENC_VERSION,
 )
 from crypto.exceptions import (
-    EncryptionError,
-    DecryptionError,
-    TamperDetectedError,
     ChunkLimitExceededError,
-    HeaderError,
+    DecryptionError,
+    EncryptionError,
+    TamperDetectedError,
 )
 from crypto.header import EncryptionHeader, is_encrypted
 from crypto.providers import KeyProvider
@@ -56,6 +55,7 @@ logger = logging.getLogger('devicevault.crypto.engine')
 # ---------------------------------------------------------------------------
 # Memory zeroisation helper
 # ---------------------------------------------------------------------------
+
 
 def _zeroize(buf: bytearray) -> None:
     """Overwrite *buf* in-place with zeros.
@@ -71,13 +71,14 @@ def _zeroize(buf: bytearray) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def encrypt_backup(
     plaintext: bytes,
     key_provider: KeyProvider,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
-    aad_fields: Optional[Dict[str, Any]] = None,
-) -> Tuple[bytes, Dict[str, Any]]:
+    aad_fields: dict[str, Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
     """Encrypt *plaintext* using envelope encryption (AES-256-GCM).
 
     Args:
@@ -133,8 +134,7 @@ def encrypt_backup(
         while offset < len(plaintext):
             if chunk_index >= MAX_CHUNK_COUNT:
                 raise ChunkLimitExceededError(
-                    f'Backup exceeds maximum {MAX_CHUNK_COUNT} chunks '
-                    f'(chunk_size={chunk_size})'
+                    f'Backup exceeds maximum {MAX_CHUNK_COUNT} chunks (chunk_size={chunk_size})'
                 )
 
             end = min(offset + chunk_size, len(plaintext))
@@ -163,6 +163,7 @@ def encrypt_backup(
 
         # Metadata for database storage
         import base64
+
         metadata = {
             'enc_version': ENC_VERSION,
             'cipher': CIPHER_ID,
@@ -172,12 +173,15 @@ def encrypt_backup(
 
         logger.info(
             'Encrypted backup: %d bytes -> %d bytes (%d chunks, kid=%s)',
-            len(plaintext), len(blob), chunk_index or 1, kid,
+            len(plaintext),
+            len(blob),
+            chunk_index or 1,
+            kid,
         )
 
         return bytes(blob), metadata
 
-    except (EncryptionError, ChunkLimitExceededError):
+    except EncryptionError, ChunkLimitExceededError:
         raise
     except Exception as exc:
         raise EncryptionError(f'Encryption failed: {exc}') from exc
@@ -218,37 +222,27 @@ def decrypt_backup(
         header_size = header.header_size
 
         if header.enc_version != ENC_VERSION:
-            raise DecryptionError(
-                f'Unsupported enc_version={header.enc_version} '
-                f'(expected {ENC_VERSION})'
-            )
+            raise DecryptionError(f'Unsupported enc_version={header.enc_version} (expected {ENC_VERSION})')
 
         if header.cipher != CIPHER_ID:
-            raise DecryptionError(
-                f'Unsupported cipher="{header.cipher}" '
-                f'(expected "{CIPHER_ID}")'
-            )
+            raise DecryptionError(f'Unsupported cipher="{header.cipher}" (expected "{CIPHER_ID}")')
 
         # Unwrap DEK
         dek = bytearray(key_provider.unwrap_key(header.edk, header.kid))
 
         try:
             # Reconstruct AAD (must match what was used during encryption)
-            aad_bytes = json.dumps(
-                header.aad, separators=(',', ':')
-            ).encode('utf-8') if header.aad else b''
+            aad_bytes = json.dumps(header.aad, separators=(',', ':')).encode('utf-8') if header.aad else b''
 
             aesgcm = AESGCM(bytes(dek))
             chunk_size = header.chunk_size
-            # Each encrypted chunk = nonce + ciphertext + tag
-            encrypted_chunk_size = GCM_NONCE_BYTES + chunk_size + GCM_TAG_BYTES
 
             plaintext_parts = []
             pos = header_size
 
             while pos < len(blob):
                 # Read nonce
-                nonce = blob[pos:pos + GCM_NONCE_BYTES]
+                nonce = blob[pos : pos + GCM_NONCE_BYTES]
                 if len(nonce) < GCM_NONCE_BYTES:
                     raise DecryptionError('Truncated chunk: nonce incomplete')
                 pos += GCM_NONCE_BYTES
@@ -265,30 +259,33 @@ def decrypt_backup(
                 # Otherwise, read whatever remains (last chunk)
                 max_ct_tag = chunk_size + GCM_TAG_BYTES
                 ct_tag_len = min(remaining, max_ct_tag)
-                ct_tag = blob[pos:pos + ct_tag_len]
+                ct_tag = blob[pos : pos + ct_tag_len]
                 pos += ct_tag_len
 
                 try:
                     pt = aesgcm.decrypt(nonce, ct_tag, aad_bytes)
-                except InvalidTag:
+                except InvalidTag as exc:
                     raise TamperDetectedError(
                         'GCM authentication failed — backup data may be '
                         'tampered with, or the wrong master key was used.'
-                    )
+                    ) from exc
 
                 plaintext_parts.append(pt)
 
             result = b''.join(plaintext_parts)
             logger.info(
                 'Decrypted backup: %d bytes -> %d bytes (%d chunks, kid=%s)',
-                len(blob), len(result), len(plaintext_parts), header.kid,
+                len(blob),
+                len(result),
+                len(plaintext_parts),
+                header.kid,
             )
             return result
 
         finally:
             _zeroize(dek)
 
-    except (DecryptionError, TamperDetectedError):
+    except DecryptionError, TamperDetectedError:
         raise
     except Exception as exc:
         raise DecryptionError(f'Decryption failed: {exc}') from exc

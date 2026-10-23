@@ -16,10 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os
 import base64
 import logging
-from typing import Dict, Tuple, Union
+import os
 
 from git import Repo
 
@@ -47,7 +46,7 @@ def _ensure_repo(repo_path: str, branch: str) -> Repo:
     return repo
 
 
-def _parse_storage_ref(storage_ref: str) -> Tuple[str, str, str]:
+def _parse_storage_ref(storage_ref: str) -> tuple[str, str, str]:
     """Split storage_ref into branch, rel_path, commit components."""
     commit = None
     branch_rel = storage_ref
@@ -62,15 +61,15 @@ def _parse_storage_ref(storage_ref: str) -> Tuple[str, str, str]:
     return branch, rel_path, commit
 
 
-def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_binary: bool = False) -> str:
+def store_backup(content: str | bytes, rel_path: str, config: dict, is_binary: bool = False) -> str:
     """Persist backup content to a Git repository and return an opaque ref.
-    
+
     Args:
         content: str (text) or bytes (binary, base64-decoded from plugin).
         rel_path: Relative path under Git repo.
         config: Storage configuration with repo_path, branch, etc.
         is_binary: True if content is binary, False if text.
-    
+
     Returns:
         storage_ref: Opaque reference in format "branch:rel_path@commit_sha"
     """
@@ -84,7 +83,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
 
     full_path = os.path.join(repo_path, rel_path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
-    
+
     if is_binary:
         # Binary write
         if isinstance(content, str):
@@ -98,7 +97,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
         else:
             binary_data = content
             logger.debug(f'Using raw binary content ({len(binary_data)} bytes)')
-        
+
         with open(full_path, 'wb') as handle:
             handle.write(binary_data)
         logger.debug(f'Wrote {len(binary_data)} bytes to {full_path}')
@@ -113,18 +112,18 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
     message = config.get('commit_message', f'devicevault: save {rel_path}')
     commit = repo.index.commit(message)
     logger.info(f'Committed to Git: {commit.hexsha[:8]} - "{message}"')
-    storage_ref = f"{branch}:{rel_path}@{commit.hexsha}"
+    storage_ref = f'{branch}:{rel_path}@{commit.hexsha}'
     return storage_ref
 
 
-def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Union[str, bytes]:
+def read_backup(storage_ref: str, config: dict, is_binary: bool = False) -> str | bytes:
     """Read a stored backup from a Git repository.
-    
+
     Args:
         storage_ref: Opaque reference in format "branch:rel_path@commit_sha".
         config: Storage configuration with repo_path.
         is_binary: True if backup is binary, False if text.
-    
+
     Returns:
         str (text, UTF-8 decoded) or bytes (binary).
     """
@@ -137,7 +136,7 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
     repo = Repo(repo_path)
 
     target = commit or branch
-    blob_ref = f"{target}:{rel_path}"
+    blob_ref = f'{target}:{rel_path}'
     try:
         logger.debug(f'Retrieving Git blob: {blob_ref}')
         blob_bytes = repo.git.show(blob_ref, raw=True)
@@ -164,14 +163,14 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
         if not os.path.exists(full_path):
             logger.error(f'Backup not found in Git or working tree: {full_path}')
             raise
-        
+
         if is_binary:
             with open(full_path, 'rb') as handle:
                 data = handle.read()
             logger.info(f'Read {len(data)} bytes from working tree {full_path}')
             return data
         else:
-            with open(full_path, 'r', encoding='utf-8') as handle:
+            with open(full_path, encoding='utf-8') as handle:
                 data = handle.read()
             logger.info(f'Read {len(data)} characters from working tree {full_path}')
             return data

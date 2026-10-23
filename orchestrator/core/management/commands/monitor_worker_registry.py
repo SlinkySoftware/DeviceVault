@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
 import signal
-import socket
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone as django_timezone
@@ -37,7 +35,7 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class Command(BaseCommand):
@@ -57,9 +55,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, _signal_handler)
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f'Worker monitor started (broker={BROKER}, ping_interval={ping_interval_sec}s)'
-            )
+            self.style.SUCCESS(f'Worker monitor started (broker={BROKER}, ping_interval={ping_interval_sec}s)')
         )
 
         while running:
@@ -121,7 +117,7 @@ class Command(BaseCommand):
 
                             try:
                                 connection.drain_events(timeout=1)
-                            except socket.timeout:
+                            except TimeoutError:
                                 continue
             except Exception as exc:
                 if not running:
@@ -161,7 +157,7 @@ class Command(BaseCommand):
         if pid is not None:
             try:
                 pid = int(pid)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pid = None
 
         now = django_timezone.now()

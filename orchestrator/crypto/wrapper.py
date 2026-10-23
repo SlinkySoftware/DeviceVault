@@ -27,12 +27,12 @@ Copyright (C) 2026, Slinky Software
 License: GPLv3+
 """
 
-import base64
 import logging
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 from crypto.constants import DEFAULT_CHUNK_SIZE
-from crypto.engine import encrypt_backup, decrypt_backup
+from crypto.engine import decrypt_backup, encrypt_backup
 from crypto.header import is_encrypted
 from crypto.providers import KeyProvider
 
@@ -65,13 +65,13 @@ class CryptoStorage:
 
     def store(
         self,
-        content: Union[str, bytes],
+        content: str | bytes,
         rel_path: str,
-        config: Dict,
+        config: dict,
         is_binary: bool,
         store_fn: Callable,
-        aad_fields: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        aad_fields: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any] | None]:
         """Encrypt *content* then delegate to *store_fn*.
 
         Returns:
@@ -101,7 +101,10 @@ class CryptoStorage:
 
         logger.info(
             'CryptoStorage.store: encrypted %d bytes -> %d bytes, ref=%s, kid=%s',
-            len(raw_bytes), len(blob), storage_ref, enc_meta.get('kid'),
+            len(raw_bytes),
+            len(blob),
+            storage_ref,
+            enc_meta.get('kid'),
         )
 
         return storage_ref, enc_meta
@@ -111,10 +114,10 @@ class CryptoStorage:
     def read(
         self,
         storage_ref: str,
-        config: Dict,
+        config: dict,
         is_binary: bool,
         read_fn: Callable,
-    ) -> Union[str, bytes]:
+    ) -> str | bytes:
         """Read from storage and decrypt if the object is encrypted.
 
         Backward compatible: plaintext (v0) objects are returned as-is.

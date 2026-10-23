@@ -35,7 +35,9 @@ class Command(BaseCommand):
         sp_rewrap = subparsers.add_parser('rewrap', help='Re-wrap existing EDKs from one master key to another')
         sp_rewrap.add_argument('--from-kid', required=True, help='Source KID (old master key)')
         sp_rewrap.add_argument('--to-kid', required=True, help='Target KID (new master key)')
-        sp_rewrap.add_argument('--dry-run', action='store_true', help='Show what would be re-wrapped without changing data')
+        sp_rewrap.add_argument(
+            '--dry-run', action='store_true', help='Show what would be re-wrapped without changing data'
+        )
 
         # status
         subparsers.add_parser('status', help='Show encryption configuration status')
@@ -43,7 +45,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         subcommand = options.get('subcommand')
         if not subcommand:
-            self.stderr.write(self.style.ERROR('Please specify a sub-command: list, generate, set-default, rewrap, status'))
+            self.stderr.write(
+                self.style.ERROR('Please specify a sub-command: list, generate, set-default, rewrap, status')
+            )
             return
 
         handler = getattr(self, f'_handle_{subcommand.replace("-", "_")}', None)
@@ -64,6 +68,7 @@ class Command(BaseCommand):
 
         # Show per-KID backup counts
         from backups.models import StoredBackup
+
         for kid in kids:
             count = StoredBackup.objects.filter(enc_kid=kid).count()
             self.stdout.write(f'    Backups encrypted with {kid}: {count}')
@@ -71,6 +76,7 @@ class Command(BaseCommand):
     def _handle_generate(self, options):
         """Generate a new random master key."""
         from crypto.providers import LocalKeyProvider
+
         key_b64 = LocalKeyProvider.generate_master_key()
         self.stdout.write(self.style.SUCCESS('Generated new 256-bit master key:'))
         self.stdout.write(f'  {key_b64}')
@@ -91,10 +97,11 @@ class Command(BaseCommand):
         old_default = kp.get_default_key_id()
         kp.set_default_key_id(kid)
         self.stdout.write(self.style.SUCCESS(f'Default KID changed: {old_default} -> {kid}'))
-        self.stdout.write(self.style.WARNING(
-            'Note: This change is runtime-only. To persist, update '
-            'encryption.default_key_id in config.yaml.'
-        ))
+        self.stdout.write(
+            self.style.WARNING(
+                'Note: This change is runtime-only. To persist, update encryption.default_key_id in config.yaml.'
+            )
+        )
 
     def _handle_rewrap(self, options):
         """Re-wrap EDKs from one master key to another."""
@@ -112,8 +119,9 @@ class Command(BaseCommand):
         if from_kid == to_kid:
             raise CommandError('Source and target KID are the same — nothing to rewrap')
 
-        from backups.models import StoredBackup
         import base64
+
+        from backups.models import StoredBackup
 
         backups = StoredBackup.objects.filter(enc_kid=from_kid, enc_edk__isnull=False).exclude(enc_edk='')
         total = backups.count()
@@ -159,23 +167,19 @@ class Command(BaseCommand):
 
             except Exception as exc:
                 errors += 1
-                self.stderr.write(self.style.ERROR(
-                    f'Failed to re-wrap backup {sb.pk} ({sb.task_identifier}): {exc}'
-                ))
+                self.stderr.write(self.style.ERROR(f'Failed to re-wrap backup {sb.pk} ({sb.task_identifier}): {exc}'))
 
         # Restore original default
         kp.set_default_key_id(original_default)
 
-        self.stdout.write(self.style.SUCCESS(
-            f'Re-wrap complete: {rewrapped} succeeded, {errors} failed'
-        ))
+        self.stdout.write(self.style.SUCCESS(f'Re-wrap complete: {rewrapped} succeeded, {errors} failed'))
 
     def _handle_status(self, options):
         """Show encryption configuration status."""
         from crypto.config import (
-            get_encryption_enabled,
-            get_chunk_size,
             get_allow_plaintext_fallback,
+            get_chunk_size,
+            get_encryption_enabled,
         )
 
         enabled = get_encryption_enabled()
@@ -192,7 +196,7 @@ class Command(BaseCommand):
                 kp = self._get_provider()
                 kids = kp.list_key_ids()
                 default = kp.get_default_key_id()
-                self.stdout.write(f'  Key provider: local')
+                self.stdout.write('  Key provider: local')
                 self.stdout.write(f'  Key ring: {len(kids)} key(s)')
                 self.stdout.write(f'  Default KID: {default}')
             except Exception as exc:
@@ -200,6 +204,7 @@ class Command(BaseCommand):
 
         # Database stats
         from backups.models import StoredBackup
+
         total = StoredBackup.objects.count()
         encrypted = StoredBackup.objects.filter(enc_version__gt=0).count()
         plaintext = total - encrypted
@@ -209,7 +214,7 @@ class Command(BaseCommand):
 
     def _get_provider(self):
         """Get the key provider or raise CommandError."""
-        from crypto.config import get_key_provider, get_encryption_enabled
+        from crypto.config import get_encryption_enabled, get_key_provider
         from crypto.exceptions import KeyProviderError
 
         if not get_encryption_enabled():
@@ -221,7 +226,7 @@ class Command(BaseCommand):
         try:
             kp = get_key_provider()
         except KeyProviderError as exc:
-            raise CommandError(f'Failed to initialise key provider: {exc}')
+            raise CommandError(f'Failed to initialise key provider: {exc}') from exc
 
         if kp is None:
             raise CommandError('Key provider is not available')

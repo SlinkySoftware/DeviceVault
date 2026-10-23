@@ -1,4 +1,3 @@
-
 # DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
 # Copyright (C) 2026, Slinky Software
 #

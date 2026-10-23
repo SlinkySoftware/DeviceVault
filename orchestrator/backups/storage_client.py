@@ -1,6 +1,6 @@
 """Thin client helpers for synchronous storage worker interactions."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from celery_app import app as celery_app
 
@@ -8,12 +8,12 @@ from celery_app import app as celery_app
 def read_backup_via_worker(
     storage_backend: str,
     storage_ref: str,
-    storage_config: Dict[str, Any],
+    storage_config: dict[str, Any],
     *,
-    task_identifier: Optional[str] = None,
+    task_identifier: str | None = None,
     is_binary: bool = False,
     timeout: int = 60,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fetch backup content by delegating to the storage.read Celery task.
 
     The storage worker handles decryption transparently when encryption is

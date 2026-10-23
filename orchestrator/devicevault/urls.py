@@ -18,8 +18,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework import routers
+
 from api import views
 
 router = routers.DefaultRouter()
@@ -45,17 +46,17 @@ router.register(r'users', views.UserViewSet, basename='users')
 router.register(r'audit-logs', views.AuditLogViewSet)
 
 urlpatterns = [
-    path('admin/', admin.site.urls), 
-    path('api/', include(router.urls)), 
-    path('api/onboarding/', views.onboarding), 
+    path('admin/', admin.site.urls),
+    path('api/', include(router.urls)),
+    path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', views.dashboard_stats),
     path('api/recent-backup-activity/', views.recent_backup_activity),
     path('api/worker-registry/', views.WorkerRegistryView.as_view()),
     path('api/timezone/', views.timezone_config),
-    path('api/auth/config/', views.AuthConfigView.as_view()), 
+    path('api/auth/config/', views.AuthConfigView.as_view()),
     path('api/backups/compare/', views.compare_backups),
-    path('api/auth/login/', views.LoginView.as_view()), 
-    path('api/auth/logout/', views.LogoutView.as_view()), 
+    path('api/auth/login/', views.LoginView.as_view()),
+    path('api/auth/logout/', views.LogoutView.as_view()),
     path('api/auth/user/', views.UserInfoView.as_view()),
     path('api/auth/change-password/', views.ChangePasswordView.as_view()),
     path('api/theme-settings/', views.ThemeSettingsView.as_view()),

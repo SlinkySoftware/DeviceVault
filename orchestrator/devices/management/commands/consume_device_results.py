@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import os
-import json
-import time
 import signal
+import time
 from datetime import datetime
 
 from django.core.management.base import BaseCommand
 from redis import Redis
 
-from devices.models import Device, DeviceBackupResult
 from celery_app import app as celery_app
+from devices.models import Device, DeviceBackupResult
 
 
 class Command(BaseCommand):
@@ -47,7 +46,9 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, _signal)
         signal.signal(signal.SIGTERM, _signal)
 
-        self.stdout.write(self.style.SUCCESS(f'Listening for results on stream "{stream}" as group "{group}" consumer "{consumer}"'))
+        self.stdout.write(
+            self.style.SUCCESS(f'Listening for results on stream "{stream}" as group "{group}" consumer "{consumer}"')
+        )
 
         while running:
             try:
@@ -55,7 +56,7 @@ class Command(BaseCommand):
                 if not resp:
                     continue
 
-                for sname, messages in resp:
+                for _stream, messages in resp:
                     for msg_id, fields in messages:
                         # decode bytes to str
                         try:
@@ -73,7 +74,10 @@ class Command(BaseCommand):
                         initiated_at_str = data.get('initiated_at', '')
 
                         # Idempotency: skip if task_identifier already persisted
-                        if task_identifier and DeviceBackupResult.objects.filter(task_identifier=task_identifier).exists():
+                        if (
+                            task_identifier
+                            and DeviceBackupResult.objects.filter(task_identifier=task_identifier).exists()
+                        ):
                             r.xack(stream, group, msg_id)
                             self.stdout.write(f'Skipped idempotent message: {task_identifier}')
                             continue
@@ -84,7 +88,9 @@ class Command(BaseCommand):
                                 try:
                                     device_obj = Device.objects.get(pk=int(device_id))
                                 except Device.DoesNotExist:
-                                    self.stderr.write(self.style.WARNING(f'Device {device_id} not found, skipping message {msg_id}'))
+                                    self.stderr.write(
+                                        self.style.WARNING(f'Device {device_id} not found, skipping message {msg_id}')
+                                    )
                                     # Still acknowledge the message to prevent reprocessing
                                     r.xack(stream, group, msg_id)
                                     continue
@@ -95,7 +101,9 @@ class Command(BaseCommand):
                                     continue
 
                             if not device_obj:
-                                self.stderr.write(self.style.WARNING(f'No device specified in message {msg_id}, skipping'))
+                                self.stderr.write(
+                                    self.style.WARNING(f'No device specified in message {msg_id}, skipping')
+                                )
                                 # Still acknowledge
                                 r.xack(stream, group, msg_id)
                                 continue
@@ -105,18 +113,19 @@ class Command(BaseCommand):
                             if initiated_at_str:
                                 try:
                                     from django.utils.dateparse import parse_datetime
+
                                     initiated_at = parse_datetime(initiated_at_str)
                                 except Exception:
                                     pass
-                            
+
                             # Convert collection_duration_ms to int if present
                             collection_duration_int = None
                             if collection_duration_ms:
                                 try:
                                     collection_duration_int = int(collection_duration_ms)
-                                except (ValueError, TypeError):
+                                except ValueError, TypeError:
                                     pass
-                            
+
                             # Calculate overall duration (step 1 to step 5)
                             overall_duration_int = None
                             if initiated_at and collection_duration_int is not None:
@@ -136,7 +145,7 @@ class Command(BaseCommand):
                                 log=log_text,
                                 initiated_at=initiated_at,
                                 collection_duration_ms=collection_duration_int,
-                                overall_duration_ms=overall_duration_int
+                                overall_duration_ms=overall_duration_int,
                             )
 
                             if status == 'success':
@@ -148,7 +157,9 @@ class Command(BaseCommand):
                                 )
 
                             r.xack(stream, group, msg_id)
-                            self.stdout.write(self.style.SUCCESS(f'Persisted result for device {device_id}: {task_identifier}'))
+                            self.stdout.write(
+                                self.style.SUCCESS(f'Persisted result for device {device_id}: {task_identifier}')
+                            )
                         except Exception as exc:
                             self.stderr.write(self.style.ERROR(f'Failed to persist message {msg_id}: {exc}'))
                             # Still acknowledge to prevent getting stuck on bad messages
@@ -161,12 +172,20 @@ class Command(BaseCommand):
         """Schedule storage via Celery worker, routed by storage backend."""
         location = device_obj.backup_location
         if not location:
-            self.stderr.write(self.style.WARNING(f'No backup location configured for device {device_obj.pk}, skipping storage dispatch'))
+            self.stderr.write(
+                self.style.WARNING(
+                    f'No backup location configured for device {device_obj.pk}, skipping storage dispatch'
+                )
+            )
             return
 
         backend_key = self.storage_backend_map.get((location.location_type or '').lower())
         if not backend_key:
-            self.stderr.write(self.style.WARNING(f'Unsupported storage backend "{location.location_type}" for device {device_obj.pk}, skipping storage dispatch'))
+            self.stderr.write(
+                self.style.WARNING(
+                    f'Unsupported storage backend "{location.location_type}" for device {device_obj.pk}, skipping storage dispatch'
+                )
+            )
             return
 
         payload = {
@@ -188,6 +207,8 @@ class Command(BaseCommand):
                 queue=queue,
                 routing_key=queue,
             )
-            self.stdout.write(self.style.SUCCESS(f'Storage task queued on {queue} for device {device_obj.pk} ({task_identifier})'))
+            self.stdout.write(
+                self.style.SUCCESS(f'Storage task queued on {queue} for device {device_obj.pk} ({task_identifier})')
+            )
         except Exception as exc:
             self.stderr.write(self.style.ERROR(f'Failed to enqueue storage task for device {device_obj.pk}: {exc}'))

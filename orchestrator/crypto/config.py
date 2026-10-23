@@ -15,29 +15,29 @@ License: GPLv3+
 
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from crypto.constants import (
     DEFAULT_CHUNK_SIZE,
-    MIN_CHUNK_SIZE,
-    MAX_CHUNK_SIZE,
-    PROVIDER_LOCAL,
-    ENV_ENCRYPTION_ENABLED,
+    ENV_ALLOW_PLAINTEXT_FALLBACK,
     ENV_CHUNK_SIZE,
+    ENV_ENCRYPTION_ENABLED,
     ENV_KEY_PROVIDER,
     ENV_LOCAL_MASTER_KEY,
-    ENV_ALLOW_PLAINTEXT_FALLBACK,
+    MAX_CHUNK_SIZE,
+    MIN_CHUNK_SIZE,
+    PROVIDER_LOCAL,
 )
+from crypto.exceptions import KeyProviderError
 from crypto.providers import KeyProvider, LocalKeyProvider
-from crypto.exceptions import CryptoError, KeyProviderError
 
 logger = logging.getLogger('devicevault.crypto.config')
 
 # Module-level singleton
-_key_provider: Optional[KeyProvider] = None
-_encryption_enabled: Optional[bool] = None
-_chunk_size: Optional[int] = None
-_allow_plaintext_fallback: Optional[bool] = None
+_key_provider: KeyProvider | None = None
+_encryption_enabled: bool | None = None
+_chunk_size: int | None = None
+_allow_plaintext_fallback: bool | None = None
 
 
 def _parse_bool(val: Any) -> bool:
@@ -49,17 +49,19 @@ def _parse_bool(val: Any) -> bool:
     return bool(val)
 
 
-def _load_yaml_config() -> Dict:
+def _load_yaml_config() -> dict:
     """Load the ``encryption`` section from config.yaml if available."""
     try:
         config_path = os.environ.get('DEVICEVAULT_CONFIG', '')
         if not config_path:
             # Try default path
             from pathlib import Path
+
             config_path = str(Path(__file__).resolve().parent.parent / 'config' / 'config.yaml')
 
         if os.path.exists(config_path):
             import yaml
+
             with open(config_path) as f:
                 cfg = yaml.safe_load(f) or {}
             return cfg.get('encryption', {})
@@ -68,7 +70,7 @@ def _load_yaml_config() -> Dict:
     return {}
 
 
-def get_encryption_enabled(yaml_cfg: Optional[Dict] = None) -> bool:
+def get_encryption_enabled(yaml_cfg: dict | None = None) -> bool:
     """Return whether encryption is enabled."""
     global _encryption_enabled
     if _encryption_enabled is not None:
@@ -87,7 +89,7 @@ def get_encryption_enabled(yaml_cfg: Optional[Dict] = None) -> bool:
     return _encryption_enabled
 
 
-def get_chunk_size(yaml_cfg: Optional[Dict] = None) -> int:
+def get_chunk_size(yaml_cfg: dict | None = None) -> int:
     """Return the configured chunk size in bytes."""
     global _chunk_size
     if _chunk_size is not None:
@@ -110,7 +112,7 @@ def get_chunk_size(yaml_cfg: Optional[Dict] = None) -> int:
     return _chunk_size
 
 
-def get_allow_plaintext_fallback(yaml_cfg: Optional[Dict] = None) -> bool:
+def get_allow_plaintext_fallback(yaml_cfg: dict | None = None) -> bool:
     """Return whether plaintext writes are allowed when encryption is disabled."""
     global _allow_plaintext_fallback
     if _allow_plaintext_fallback is not None:
@@ -123,14 +125,12 @@ def get_allow_plaintext_fallback(yaml_cfg: Optional[Dict] = None) -> bool:
     if env_val is not None:
         _allow_plaintext_fallback = _parse_bool(env_val)
     else:
-        _allow_plaintext_fallback = _parse_bool(
-            yaml_cfg.get('allow_plaintext_fallback', True)
-        )
+        _allow_plaintext_fallback = _parse_bool(yaml_cfg.get('allow_plaintext_fallback', True))
 
     return _allow_plaintext_fallback
 
 
-def get_key_provider(yaml_cfg: Optional[Dict] = None, force: bool = False) -> Optional[KeyProvider]:
+def get_key_provider(yaml_cfg: dict | None = None, force: bool = False) -> KeyProvider | None:
     """Return the configured KeyProvider singleton (lazy initialised).
 
     Args:

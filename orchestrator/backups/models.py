@@ -25,7 +25,7 @@ from django.db import models
 class Backup(models.Model):
     """
     Backup Model: Records a single backup operation for a device
-    
+
     Fields:
         - device (ForeignKey): The device that was backed up
         - location (ForeignKey): Where the backup was stored
@@ -34,10 +34,10 @@ class Backup(models.Model):
         - size_bytes (BigIntegerField): Size of backed up configuration in bytes
         - artifact_path (CharField): Path/identifier of backup artifact in storage location
         - is_text (BooleanField): Whether artifact is text (True) or binary (False)
-    
+
     Methods:
         - __str__(): Returns formatted string with device ID and timestamp
-    
+
     Usage:
         Each successful backup operation creates a Backup record. These records are
         used for:
@@ -46,17 +46,22 @@ class Backup(models.Model):
         - Displaying restore options to users
         - Audit and compliance reporting
     """
+
     device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, help_text='Device that was backed up')
-    location = models.ForeignKey('locations.BackupLocation', on_delete=models.SET_NULL, null=True, help_text='Where this backup is stored')
+    location = models.ForeignKey(
+        'locations.BackupLocation', on_delete=models.SET_NULL, null=True, help_text='Where this backup is stored'
+    )
     timestamp = models.DateTimeField(auto_now_add=True, help_text='When this backup record was created')
     requested_at = models.DateTimeField(null=True, blank=True, help_text='When this backup was requested')
     started_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution started')
     completed_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution completed')
-    status = models.CharField(max_length=32, default='pending', help_text='Backup status: pending, in_progress, success, failed')
+    status = models.CharField(
+        max_length=32, default='pending', help_text='Backup status: pending, in_progress, success, failed'
+    )
     size_bytes = models.BigIntegerField(null=True, blank=True, help_text='Size of configuration backup in bytes')
     artifact_path = models.CharField(max_length=256, help_text='Path or identifier of backup in storage location')
     is_text = models.BooleanField(default=True, help_text='True if text artifact (configs), False if binary')
-    
+
     @property
     def duration_seconds(self):
         """Return duration in seconds if start and completion timestamps are available."""
@@ -66,7 +71,7 @@ class Backup(models.Model):
 
     def __str__(self):
         """Return formatted string with device ID and timestamp"""
-        return f"{self.device_id} @ {self.timestamp}"
+        return f'{self.device_id} @ {self.timestamp}'
 
 
 class StoredBackup(models.Model):
@@ -80,15 +85,21 @@ class StoredBackup(models.Model):
     status = models.CharField(max_length=16)
     timestamp = models.DateTimeField()
     log = models.TextField(help_text='JSON serialized list of log messages')
-    
+
     # Timing metrics (in milliseconds)
-    storage_duration_ms = models.IntegerField(null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)')
+    storage_duration_ms = models.IntegerField(
+        null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)'
+    )
 
     # Encryption metadata (nullable for backward compatibility with legacy v0 plaintext backups)
     # When enc_version is null or 0, the stored object is plaintext (no decryption needed).
-    enc_version = models.IntegerField(null=True, blank=True, help_text='Encryption format version (null/0 = plaintext, 1 = AES-256-GCM chunked)')
+    enc_version = models.IntegerField(
+        null=True, blank=True, help_text='Encryption format version (null/0 = plaintext, 1 = AES-256-GCM chunked)'
+    )
     enc_cipher = models.CharField(max_length=32, null=True, blank=True, help_text='Cipher identifier, e.g. AES-256-GCM')
-    enc_kid = models.CharField(max_length=128, null=True, blank=True, db_index=True, help_text='Master key identifier used to wrap the DEK')
+    enc_kid = models.CharField(
+        max_length=128, null=True, blank=True, db_index=True, help_text='Master key identifier used to wrap the DEK'
+    )
     enc_edk = models.TextField(null=True, blank=True, help_text='Encrypted DEK (base64-encoded)')
 
     class Meta:
@@ -101,4 +112,4 @@ class StoredBackup(models.Model):
 
     def __str__(self):
         enc = f' [encrypted v{self.enc_version}]' if self.is_encrypted else ''
-        return f"{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}{enc}"
+        return f'{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}{enc}'

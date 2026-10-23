@@ -19,16 +19,17 @@ Device Group RBAC Permission Checking Utilities
 Moved from rbac.permissions; uses devices models directly.
 """
 
-from devices.models import (
-    UserDeviceGroupRole,
-    GroupDeviceGroupRole,
-    DeviceGroupRole,
-    DeviceGroupPermission,
-    DeviceGroup,
-    DeviceGroupDjangoPermissions,
-)
 from django.contrib.auth.models import User
 from rest_framework.permissions import BasePermission
+
+from devices.models import (
+    DeviceGroup,
+    DeviceGroupDjangoPermissions,
+    DeviceGroupPermission,
+    DeviceGroupRole,
+    GroupDeviceGroupRole,
+    UserDeviceGroupRole,
+)
 
 
 def user_has_device_group_permission(user: User, device_group, permission_code: str) -> bool:
@@ -67,11 +68,17 @@ def user_get_device_group_permissions(user: User, device_group) -> set:
     all_roles = list(user_roles) + list(group_roles)
     if not all_roles:
         return set()
-    permissions = DeviceGroupRole.objects.filter(
-        id__in=all_roles,
-    ).prefetch_related('permissions').values_list(
-        'permissions__code', flat=True,
-    ).distinct()
+    permissions = (
+        DeviceGroupRole.objects.filter(
+            id__in=all_roles,
+        )
+        .prefetch_related('permissions')
+        .values_list(
+            'permissions__code',
+            flat=True,
+        )
+        .distinct()
+    )
     return set(permissions)
 
 
@@ -95,7 +102,7 @@ def user_has_device_group_django_permission(user: User, device_group: DeviceGrou
     perm = mapping.get(action)
     if not perm:
         return False
-    return user.has_perm(f"{perm.content_type.app_label}.{perm.codename}")
+    return user.has_perm(f'{perm.content_type.app_label}.{perm.codename}')
 
 
 def user_get_device_group_django_permissions(user: User, device_group: DeviceGroup) -> set:
@@ -113,7 +120,7 @@ def user_get_device_group_django_permissions(user: User, device_group: DeviceGro
         ('view_backups', link.perm_view_backups),
         ('backup_now', link.perm_backup_now),
     ):
-        if perm and user.has_perm(f"{perm.content_type.app_label}.{perm.codename}"):
+        if perm and user.has_perm(f'{perm.content_type.app_label}.{perm.codename}'):
             results.add(action)
     return results
 
@@ -127,12 +134,12 @@ def user_get_accessible_device_groups(user: User):
     for dg in DeviceGroup.objects.all():
         if user_get_device_group_django_permissions(user, dg):
             groups.append(dg)
-    from django.db.models import QuerySet
     # Return a QuerySet-like object; simplest is to filter by IDs
     return DeviceGroup.objects.filter(id__in=[g.id for g in groups])
 
 
 # ===== REST Framework Permission Classes =====
+
 
 class CanViewDeviceConfiguration(BasePermission):
     def has_object_permission(self, request, view, obj):

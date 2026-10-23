@@ -17,19 +17,18 @@ import base64
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
 
 from cryptography.hazmat.primitives.keywrap import (
-    aes_key_wrap,
-    aes_key_unwrap,
     InvalidUnwrap,
+    aes_key_unwrap,
+    aes_key_wrap,
 )
 
 from crypto.constants import AES_KEY_BYTES
 from crypto.exceptions import (
     KeyProviderError,
-    MasterKeyNotFoundError,
     KeyUnwrapError,
+    MasterKeyNotFoundError,
 )
 
 logger = logging.getLogger('devicevault.crypto.providers')
@@ -48,7 +47,7 @@ class KeyProvider(ABC):
         """Return the KID used for new encryption operations."""
 
     @abstractmethod
-    def wrap_key(self, plaintext_dek: bytes) -> Tuple[bytes, str]:
+    def wrap_key(self, plaintext_dek: bytes) -> tuple[bytes, str]:
         """Wrap a plaintext DEK with the default master key.
 
         Returns:
@@ -65,7 +64,7 @@ class KeyProvider(ABC):
         """
 
     @abstractmethod
-    def list_key_ids(self) -> List[str]:
+    def list_key_ids(self) -> list[str]:
         """Return all KIDs currently available in the key ring."""
 
     @abstractmethod
@@ -96,15 +95,15 @@ class LocalKeyProvider(KeyProvider):
     to ``local-env``).
     """
 
-    def __init__(self, keys: Optional[Dict[str, str]] = None, default_kid: Optional[str] = None):
+    def __init__(self, keys: dict[str, str] | None = None, default_kid: str | None = None):
         """Initialise the local key ring.
 
         Args:
             keys: Mapping of KID -> base64-encoded master key material.
             default_kid: KID to use for new wrap operations.
         """
-        self._ring: Dict[str, bytes] = {}
-        self._default_kid: Optional[str] = None
+        self._ring: dict[str, bytes] = {}
+        self._default_kid: str | None = None
 
         # Load from explicit dict
         if keys:
@@ -134,7 +133,8 @@ class LocalKeyProvider(KeyProvider):
 
         logger.info(
             'LocalKeyProvider initialised with %d key(s), default_kid=%s',
-            len(self._ring), self._default_kid,
+            len(self._ring),
+            self._default_kid,
         )
 
     def _add_key(self, kid: str, key_b64: str) -> None:
@@ -145,9 +145,7 @@ class LocalKeyProvider(KeyProvider):
             raise KeyProviderError(f'Invalid base64 for KID "{kid}": {exc}') from exc
 
         if len(raw) != AES_KEY_BYTES:
-            raise KeyProviderError(
-                f'Master key "{kid}" must be {AES_KEY_BYTES} bytes, got {len(raw)}'
-            )
+            raise KeyProviderError(f'Master key "{kid}" must be {AES_KEY_BYTES} bytes, got {len(raw)}')
         self._ring[kid] = raw
 
     # -- KeyProvider interface ------------------------------------------------
@@ -155,7 +153,7 @@ class LocalKeyProvider(KeyProvider):
     def get_default_key_id(self) -> str:
         return self._default_kid
 
-    def wrap_key(self, plaintext_dek: bytes) -> Tuple[bytes, str]:
+    def wrap_key(self, plaintext_dek: bytes) -> tuple[bytes, str]:
         kid = self._default_kid
         master_key = self._ring[kid]
         edk = aes_key_wrap(master_key, plaintext_dek)
@@ -166,8 +164,7 @@ class LocalKeyProvider(KeyProvider):
         master_key = self._ring.get(kid)
         if master_key is None:
             raise MasterKeyNotFoundError(
-                f'KID "{kid}" not found in key ring. '
-                f'Available KIDs: {list(self._ring.keys())}'
+                f'KID "{kid}" not found in key ring. Available KIDs: {list(self._ring.keys())}'
             )
         try:
             dek = aes_key_unwrap(master_key, encrypted_dek)
@@ -179,7 +176,7 @@ class LocalKeyProvider(KeyProvider):
         logger.debug('Unwrapped DEK with KID=%s', kid)
         return dek
 
-    def list_key_ids(self) -> List[str]:
+    def list_key_ids(self) -> list[str]:
         return list(self._ring.keys())
 
     def set_default_key_id(self, kid: str) -> None:

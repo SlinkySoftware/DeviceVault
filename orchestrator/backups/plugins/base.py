@@ -16,9 +16,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Any
 from datetime import datetime
+from typing import Any
 
 # New plugin contract:
 # - entrypoint accepts a configuration dict and an optional timeout (seconds)
@@ -26,7 +27,7 @@ from datetime import datetime
 #   (task_id will be filled by the Celery task wrapper when run inside a task)
 
 # Collector entrypoint signature: Callable[[Dict, Optional[int]], Dict]
-CollectorCallable = Callable[[Dict, Optional[int]], Dict]
+CollectorCallable = Callable[[dict, int | None], dict]
 
 
 @dataclass
@@ -54,7 +55,7 @@ class BackupPlugin:
       - timestamp: ISO 8601 UTC timestamp when the log entry occurred
       - severity: one of INFO, WARN, ERROR, DEBUG
       - message: the actual log message text
-    
+
     For backward compatibility, string log entries are supported but will be automatically
     converted to structured format with default values.
 
@@ -62,13 +63,14 @@ class BackupPlugin:
 
     The Celery task wrapper will populate `task_id` and persist results.
     """
+
     key: str
     friendly_name: str
     description: str
     entrypoint: CollectorCallable
     is_binary: bool = False  # True for binary backups, False for text
 
-    def run(self, config: Dict, timeout: Optional[int] = None) -> Dict[str, Any]:
+    def run(self, config: dict, timeout: int | None = None) -> dict[str, Any]:
         """Invoke the plugin entrypoint and normalize its result.
 
         This wrapper ensures a minimal, well-formed result dict is returned
@@ -82,7 +84,7 @@ class BackupPlugin:
                 'status': 'failure',
                 'timestamp': datetime.utcnow().isoformat() + 'Z',
                 'log': [f'plugin_exception: {repr(exc)}'],
-                'device_config': None
+                'device_config': None,
             }
 
         # Allow plugins to return a raw string (old contract) or dict (new contract)
@@ -93,7 +95,7 @@ class BackupPlugin:
                 'status': result.get('status', 'failure'),
                 'timestamp': result.get('timestamp') or (datetime.utcnow().isoformat() + 'Z'),
                 'log': result.get('log') or [],
-                'device_config': result.get('device_config')
+                'device_config': result.get('device_config'),
             }
         else:
             # Treat any non-dict as raw device config
@@ -102,5 +104,5 @@ class BackupPlugin:
                 'status': 'success',
                 'timestamp': datetime.utcnow().isoformat() + 'Z',
                 'log': ['plugin_returned_raw_string'],
-                'device_config': result
+                'device_config': result,
             }

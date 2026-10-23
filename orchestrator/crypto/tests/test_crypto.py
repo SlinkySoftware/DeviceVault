@@ -17,9 +17,7 @@ License: GPLv3+
 """
 
 import base64
-import json
 import os
-import struct
 import sys
 import unittest
 
@@ -27,17 +25,22 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from crypto.constants import (
-    AES_KEY_BYTES, GCM_NONCE_BYTES, GCM_TAG_BYTES,
-    DEFAULT_CHUNK_SIZE, HEADER_MAGIC, ENC_VERSION, CIPHER_ID,
+    AES_KEY_BYTES,
+    CIPHER_ID,
+    ENC_VERSION,
+    GCM_NONCE_BYTES,
+    HEADER_MAGIC,
 )
+from crypto.engine import _zeroize, decrypt_backup, encrypt_backup
 from crypto.exceptions import (
-    TamperDetectedError, DecryptionError, MasterKeyNotFoundError,
-    KeyUnwrapError, KeyProviderError, EncryptionError,
-    ChunkLimitExceededError, HeaderError,
+    HeaderError,
+    KeyProviderError,
+    KeyUnwrapError,
+    MasterKeyNotFoundError,
+    TamperDetectedError,
 )
 from crypto.header import EncryptionHeader, is_encrypted
 from crypto.providers import LocalKeyProvider
-from crypto.engine import encrypt_backup, decrypt_backup, _zeroize
 from crypto.wrapper import CryptoStorage
 
 
@@ -53,8 +56,8 @@ def _make_provider(*keys, default=None):
 # Header codec tests
 # =========================================================================
 
-class TestEncryptionHeader(unittest.TestCase):
 
+class TestEncryptionHeader(unittest.TestCase):
     def test_roundtrip(self):
         """Header serialises and deserialises correctly."""
         hdr = EncryptionHeader(
@@ -101,8 +104,8 @@ class TestEncryptionHeader(unittest.TestCase):
 # Key provider tests
 # =========================================================================
 
-class TestLocalKeyProvider(unittest.TestCase):
 
+class TestLocalKeyProvider(unittest.TestCase):
     def test_wrap_unwrap_roundtrip(self):
         """DEK wrap + unwrap returns original key."""
         kp = _make_provider('mk-1')
@@ -129,13 +132,9 @@ class TestLocalKeyProvider(unittest.TestCase):
 
     def test_wrong_key_material_raises(self):
         """Unwrapping EDK with wrong master key raises KeyUnwrapError."""
-        kp1 = _make_provider('k1')
-        kp2 = _make_provider('k2')
+        # Same KID on both providers but different key material, so the lookup
+        # succeeds and the unwrap itself must fail.
         dek = os.urandom(AES_KEY_BYTES)
-        edk, _ = kp1.wrap_key(dek)
-        # kp2's 'k2' key cannot unwrap kp1's EDK
-        # But we need to add 'k1' as a KID to kp2's ring to avoid MasterKeyNotFoundError
-        # So let's test with a provider that has the same KID but different key material
         key_a = base64.b64encode(os.urandom(AES_KEY_BYTES)).decode()
         key_b = base64.b64encode(os.urandom(AES_KEY_BYTES)).decode()
         kp_a = LocalKeyProvider(keys={'shared-kid': key_a})
@@ -191,8 +190,8 @@ class TestLocalKeyProvider(unittest.TestCase):
 # Encryption engine tests
 # =========================================================================
 
-class TestEncryptionEngine(unittest.TestCase):
 
+class TestEncryptionEngine(unittest.TestCase):
     def setUp(self):
         self.kp = _make_provider('test-key')
 
@@ -208,7 +207,7 @@ class TestEncryptionEngine(unittest.TestCase):
     def test_large_payload_multi_chunk(self):
         """Payload larger than chunk_size uses multiple chunks."""
         pt = os.urandom(300_000)  # 300 KB
-        chunk_size = 64 * 1024    # 64 KB chunks -> ~5 chunks
+        chunk_size = 64 * 1024  # 64 KB chunks -> ~5 chunks
         blob, meta = encrypt_backup(pt, self.kp, chunk_size=chunk_size)
         recovered = decrypt_backup(blob, self.kp)
         self.assertEqual(recovered, pt)
@@ -273,8 +272,8 @@ class TestEncryptionEngine(unittest.TestCase):
 # Tamper detection tests
 # =========================================================================
 
-class TestTamperDetection(unittest.TestCase):
 
+class TestTamperDetection(unittest.TestCase):
     def setUp(self):
         self.kp = _make_provider('tamper-key')
         self.pt = b'sensitive configuration data'
@@ -319,8 +318,8 @@ class TestTamperDetection(unittest.TestCase):
 # Backward compatibility tests
 # =========================================================================
 
-class TestBackwardCompatibility(unittest.TestCase):
 
+class TestBackwardCompatibility(unittest.TestCase):
     def setUp(self):
         self.kp = _make_provider('compat-key')
 
@@ -332,7 +331,7 @@ class TestBackwardCompatibility(unittest.TestCase):
 
     def test_plaintext_string_passthrough(self):
         """Arbitrary string bytes (no DVLT magic) pass through."""
-        data = 'just a plain text config'.encode('utf-8')
+        data = b'just a plain text config'
         result = decrypt_backup(data, self.kp)
         self.assertEqual(result, data)
 
@@ -346,8 +345,8 @@ class TestBackwardCompatibility(unittest.TestCase):
 # Key rotation tests
 # =========================================================================
 
-class TestKeyRotation(unittest.TestCase):
 
+class TestKeyRotation(unittest.TestCase):
     def test_read_with_old_key_in_ring(self):
         """Backup encrypted with old key is readable when ring has both keys."""
         k1 = base64.b64encode(os.urandom(AES_KEY_BYTES)).decode()
@@ -399,8 +398,8 @@ class TestKeyRotation(unittest.TestCase):
 # CryptoStorage wrapper tests
 # =========================================================================
 
-class TestCryptoStorage(unittest.TestCase):
 
+class TestCryptoStorage(unittest.TestCase):
     def setUp(self):
         self.kp = _make_provider('wrap-key')
         self.crypto = CryptoStorage(self.kp, chunk_size=64 * 1024)
@@ -419,7 +418,10 @@ class TestCryptoStorage(unittest.TestCase):
         """Text content encrypts on store and decrypts on read."""
         content = 'hostname router\ninterface eth0\n'
         ref, meta = self.crypto.store(
-            content, 'test.cfg', {}, is_binary=False,
+            content,
+            'test.cfg',
+            {},
+            is_binary=False,
             store_fn=self._mock_store,
         )
         self.assertIsNotNone(meta)
@@ -438,7 +440,10 @@ class TestCryptoStorage(unittest.TestCase):
         """Binary content encrypts on store and decrypts on read."""
         content = os.urandom(1000)
         ref, meta = self.crypto.store(
-            content, 'backup.bin', {}, is_binary=True,
+            content,
+            'backup.bin',
+            {},
+            is_binary=True,
             store_fn=self._mock_store,
         )
         self.assertIsNotNone(meta)
@@ -451,7 +456,10 @@ class TestCryptoStorage(unittest.TestCase):
         crypto_off = CryptoStorage(self.kp, encryption_enabled=False)
         content = 'plain text'
         ref, meta = crypto_off.store(
-            content, 'plain.cfg', {}, is_binary=False,
+            content,
+            'plain.cfg',
+            {},
+            is_binary=False,
             store_fn=self._mock_store,
         )
         self.assertIsNone(meta)
@@ -476,8 +484,8 @@ class TestCryptoStorage(unittest.TestCase):
 # Zeroization test
 # =========================================================================
 
-class TestZeroize(unittest.TestCase):
 
+class TestZeroize(unittest.TestCase):
     def test_zeroize(self):
         """_zeroize overwrites buffer with zeros."""
         buf = bytearray(b'secret key material')
@@ -489,8 +497,8 @@ class TestZeroize(unittest.TestCase):
 # Edge case / fuzz-like tests
 # =========================================================================
 
-class TestEdgeCases(unittest.TestCase):
 
+class TestEdgeCases(unittest.TestCase):
     def setUp(self):
         self.kp = _make_provider('edge-key')
 
@@ -518,7 +526,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_unicode_content(self):
         """UTF-8 content with multibyte characters."""
-        text = '日本語のバックアップ設定 — ñ € £ ★'.encode('utf-8')
+        text = '日本語のバックアップ設定 — ñ € £ ★'.encode()
         blob, _ = encrypt_backup(text, self.kp)
         self.assertEqual(decrypt_backup(blob, self.kp), text)
 

@@ -30,15 +30,15 @@ License: GPLv3+
 import json
 import struct
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from crypto.constants import (
-    HEADER_MAGIC,
-    ENC_VERSION,
     CIPHER_ID,
     DEFAULT_CHUNK_SIZE,
+    ENC_VERSION,
     GCM_NONCE_BYTES,
     GCM_TAG_BYTES,
+    HEADER_MAGIC,
 )
 from crypto.exceptions import HeaderError
 
@@ -55,7 +55,7 @@ class EncryptionHeader:
     chunk_size: int = DEFAULT_CHUNK_SIZE
     kid: str = ''
     edk: bytes = b''
-    aad: Dict[str, Any] = field(default_factory=dict)
+    aad: dict[str, Any] = field(default_factory=dict)
 
     # ── Serialisation ───────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ class EncryptionHeader:
         return b''.join(parts)
 
     @classmethod
-    def from_bytes(cls, data: bytes, offset: int = 0) -> 'EncryptionHeader':
+    def from_bytes(cls, data: bytes, offset: int = 0) -> EncryptionHeader:
         """Parse a header from *data* starting at *offset*.
 
         Also sets ``header_size`` on the returned object indicating how
@@ -111,7 +111,7 @@ class EncryptionHeader:
         pos = offset
 
         # Magic
-        if data[pos:pos + 4] != HEADER_MAGIC:
+        if data[pos : pos + 4] != HEADER_MAGIC:
             raise HeaderError('Invalid magic bytes — not a DeviceVault encrypted object')
         pos += 4
 
@@ -122,7 +122,7 @@ class EncryptionHeader:
         # cipher_id
         cipher_len = struct.unpack_from('!B', data, pos)[0]
         pos += 1
-        cipher = data[pos:pos + cipher_len].decode('utf-8')
+        cipher = data[pos : pos + cipher_len].decode('utf-8')
         pos += cipher_len
 
         # chunk_size
@@ -132,20 +132,20 @@ class EncryptionHeader:
         # kid
         kid_len = struct.unpack_from('!B', data, pos)[0]
         pos += 1
-        kid = data[pos:pos + kid_len].decode('utf-8')
+        kid = data[pos : pos + kid_len].decode('utf-8')
         pos += kid_len
 
         # edk
         edk_len = struct.unpack_from('!H', data, pos)[0]
         pos += 2
-        edk = bytes(data[pos:pos + edk_len])
+        edk = bytes(data[pos : pos + edk_len])
         pos += edk_len
 
         # aad
         aad_len = struct.unpack_from('!H', data, pos)[0]
         pos += 2
         if aad_len:
-            aad = json.loads(data[pos:pos + aad_len].decode('utf-8'))
+            aad = json.loads(data[pos : pos + aad_len].decode('utf-8'))
         else:
             aad = {}
         pos += aad_len

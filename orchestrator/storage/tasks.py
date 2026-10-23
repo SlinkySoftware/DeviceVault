@@ -9,22 +9,22 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from celery.exceptions import SoftTimeLimitExceeded
-from pythonjsonlogger import jsonlogger  # type: ignore
+from pythonjsonlogger.json import JsonFormatter
 from redis import Redis
 
-from celery_app import app as celery_app, REDIS_URL, STORAGE_RESULTS_STREAM
-from storage import git as git_storage
+from celery_app import REDIS_URL, STORAGE_RESULTS_STREAM
+from celery_app import app as celery_app
 from storage import fs as fs_storage
+from storage import git as git_storage
 
 # Provide app alias for Celery discovery
 app = celery_app
 
 logger = logging.getLogger('devicevault.storage.worker')
 _handler = logging.StreamHandler()
-_formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')  # type: ignore
+_formatter = JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
 _handler.setFormatter(_formatter)
 logger.addHandler(_handler)
 logger.setLevel(os.environ.get('DEVICEVAULT_LOG_LEVEL', 'INFO'))
@@ -70,7 +70,7 @@ def _get_crypto_storage():
 
     _crypto_checked = True
     try:
-        from crypto.config import get_key_provider, get_chunk_size
+        from crypto.config import get_chunk_size, get_key_provider
         from crypto.wrapper import CryptoStorage
 
         kp = get_key_provider(force=True)
@@ -82,7 +82,8 @@ def _get_crypto_storage():
         _crypto_storage = CryptoStorage(kp, chunk_size=chunk_size, encryption_enabled=True)
         logger.info(
             'Crypto subsystem ready: cipher=AES-256-GCM, chunk_size=%d, default_kid=%s',
-            chunk_size, kp.get_default_key_id(),
+            chunk_size,
+            kp.get_default_key_id(),
         )
     except Exception as exc:
         # If crypto init fails, per-device encryption won't work.
@@ -100,13 +101,13 @@ def _storage_queue_name(storage_backend: str) -> str:
     return f'storage.{storage_backend}' if storage_backend else 'storage'
 
 
-def _sanitize_rel_path(device_id: Optional[int], task_identifier: str) -> str:
+def _sanitize_rel_path(device_id: int | None, task_identifier: str) -> str:
     safe_identifier = re.sub(r'[^A-Za-z0-9_.-]', '-', task_identifier or 'job')
     prefix = str(device_id) if device_id is not None else 'unknown'
-    return f"{prefix}/{safe_identifier}.txt"
+    return f'{prefix}/{safe_identifier}.txt'
 
 
-def _publish_result(result: Dict) -> None:
+def _publish_result(result: dict) -> None:
     try:
         payload = {
             'task_id': result.get('task_id', '') or '',
@@ -139,7 +140,7 @@ def _publish_result(result: Dict) -> None:
     retry_backoff=True,
     retry_kwargs={'max_retries': 3},
 )
-def storage_store_task(self, payload: Dict) -> Dict:
+def storage_store_task(self, payload: dict) -> dict:
     """Store backup content using the configured storage backend.
 
     Expected payload keys:
@@ -150,7 +151,7 @@ def storage_store_task(self, payload: Dict) -> Dict:
         - device_id: int
         - storage_rel_path: optional relative path override
     """
-    log_lines: List[str] = []
+    log_lines: list[str] = []
 
     if isinstance(payload, str):
         try:
@@ -170,12 +171,7 @@ def storage_store_task(self, payload: Dict) -> Dict:
 
     if not storage_backend or storage_backend not in STORAGE_BACKENDS:
         msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': msg
-        })
+        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -192,12 +188,7 @@ def storage_store_task(self, payload: Dict) -> Dict:
 
     if not device_config:
         msg = 'device_config missing; nothing to store'
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': msg
-        })
+        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -224,10 +215,10 @@ def storage_store_task(self, payload: Dict) -> Dict:
                 'queue': getattr(getattr(self, 'request', None), 'delivery_info', {}).get('routing_key'),
             },
         )
-        
+
         # Capture start time for storage duration
         storage_start_ms = int(time.time() * 1000)
-        
+
         storage_fn = STORAGE_BACKENDS[storage_backend]['store']
         is_binary = payload.get('is_binary', False)
 
@@ -238,12 +229,14 @@ def storage_store_task(self, payload: Dict) -> Dict:
         crypto = _get_crypto_storage() if encrypt_requested else None
         enc_meta = None
         if encrypt_requested and crypto is None:
-            log_lines.append({
-                'source': 'encryption',
-                'timestamp': _iso_now(),
-                'severity': 'WARNING',
-                'message': 'Encryption requested but no master key is configured — backup stored as plaintext'
-            })
+            log_lines.append(
+                {
+                    'source': 'encryption',
+                    'timestamp': _iso_now(),
+                    'severity': 'WARNING',
+                    'message': 'Encryption requested but no master key is configured — backup stored as plaintext',
+                }
+            )
             logger.warning(
                 'encryption_requested_but_unavailable',
                 extra={'device_id': device_id, 'task_identifier': task_identifier},
@@ -264,27 +257,31 @@ def storage_store_task(self, payload: Dict) -> Dict:
             )
         else:
             storage_ref = storage_fn(str(device_config), rel_path, storage_config)
-        
+
         # Capture end time and calculate duration
         storage_end_ms = int(time.time() * 1000)
         storage_duration_ms = storage_end_ms - storage_start_ms
-        
+
         enc_msg = ''
         if enc_meta:
             enc_msg = f' [encrypted v{enc_meta["enc_version"]}, kid={enc_meta["kid"]}]'
-            log_lines.append({
-                'source': 'encryption',
+            log_lines.append(
+                {
+                    'source': 'encryption',
+                    'timestamp': _iso_now(),
+                    'severity': 'INFO',
+                    'message': f'Backup encrypted at rest (AES-256-GCM, key={enc_meta["kid"]})',
+                }
+            )
+
+        log_lines.append(
+            {
+                'source': 'storage_worker',
                 'timestamp': _iso_now(),
                 'severity': 'INFO',
-                'message': f'Backup encrypted at rest (AES-256-GCM, key={enc_meta["kid"]})'
-            })
-        
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'INFO',
-            'message': f'Stored to {storage_backend}:{storage_ref}{enc_msg} in {storage_duration_ms}ms'
-        })
+                'message': f'Stored to {storage_backend}:{storage_ref}{enc_msg} in {storage_duration_ms}ms',
+            }
+        )
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -316,12 +313,7 @@ def storage_store_task(self, payload: Dict) -> Dict:
         return result
     except SoftTimeLimitExceeded:
         msg = 'storage_task_soft_time_limit_exceeded'
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': msg
-        })
+        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -337,12 +329,14 @@ def storage_store_task(self, payload: Dict) -> Dict:
         return result
     except Exception as exc:
         logger.exception('storage_store_failure')
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': f'Unhandled exception: {repr(exc)}'
-        })
+        log_lines.append(
+            {
+                'source': 'storage_worker',
+                'timestamp': _iso_now(),
+                'severity': 'ERROR',
+                'message': f'Unhandled exception: {repr(exc)}',
+            }
+        )
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -372,24 +366,19 @@ def storage_read_task(
     self,
     storage_backend: str,
     storage_ref: str,
-    storage_config: Dict,
-    task_identifier: Optional[str] = None,
+    storage_config: dict,
+    task_identifier: str | None = None,
     is_binary: bool = False,
-) -> Dict:
+) -> dict:
     """Retrieve backup content synchronously via the storage backend."""
-    log_lines: List[str] = []
+    log_lines: list[str] = []
     tid = getattr(getattr(self, 'request', None), 'id', None)
     task_identifier = task_identifier or f'read:{storage_ref}'
     operation = 'read'
 
     if not storage_backend or storage_backend not in STORAGE_BACKENDS:
         msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': msg
-        })
+        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -431,12 +420,7 @@ def storage_read_task(
         return result
     except SoftTimeLimitExceeded:
         msg = 'storage_read_soft_time_limit_exceeded'
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': msg
-        })
+        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,
@@ -452,12 +436,14 @@ def storage_read_task(
         return result
     except Exception as exc:
         logger.exception('storage_read_failure')
-        log_lines.append({
-            'source': 'storage_worker',
-            'timestamp': _iso_now(),
-            'severity': 'ERROR',
-            'message': f'Unhandled exception: {repr(exc)}'
-        })
+        log_lines.append(
+            {
+                'source': 'storage_worker',
+                'timestamp': _iso_now(),
+                'severity': 'ERROR',
+                'message': f'Unhandled exception: {repr(exc)}',
+            }
+        )
         result = {
             'task_id': tid,
             'task_identifier': task_identifier,

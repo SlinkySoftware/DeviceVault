@@ -16,11 +16,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os
 import base64
 import gzip
 import logging
-from typing import Dict, Union
+import os
 
 logger = logging.getLogger('devicevault.storage.fs')
 
@@ -28,7 +27,7 @@ logger = logging.getLogger('devicevault.storage.fs')
 _GZ_SUFFIX = '.gz'
 
 
-def _should_compress(config: Dict, is_binary: bool) -> bool:
+def _should_compress(config: dict, is_binary: bool) -> bool:
     """Return True when text content should be gzip-compressed on disk.
 
     Compression is enabled when *all* of the following are true:
@@ -42,7 +41,7 @@ def _should_compress(config: Dict, is_binary: bool) -> bool:
     return bool(config.get('compress') or config.get('gzip'))
 
 
-def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_binary: bool = False) -> str:
+def store_backup(content: str | bytes, rel_path: str, config: dict, is_binary: bool = False) -> str:
     """Persist backup content onto a filesystem path.
 
     Args:
@@ -53,11 +52,11 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
 
     Returns:
         storage_ref: Relative path used to retrieve this backup later.
-    
+
     For binary content:
         - If content is a base64-encoded string, it will be decoded to bytes before writing.
         - If content is already bytes, it will be written as-is.
-    
+
     For text content:
         - Content is written as UTF-8 text.
     """
@@ -87,7 +86,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
             # Already bytes
             binary_data = content
             logger.debug(f'Using raw binary content ({len(binary_data)} bytes)')
-        
+
         with open(full_path, 'wb') as handle:
             handle.write(binary_data)
         logger.info(f'Wrote {len(binary_data)} bytes to {full_path}')
@@ -97,9 +96,7 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
         full_path += _GZ_SUFFIX
         with gzip.open(full_path, 'wb') as handle:
             handle.write(text_data)
-        logger.info(
-            f'Wrote {len(text_data)} characters (gzip-compressed) to {full_path}'
-        )
+        logger.info(f'Wrote {len(text_data)} characters (gzip-compressed) to {full_path}')
     else:
         # Text write mode (uncompressed)
         content_len = len(content or '')
@@ -110,17 +107,17 @@ def store_backup(content: Union[str, bytes], rel_path: str, config: Dict, is_bin
     return rel_path
 
 
-def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Union[str, bytes]:
+def read_backup(storage_ref: str, config: dict, is_binary: bool = False) -> str | bytes:
     """Read a stored backup from the filesystem storage backend.
-    
+
     Args:
         storage_ref: Relative path identifier of backup.
         config: Storage configuration containing ``base_path`` or ``path``.
         is_binary: True if backup is binary, False if text (default).
-    
+
     Returns:
         str (text backup, UTF-8 decoded) or bytes (binary backup).
-    
+
     For text backups the function automatically detects whether the file was
     stored with gzip compression (by checking for a ``.gz`` companion file)
     and decompresses transparently.
@@ -149,16 +146,14 @@ def read_backup(storage_ref: str, config: Dict, is_binary: bool = False) -> Unio
     if os.path.exists(gz_path):
         with gzip.open(gz_path, 'rb') as handle:
             data = handle.read().decode('utf-8')
-        logger.info(
-            f'Read {len(data)} characters (gzip-decompressed) from {gz_path}'
-        )
+        logger.info(f'Read {len(data)} characters (gzip-decompressed) from {gz_path}')
         return data
 
     if not os.path.exists(full_path):
         logger.error(f'Backup not found at {full_path} (also checked {gz_path})')
         raise FileNotFoundError(f'backup not found at {full_path}')
 
-    with open(full_path, 'r', encoding='utf-8') as handle:
+    with open(full_path, encoding='utf-8') as handle:
         data = handle.read()
     logger.info(f'Read {len(data)} characters from {full_path}')
     return data
