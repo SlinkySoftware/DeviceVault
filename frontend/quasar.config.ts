@@ -25,7 +25,7 @@ export default defineConfig(() => ({
     host: '0.0.0.0',
     open: false,
     allowedHosts: true,
-    proxy: Object.fromEntries(['/api', '/admin', '/static'].map((prefix) => [prefix, { target: apiTarget }])),
+    proxy: Object.fromEntries(['/api', '/static'].map((prefix) => [prefix, { target: apiTarget }])),
   },
 
   framework: {

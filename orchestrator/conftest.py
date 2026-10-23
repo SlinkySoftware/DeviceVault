@@ -1,6 +1,7 @@
 import uuid
 
 import pytest
+from rest_framework.test import APIClient
 
 from devicevault_protocol import signing
 from devicevault_protocol.crypto import ecies
@@ -102,3 +103,60 @@ def approved_collector(db):
         return workers.approve(worker, role='collector', collection_groups=list(groups))
 
     return make
+
+
+# --- users and access -----------------------------------------------------------
+
+
+@pytest.fixture
+def make_user(db):
+    """Create a user. ``global_admin`` adds it to Administrators; ``grants`` maps device groups to flags.
+
+    Grants go to a user group of the user's own, and flags pull in what they need (``download`` adds
+    ``view_contents`` and ``view``).
+    """
+    from django.contrib.auth.models import User
+
+    from accounts.access import administrators_group
+    from accounts.models import REQUIRES, DeviceGroupGrant, UserGroup, UserGroupMembership
+
+    def implied(flags):
+        held = set(flags) | {'view'}
+        while True:
+            more = held | {need for flag in held for need in REQUIRES[flag]}
+            if more == held:
+                return held
+            held = more
+
+    def make(username, *, global_admin=False, grants=None, password='x', **fields):
+        user = User.objects.create_user(username, password=password, **fields)
+        if global_admin:
+            UserGroupMembership.objects.create(user=user, group=administrators_group())
+        if grants:
+            group = UserGroup.objects.create(name=f'{username} access')
+            UserGroupMembership.objects.create(user=user, group=group)
+            for device_group, flags in grants.items():
+                DeviceGroupGrant.objects.create(
+                    user_group=group, device_group=device_group, **dict.fromkeys(implied(flags), True)
+                )
+        return user
+
+    return make
+
+
+@pytest.fixture
+def client_for(db):
+    """An API client signed in (with a session) as ``user``."""
+
+    def make(user):
+        client = APIClient()
+        client.force_login(user)
+        return client
+
+    return make
+
+
+@pytest.fixture
+def admin_client(make_user, client_for):
+    """An API client signed in as a global administrator."""
+    return client_for(make_user('admin', global_admin=True))

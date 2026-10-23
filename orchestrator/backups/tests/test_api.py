@@ -1,29 +1,24 @@
 import pytest
-from django.contrib.auth.models import User
 from django.utils import timezone
-from rest_framework.test import APIClient
 
+from audit.models import AuditLog
 from backups.models import BackupJob
-from devices.models import DeviceGroupDjangoPermissions
-
-
-def client_for(user):
-    client = APIClient()
-    client.force_authenticate(user)
-    return client
-
-
-def member(setup, *actions):
-    user = User.objects.create_user('-'.join(('member', *actions)), password='x')
-    link = DeviceGroupDjangoPermissions.ensure_for_group(setup['device'].device_group)
-    for action in actions:
-        user.user_permissions.add(getattr(link, f'perm_{action}'))
-    return client_for(User.objects.get(pk=user.pk))  # fresh permission cache
 
 
 @pytest.fixture
-def admin(db):
-    return client_for(User.objects.create_user('admin', password='x', is_staff=True))
+def member(setup, make_user, client_for):
+    """A client for a user holding ``flags`` on the device's group."""
+
+    def make(*flags):
+        user = make_user('-'.join(('member', *flags)), grants={setup['device'].device_group: flags})
+        return client_for(user)
+
+    return make
+
+
+@pytest.fixture
+def admin(admin_client):
+    return admin_client
 
 
 def test_backup_now_queues_a_job_once(setup, broker, admin):
@@ -37,11 +32,13 @@ def test_backup_now_queues_a_job_once(setup, broker, admin):
     assert again.json()['job']['id'] == first.json()['job']['id']
 
 
-def test_backup_now_needs_the_group_permission(setup, broker):
+def test_backup_now_needs_the_group_permission(setup, broker, member):
     url = f'/api/devices/{setup["device"].id}/backup_now/'
 
-    assert member(setup, 'view').post(url).status_code == 403
-    assert member(setup, 'view', 'backup_now').post(url).status_code == 202
+    assert member('view').post(url).status_code == 403
+    assert member('backup_now').post(url).status_code == 202
+    assert AuditLog.objects.filter(action='backup.start', actor_name='member-backup_now').exists()
+    assert AuditLog.objects.filter(action='access.denied', actor_name='member-view').exists()
 
 
 def test_backup_now_explains_misconfigured_devices(setup, broker, admin):
@@ -54,21 +51,64 @@ def test_backup_now_explains_misconfigured_devices(setup, broker, admin):
     assert 'no storage target' in reply.json()['error']
 
 
-def test_job_history_needs_view_backups(setup, broker):
+def test_job_history_needs_view(setup, broker, member, make_user, client_for):
     BackupJob.objects.create(device=setup['device'], storage_target=setup['target'], driver='noop')
 
-    assert member(setup, 'view').get('/api/backups/').json()['results'] == []
-    [job] = member(setup, 'view_backups').get(f'/api/backups/?device={setup["device"].id}').json()['results']
+    assert client_for(make_user('outsider')).get('/api/backups/').json()['results'] == []
+    [job] = member('view').get(f'/api/backups/?device={setup["device"].id}').json()['results']
     assert job['device_name'] == 'Edge 01'
 
 
-def test_content_is_served_as_a_download(setup, broker, admin, monkeypatch):
+@pytest.fixture
+def stored(setup, monkeypatch):
     job = BackupJob.objects.create(
         device=setup['device'], storage_target=setup['target'], driver='noop', state=BackupJob.STORED
     )
     monkeypatch.setattr('backups.api.read_content', lambda j: b'hostname edge-01\n')
+    return job
 
-    reply = admin.get(f'/api/backups/{job.id}/content/')
+
+def test_contents_need_view_contents_and_downloads_need_download(stored, member):
+    content, download = f'/api/backups/{stored.id}/content/', f'/api/backups/{stored.id}/download/'
+    viewer, reader, downloader = member('view'), member('view_contents'), member('download')
+
+    assert viewer.get(content).status_code == 403
+    assert viewer.get(download).status_code == 403
+    assert reader.get(content).status_code == 200
+    assert reader.get(download).status_code == 403
+    reply = downloader.get(download)
+    assert reply.status_code == 200 and reply['Content-Disposition'].startswith('attachment')
+
+    audited = AuditLog.objects.filter(device_group=stored.device.device_group)
+    assert sorted(audited.values_list('action', flat=True)) == ['backup.download', 'backup.view']
+    assert audited.get(action='backup.view').details['job'] == str(stored.id)
+
+
+def test_compare_needs_view_contents_and_one_device(stored, member, setup):
+    other = BackupJob.objects.create(
+        device=setup['device'], storage_target=setup['target'], driver='noop', state=BackupJob.STORED
+    )
+    url = f'/api/backups/compare/?a={stored.id}&b={other.id}'
+
+    assert member('view').get(url).status_code == 403
+    reply = member('view_contents').get(url)
+    assert reply.status_code == 200
+    assert reply.json()['a']['content'] == 'hostname edge-01\n'
+    assert AuditLog.objects.filter(action='backup.diff').count() == 1
+
+
+def test_backups_of_hidden_devices_are_not_found(stored, make_user, client_for, setup):
+    from devices.models import DeviceGroup
+
+    elsewhere = client_for(make_user('elsewhere', grants={DeviceGroup.objects.create(name='Other'): ['admin']}))
+
+    assert elsewhere.get(f'/api/backups/{stored.id}/').status_code == 404
+    assert elsewhere.get(f'/api/backups/{stored.id}/content/').status_code == 404
+    assert elsewhere.get(f'/api/devices/{setup["device"].id}/').status_code == 404
+
+
+def test_content_is_served_as_text(stored, admin):
+    reply = admin.get(f'/api/backups/{stored.id}/content/')
 
     assert reply.status_code == 200
     assert reply.content == b'hostname edge-01\n'

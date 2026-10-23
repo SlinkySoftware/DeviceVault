@@ -15,45 +15,40 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
-"""
-Audit Logging Model
-Tracks all user actions and changes for compliance, security, and debugging.
-"""
+"""Audit log: who did what, from where, and whether it was allowed."""
 
 from django.contrib.auth.models import User
 from django.db import models
 
 
 class AuditLog(models.Model):
-    """
-    AuditLog Model: Records all user actions and changes in the system
+    """One recorded action. Written through ``audit.log.record``.
 
-    Fields:
-        - created_at (DateTimeField): When the action occurred
-        - actor (ForeignKey): User who performed the action
-        - action (CharField): Action type (create, update, delete, login, etc.)
-        - resource (CharField): Resource affected (Device, Backup, Schedule, etc.)
-        - details (JSONField): Additional context data about the change
-        - label_scope (JSONField): Labels related to the resource (for audit filtering)
-
-    Usage:
-        Every significant action is logged for:
-        - Compliance reporting
-        - Security auditing
-        - Debugging issues
-        - Tracking who made what changes and when
-
-    Action Examples:
-        - create_device: New device was created
-        - update_device: Device was modified
-        - delete_device: Device was removed
-        - execute_backup: Backup job ran
-        - toggle_schedule: Schedule was enabled/disabled
+    ``actor_name`` is a snapshot, so failed sign-ins by unknown names and the
+    actions of deleted users stay readable. ``device_group`` is set for actions
+    on a device group's devices and backups.
     """
 
-    created_at = models.DateTimeField(auto_now_add=True, help_text='Timestamp of when action occurred')
-    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, help_text='User who performed the action')
-    action = models.CharField(max_length=128, help_text='Type of action (create, update, delete, etc.)')
-    resource = models.CharField(max_length=128, help_text='Type of resource affected (Device, Backup, etc.)')
-    details = models.JSONField(default=dict, help_text='Additional context: changed fields, old/new values, etc.')
-    label_scope = models.JSONField(default=list, help_text='Labels of affected resource for access control filtering')
+    SUCCESS = 'success'
+    FAILURE = 'failure'
+    DENIED = 'denied'
+    OUTCOME_CHOICES = [(SUCCESS, 'Success'), (FAILURE, 'Failure'), (DENIED, 'Denied')]
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    actor_name = models.CharField(max_length=150, blank=True)
+    action = models.CharField(max_length=128, db_index=True, help_text='e.g. auth.login, user.update, backup.view')
+    resource = models.CharField(max_length=128, blank=True, help_text='What was acted on, e.g. a user or backup id')
+    outcome = models.CharField(max_length=16, choices=OUTCOME_CHOICES, default=SUCCESS)
+    details = models.JSONField(default=dict, blank=True, help_text='Context, such as before and after values')
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True)
+    device_group = models.ForeignKey(
+        'devices.DeviceGroup', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
+    )
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'{self.created_at:%Y-%m-%d %H:%M:%S} {self.actor_name or "-"} {self.action} {self.outcome}'

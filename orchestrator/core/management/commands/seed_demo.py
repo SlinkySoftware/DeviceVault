@@ -17,6 +17,7 @@
 
 from django.core.management.base import BaseCommand
 
+from accounts.models import FLAGS, DeviceGroupGrant, UserGroup
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
 from monitoring.models import FlowerEndpoint
@@ -208,6 +209,23 @@ def create_sample_data():
         created_groups['Access Layer'].device_set.set(access_devices)
 
     print('✓ Assigned devices to groups')
+
+    # User groups with grants on the device groups (no members: add users from the UI).
+    access_groups = [
+        ('Network Operators', 'Run and inspect backups everywhere', ['view', 'backup_now', 'view_contents']),
+        ('Lab Admins', 'Manage the lab devices', ['admin']),
+        ('Auditors', 'Read backup contents', ['view', 'view_contents', 'download']),
+    ]
+    for name, description, flags in access_groups:
+        user_group, _ = UserGroup.objects.get_or_create(name=name, defaults={'description': description})
+        targets = [created_groups['Lab Equipment']] if name == 'Lab Admins' else created_groups.values()
+        for device_group in targets:
+            DeviceGroupGrant.objects.get_or_create(
+                user_group=user_group,
+                device_group=device_group,
+                defaults=dict.fromkeys(FLAGS if 'admin' in flags else flags, True),
+            )
+    print(f'✓ Created {len(access_groups)} user groups with device group grants')
 
     lab_devices.update(schedule=BackupSchedule.objects.get(name='Every 10 minutes'))
 

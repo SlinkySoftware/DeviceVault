@@ -5,9 +5,10 @@ import { http } from './client'
 import type {
   ActivityItem,
   ActivityWindow,
+  AuditEntry,
+  AuditQuery,
   AuthConfig,
-  AuthGroup,
-  AuthGroupWrite,
+  BackupComparison,
   BackupJob,
   BackupMethod,
   BackupNowResponse,
@@ -21,10 +22,8 @@ import type {
   Device,
   DeviceDetail,
   DeviceGroup,
-  DeviceGroupRole,
   DeviceType,
   DeviceWrite,
-  DjangoPermission,
   FlowerEndpoint,
   FlowerEndpointWrite,
   Id,
@@ -38,8 +37,10 @@ import type {
   User,
   UserCreate,
   UserDetails,
+  UserGroup,
+  UserGroupWrite,
   UserPreferences,
-  UserRoleAssignment,
+  UserUpdate,
   OrchestratorIdentity,
   Page,
   Worker,
@@ -138,10 +139,15 @@ export interface JobQuery {
 export const backupJobsApi = {
   list: async (query: JobQuery) => (await http.get<Page<BackupJob>>('/backups/', { params: query })).data,
   get: async (id: string) => (await http.get<BackupJob>(`/backups/${id}/`)).data,
+  /** Needs view_contents on the device's group. */
   contentText: async (id: string) =>
     (await http.get<string>(`/backups/${id}/content/`, { responseType: 'text' })).data,
-  contentBlob: async (id: string) =>
-    (await http.get<Blob>(`/backups/${id}/content/`, { responseType: 'blob' })).data,
+  /** Needs download on the device's group. */
+  download: async (id: string) =>
+    (await http.get<Blob>(`/backups/${id}/download/`, { responseType: 'blob' })).data,
+  /** Two text backups of one device; needs view_contents. */
+  compare: async (a: string, b: string) =>
+    (await http.get<BackupComparison>('/backups/compare/', { params: { a, b } })).data,
   logs: async (id: string) => (await http.get<{ logs: LogEntry[] }>(`/backups/${id}/logs/`)).data.logs,
 }
 
@@ -152,31 +158,27 @@ const users = resource<User, UserCreate>('/users/')
 export const usersApi = {
   list: users.list,
   create: users.create,
-  updateDetails: async (id: Id, body: UserDetails) =>
-    (await http.patch<User>(`/users/${id}/update_details/`, body)).data,
-}
-
-export const groupsApi = resource<AuthGroup, AuthGroupWrite>('/groups/')
-
-export const permissionsApi = {
-  list: async () => (await http.get<DjangoPermission[]>('/device-group-permissions/')).data,
-}
-
-export const deviceGroupRolesApi = {
-  list: async () => (await http.get<DeviceGroupRole[]>('/device-group-roles/')).data,
-}
-
-export const userRolesApi = {
-  listForUser: async (userId: Id) =>
-    (await http.get<UserRoleAssignment[]>('/user-device-group-roles/', { params: { user: userId } })).data,
-  assign: async (userId: Id, roleId: Id) =>
-    (await http.post<UserRoleAssignment>('/user-device-group-roles/', { user: userId, role: roleId })).data,
-  remove: async (assignmentId: Id) => {
-    await http.delete(`/user-device-group-roles/${assignmentId}/`)
+  remove: users.remove,
+  update: async (id: Id, body: Partial<UserUpdate>) => (await http.patch<User>(`/users/${id}/`, body)).data,
+  setPassword: async (id: Id, password: string) => {
+    await http.post(`/users/${id}/set_password/`, { password })
   },
 }
 
+const userGroups = resource<UserGroup, UserGroupWrite>('/user-groups/')
+
+// Groups are edited with PATCH, so members and grants are replaced explicitly.
+export const userGroupsApi = { ...userGroups, update: (id: Key, body: UserGroupWrite) => userGroups.patch(id, body) }
+
+export const auditLogApi = {
+  list: async (query: AuditQuery) => (await http.get<Page<AuditEntry>>('/audit-logs/', { params: query })).data,
+}
+
 export const authApi = {
+  /** Sets the CSRF cookie that unsafe requests echo. */
+  csrf: async () => {
+    await http.get('/auth/csrf/')
+  },
   login: async (username: string, password: string) =>
     (await http.post<LoginResponse>('/auth/login/', { username, password })).data,
   logout: async () => {

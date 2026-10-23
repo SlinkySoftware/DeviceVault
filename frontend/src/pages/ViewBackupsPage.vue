@@ -4,6 +4,7 @@
     <template #actions>
       <q-btn flat icon="arrow_back" label="Devices" :to="{ name: 'devices' }" />
       <q-btn
+        v-if="mayRead"
         color="primary"
         icon="compare_arrows"
         label="Compare Selected"
@@ -26,12 +27,12 @@
     >
       <template #body-cell-select-a="props">
         <q-td :props="props">
-          <q-radio v-if="comparable(props.row)" v-model="selectedA" :val="props.row.id" aria-label="Compare as A" />
+          <q-radio v-if="mayRead && comparable(props.row)" v-model="selectedA" :val="props.row.id" aria-label="Compare as A" />
         </q-td>
       </template>
       <template #body-cell-select-b="props">
         <q-td :props="props">
-          <q-radio v-if="comparable(props.row)" v-model="selectedB" :val="props.row.id" aria-label="Compare as B" />
+          <q-radio v-if="mayRead && comparable(props.row)" v-model="selectedB" :val="props.row.id" aria-label="Compare as B" />
         </q-td>
       </template>
       <template #body-cell-state="props">
@@ -54,11 +55,11 @@
       </template>
       <template #body-cell-actions="props">
         <q-td :props="props" class="no-wrap">
-          <q-btn v-if="comparable(props.row)" dense round flat color="primary" icon="visibility" aria-label="View" @click="view(props.row)">
+          <q-btn v-if="mayRead && comparable(props.row)" dense round flat color="primary" icon="visibility" aria-label="View" @click="view(props.row)">
             <q-tooltip>View</q-tooltip>
           </q-btn>
           <q-btn
-            v-if="props.row.state === 'stored'"
+            v-if="mayDownload && props.row.state === 'stored'"
             dense
             round
             flat
@@ -102,7 +103,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, type RouteLocationRaw } from 'vue-router'
 
 import { backupJobsApi, devicesApi } from '@/api/endpoints'
-import type { BackupJob } from '@/api/types'
+import type { BackupJob, GrantFlag } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
 import PageCard from '@/components/PageCard.vue'
 import StatusLabel from '@/components/StatusLabel.vue'
@@ -126,6 +127,11 @@ const pagination = ref<Pagination>({ page: 1, rowsPerPage: 20, rowsNumber: 0 })
 const selectedA = ref<string | null>(null)
 const selectedB = ref<string | null>(null)
 const downloading = reactive(new Set<string>())
+
+// What the user may do with this device's backups (hidden otherwise; the API enforces it).
+const permissions = ref<GrantFlag[]>([])
+const mayRead = computed(() => permissions.value.includes('view_contents'))
+const mayDownload = computed(() => permissions.value.includes('download'))
 
 const columns: QTableColumn<BackupJob>[] = [
   { name: 'select-a', label: 'A', field: 'id', align: 'center', style: 'width: 48px' },
@@ -191,11 +197,7 @@ async function download(job: BackupJob): Promise<void> {
   downloading.add(job.id)
   try {
     const base = `${safeFilename(deviceName.value)}_${filenameTimestamp(job.created_at)}`
-    if (job.is_binary) {
-      saveFile(await backupJobsApi.contentBlob(job.id), `${base}.bin`)
-    } else {
-      saveFile(await backupJobsApi.contentText(job.id), `${base}.txt`)
-    }
+    saveFile(await backupJobsApi.download(job.id), `${base}${job.is_binary ? '.bin' : '.txt'}`)
   } catch (error) {
     notify.error(error, 'Failed to download backup')
   } finally {
@@ -217,7 +219,9 @@ function openLogs(job: BackupJob): void {
 
 onMounted(async () => {
   try {
-    deviceName.value = (await devicesApi.get(deviceId.value)).name
+    const device = await devicesApi.get(deviceId.value)
+    deviceName.value = device.name
+    permissions.value = device.user_permissions
   } catch (error) {
     notify.error(error, 'Failed to load device')
   }

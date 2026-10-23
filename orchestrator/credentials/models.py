@@ -58,6 +58,12 @@ class Credential(models.Model):
         - name (CharField): Display name for credential set
         - credential_type (ForeignKey): Type of credential source
         - data (JSONField): Credential data as JSON (username/password, API keys, config, etc.)
+        - device_group (ForeignKey): Owning device group; none for a global credential
+
+    Ownership:
+        Global credentials are managed by global administrators and usable by every
+        group administrator. Owned credentials are managed and used only by the
+        administrators of their device group, and only by its devices.
 
     Methods:
         - __str__(): Returns the credential name
@@ -72,6 +78,14 @@ class Credential(models.Model):
     credential_type = models.ForeignKey(CredentialType, on_delete=models.PROTECT, help_text='Source of credentials')
     data = EncryptedJSONField(
         default=dict, help_text='Credential data: username/password dict or vault connection params (encrypted at rest)'
+    )
+    device_group = models.ForeignKey(
+        'devices.DeviceGroup',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='credentials',
+        help_text='Owning device group (none: a global credential)',
     )
 
     def __str__(self):

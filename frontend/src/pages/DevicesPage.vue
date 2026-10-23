@@ -93,19 +93,18 @@
       <template #body-cell-actions="props">
         <q-td :props="props" class="no-wrap">
           <q-btn
-            v-if="can(props.row, 'view') || can(props.row, 'modify')"
             dense
             round
             flat
             color="primary"
             icon="settings"
-            :aria-label="can(props.row, 'modify') ? 'Configure' : 'View'"
+            :aria-label="can(props.row, 'admin') ? 'Configure' : 'View'"
             :to="{ name: 'device-edit', params: { id: props.row.id } }"
           >
-            <q-tooltip>{{ can(props.row, 'modify') ? 'Configure' : 'View' }}</q-tooltip>
+            <q-tooltip>{{ can(props.row, 'admin') ? 'Configure' : 'View' }}</q-tooltip>
           </q-btn>
           <q-btn
-            v-if="can(props.row, 'view_backups')"
+            v-if="can(props.row, 'view')"
             dense
             round
             flat
@@ -140,7 +139,7 @@ import type { QTableColumn } from 'quasar'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { deviceGroupsApi, devicesApi, deviceTypesApi } from '@/api/endpoints'
-import type { Device, DeviceGroup, DevicePermission, DeviceType, Id } from '@/api/types'
+import type { Device, DeviceGroup, DeviceType, GrantFlag, Id } from '@/api/types'
 import PageCard from '@/components/PageCard.vue'
 import { useNotify } from '@/composables/useNotify'
 import { useAuthStore } from '@/stores/auth'
@@ -184,8 +183,8 @@ const columns: QTableColumn<Device>[] = [
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]
 
-const can = (device: Device, permission: DevicePermission) => device.user_permissions.includes(permission)
-const canAdd = computed(() => auth.isAdmin || deviceGroups.value.some((g) => g.user_permissions.includes('modify')))
+const can = (device: Device, flag: GrantFlag) => device.user_permissions.includes(flag)
+const canAdd = computed(() => auth.administersAny)
 
 const filteredDevices = computed(() => {
   const needle = (filters.name ?? '').trim().toLowerCase()

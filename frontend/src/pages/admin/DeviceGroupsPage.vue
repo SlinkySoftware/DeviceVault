@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-  <PageCard title="Device Groups" caption="Groups control who can see and manage devices; their roles are created automatically">
+  <PageCard title="Device Groups" caption="Sets of devices; user groups are granted permissions on them (Admin Settings > User Groups)">
     <template #actions>
       <q-btn color="primary" icon="add" label="Add Device Group" @click="crud.openCreate" />
     </template>
@@ -16,7 +16,9 @@
         <q-td :props="props">
           <RowActions
             @edit="crud.openEdit(props.row)"
-            @delete="crud.confirmRemove(props.row, 'Deletion is blocked while devices or role members remain.')"
+            :delete-disabled="props.row.device_count > 0"
+            delete-disabled-reason="Move or delete the group's devices first"
+            @delete="crud.confirmRemove(props.row, 'Its grants are removed too.')"
           />
         </q-td>
       </template>
@@ -58,6 +60,7 @@ const crud = useCrud<DeviceGroup, Form>({
 const columns: QTableColumn<DeviceGroup>[] = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'description', label: 'Description', field: 'description', align: 'left' },
+  { name: 'device_count', label: 'Devices', field: 'device_count', align: 'center', sortable: true },
   { name: 'created_at', label: 'Created', field: 'created_at', format: formatDate, align: 'left', sortable: true },
   { name: 'updated_at', label: 'Updated', field: 'updated_at', format: formatDate, align: 'left', sortable: true },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },

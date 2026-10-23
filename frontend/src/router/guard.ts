@@ -15,8 +15,9 @@ export function safeRedirect(value: unknown): string {
 
 /**
  * Route guard: public routes are open, everything else needs a session, and
- * admin areas need the matching role. The API enforces the same rules; this
- * only keeps users out of pages they cannot use.
+ * admin areas need the matching role. The session cookie is invisible to the
+ * app, so the first protected navigation asks the API who is signed in. The
+ * API enforces the same rules; this only keeps users out of pages they cannot use.
  */
 export function createAuthGuard(getAuth: () => AuthStore): NavigationGuardWithThis<undefined> {
   return async (to): Promise<true | RouteLocationRaw> => {
@@ -26,18 +27,15 @@ export function createAuthGuard(getAuth: () => AuthStore): NavigationGuardWithTh
       return to.name === 'login' && auth.isAuthenticated ? { path: safeRedirect(to.query.redirect) } : true
     }
     if (!auth.isAuthenticated) {
-      return { name: 'login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
-    }
-    if (!auth.user) {
       try {
         await auth.fetchUser()
       } catch {
         auth.clear()
-        return { name: 'login' }
+        return { name: 'login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
       }
     }
-    if (to.meta.requiresSuperuser && !auth.isSuperuser) return { name: 'dashboard' }
-    if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'dashboard' }
+    if (to.meta.requiresGlobalAdmin && !auth.isGlobalAdmin) return { name: 'dashboard' }
+    if (to.meta.requiresGroupAdmin && !auth.administersAny) return { name: 'dashboard' }
     return true
   }
 }

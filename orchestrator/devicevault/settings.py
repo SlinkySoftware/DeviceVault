@@ -36,15 +36,13 @@ ALLOWED_HOSTS = env_list('DV_ALLOWED_HOSTS', ['*'] if DEBUG else [])
 CSRF_TRUSTED_ORIGINS = env_list('DV_CSRF_TRUSTED_ORIGINS')
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
-    'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',
     'core',
+    'accounts',
     'devices',
     'backups',
     'credentials',
@@ -60,11 +58,11 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
+    'accounts.sessions.SessionTimeoutMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 if not DEBUG:
-    # Serves collected static files (admin, DRF) in the image; runserver does it in DEBUG.
+    # Serves collected static files (DRF) in the image; runserver does it in DEBUG.
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 ROOT_URLCONF = 'devicevault.urls'
 TEMPLATES = [
@@ -77,7 +75,6 @@ TEMPLATES = [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
             ]
         },
     }
@@ -135,12 +132,32 @@ STORAGES = {
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
+# Server-side sessions in the database (shared by every orchestrator node), used
+# by the UI and the API alike. See accounts.sessions for the timeouts.
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'  # sent on the redirect back from an identity provider
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_HTTPONLY = False  # the UI reads it and echoes it in X-CSRFToken
+DEVICEVAULT_SESSION_IDLE_MIN = env_int('DV_SESSION_IDLE_MIN', 60, minimum=1)
+DEVICEVAULT_SESSION_MAX_HOURS = env_int('DV_SESSION_MAX_HOURS', 12, minimum=1)
+SESSION_COOKIE_AGE = DEVICEVAULT_SESSION_MAX_HOURS * 3600
+DEVICEVAULT_LOGIN_MAX_FAILURES = env_int('DV_LOGIN_MAX_FAILURES', 5, minimum=1)
+DEVICEVAULT_LOGIN_LOCKOUT_MIN = env_int('DV_LOGIN_LOCKOUT_MIN', 15, minimum=1)
+
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 10}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['accounts.authentication.SessionAuthentication'],
+    # A safety net only: every view states its own permission classes (accounts.access).
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'EXCEPTION_HANDLER': 'api.exceptions.exception_handler',
 }
 
 LOGGING = {

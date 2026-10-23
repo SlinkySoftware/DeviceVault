@@ -5,17 +5,19 @@ leader renews the lease every tick and releases it on a clean shutdown, so a
 standby takes over at its next tick; if the leader dies instead, the lease
 expires first (``LEASE_SECONDS``). The leader also re-checks the lease before
 each due schedule, so a leader that stalled past its lease stops scheduling.
+The leader also prunes expired sign-in sessions, hourly.
 """
 
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.db import transaction
 from django.utils import timezone
 from redis import Redis
 
+from accounts.sessions import prune_expired
 from backups.jobs import JobError, create_job, expire_stale_jobs
 from backups.models import BackupJob
 from policies.models import BackupSchedule
@@ -24,6 +26,8 @@ logger = logging.getLogger('devicevault.scheduler')
 
 LEASE_KEY = 'dv:scheduler:leader'
 LEASE_SECONDS = 60
+SESSION_PRUNE_INTERVAL = timedelta(hours=1)
+_last_session_prune: datetime | None = None
 
 # Extend the lease only if we still hold it (compare-and-extend).
 _RENEW = """
@@ -88,9 +92,20 @@ def run_due_schedules(now: datetime | None = None, leading: Callable[[], bool] |
     return created
 
 
+def prune_sessions(now: datetime) -> bool:
+    """Delete expired sessions if the last prune was over an hour ago. True if it ran."""
+    global _last_session_prune
+    if _last_session_prune is not None and now - _last_session_prune < SESSION_PRUNE_INTERVAL:
+        return False
+    prune_expired()
+    _last_session_prune = now
+    return True
+
+
 def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> None:
     now = now or timezone.now()
     created = run_due_schedules(now, leading)
     expired = expire_stale_jobs(now)
+    prune_sessions(now)
     if created or expired:
         logger.info('scheduler_tick', extra={'jobs_created': created, 'jobs_expired': expired})

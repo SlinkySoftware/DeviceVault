@@ -32,7 +32,7 @@
         </q-item>
 
         <q-expansion-item
-          v-if="auth.isAdmin"
+          v-if="adminSections.length"
           icon="admin_panel_settings"
           label="Admin Settings"
           header-class="nav-section"
@@ -74,7 +74,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useThemeStore } from '@/stores/theme'
 
-import { ADMIN_SECTIONS, MAIN_LINKS } from './navigation'
+import { adminSectionsFor, MAIN_LINKS } from './navigation'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -84,7 +84,7 @@ const router = useRouter()
 const notify = useNotify()
 
 const drawerOpen = ref(false)
-const adminSections = computed(() => ADMIN_SECTIONS.filter((section) => !section.superuserOnly || auth.isSuperuser))
+const adminSections = computed(() => adminSectionsFor(auth.isGlobalAdmin, auth.administersAny))
 const onAdminRoute = computed(() => route.path.startsWith('/vaultadmin/'))
 
 async function logout(): Promise<void> {

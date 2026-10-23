@@ -1,19 +1,23 @@
 """API for Flower endpoints (administrators only) and the check nginx makes before proxying one."""
 
 import re
+from importlib import import_module
 from urllib.parse import urlsplit
 
+from django.conf import settings
+from django.contrib.auth import SESSION_KEY
 from django.contrib.auth.models import User
 from django.core import signing
 from django.utils.crypto import constant_time_compare, salted_hmac
 from rest_framework import decorators, permissions, response, serializers, status, viewsets
 
-from api.permissions import IsAdmin, is_admin
+from accounts.access import IsGlobalAdmin, is_global_admin
+from accounts.sessions import expiry_reason
 from monitoring.models import SLUG_PATTERN, FlowerEndpoint
 
-# The UI gets this cookie just before opening a proxied Flower, since a new tab
-# carries no API token. It is scoped to the endpoint's path and bound to the
-# API token, so signing out ends it too.
+# The UI gets this cookie just before opening a proxied Flower. It is scoped to
+# the endpoint's path and bound to the user's session (whose cookie the browser
+# also sends), so signing out or the session timing out ends it too.
 SESSION_COOKIE = 'dv_flower'
 SESSION_SALT = 'devicevault.monitoring.flower'
 SESSION_SECONDS = 8 * 3600
@@ -43,7 +47,7 @@ class FlowerEndpointSerializer(serializers.ModelSerializer):
         return attrs
 
 
-def _token_digest(key: str) -> str:
+def _session_digest(key: str) -> str:
     return salted_hmac(SESSION_SALT, key, algorithm='sha256').hexdigest()
 
 
@@ -55,18 +59,18 @@ class FlowerEndpointViewSet(viewsets.ModelViewSet):
 
     queryset = FlowerEndpoint.objects.all()
     serializer_class = FlowerEndpointSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsGlobalAdmin]
 
     @decorators.action(detail=True, methods=['post'])
     def session(self, request, pk=None):
         endpoint = self.get_object()
         if not endpoint.proxied:
             return response.Response({'error': 'This endpoint is not proxied'}, status=status.HTTP_400_BAD_REQUEST)
-        token = getattr(request.auth, 'key', None)
-        if not token:
+        session_key = request.session.session_key
+        if not session_key:
             return response.Response({'error': 'Sign in through the UI first'}, status=status.HTTP_400_BAD_REQUEST)
         value = signing.dumps(
-            {'user': request.user.pk, 'slug': endpoint.slug, 'token': _token_digest(token)}, salt=SESSION_SALT
+            {'user': request.user.pk, 'slug': endpoint.slug, 'session': _session_digest(session_key)}, salt=SESSION_SALT
         )
         resp = response.Response({'link': endpoint.link})
         resp.set_cookie(
@@ -82,18 +86,21 @@ class FlowerEndpointViewSet(viewsets.ModelViewSet):
 
 
 def _session_user(request, slug: str) -> User | None:
-    """The administrator whose cookie for ``slug`` is on this request, if still valid."""
+    """The global administrator whose cookie for ``slug`` is on this request, while their session lasts."""
     try:
         claims = signing.loads(request.COOKIES.get(SESSION_COOKIE, ''), salt=SESSION_SALT, max_age=SESSION_SECONDS)
     except signing.BadSignature:  # includes expiry
         return None
-    if claims.get('slug') != slug:
+    session_key = request.COOKIES.get(settings.SESSION_COOKIE_NAME, '')
+    if claims.get('slug') != slug or not session_key:
         return None
-    user = User.objects.filter(pk=claims.get('user'), is_active=True).select_related('auth_token').first()
-    token = getattr(user, 'auth_token', None) if user else None
-    if not token or not constant_time_compare(_token_digest(token.key), claims.get('token', '')):
+    if not constant_time_compare(_session_digest(session_key), claims.get('session', '')):
         return None
-    return user if is_admin(user) else None
+    session = import_module(settings.SESSION_ENGINE).SessionStore(session_key=session_key)
+    if session.get(SESSION_KEY) != str(claims.get('user')) or expiry_reason(session):
+        return None
+    user = User.objects.filter(pk=claims.get('user'), is_active=True).first()
+    return user if is_global_admin(user) else None
 
 
 @decorators.api_view(['GET'])

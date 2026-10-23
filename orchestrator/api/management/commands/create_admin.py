@@ -19,13 +19,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
-from rest_framework.authtoken.models import Token
+from django.db import transaction
 
+from accounts.access import active_global_admins, administrators_group
+from accounts.models import UserGroupMembership
 from devicevault_protocol.env import env_str
 
 
 class Command(BaseCommand):
-    help = 'Create the bootstrap admin user if it does not exist (DV_ADMIN_USERNAME / DV_ADMIN_PASSWORD)'
+    help = (
+        'Create the built-in Administrators group, and the bootstrap admin user in it if that user does not exist '
+        '(DV_ADMIN_USERNAME / DV_ADMIN_PASSWORD). An existing bootstrap user is added to Administrators only '
+        'while there is no active global administrator, so it cannot be locked out.'
+    )
 
     def add_arguments(self, parser):
         parser.add_argument('--username', type=str, help='Admin username (default: DV_ADMIN_USERNAME or admin)')
@@ -37,12 +43,21 @@ class Command(BaseCommand):
         password = options['password'] or env_str('DV_ADMIN_PASSWORD')
         email = options['email'] or env_str('DV_ADMIN_EMAIL', '')
 
-        if User.objects.filter(username=username).exists():
-            self.stdout.write(f'Admin user "{username}" already exists')
+        administrators = administrators_group()
+        existing = User.objects.filter(username=username).first()
+        if existing is not None:
+            if not active_global_admins().exists():
+                existing.is_active = True
+                existing.save(update_fields=['is_active'])
+                UserGroupMembership.objects.get_or_create(user=existing, group=administrators)
+                self.stdout.write(self.style.WARNING(f'No active global administrator: added "{username}" to them'))
+            else:
+                self.stdout.write(f'Admin user "{username}" already exists')
             return
         if not password:
             raise CommandError('Set DV_ADMIN_PASSWORD (or pass --password) to create the bootstrap admin user')
 
-        user = User.objects.create_superuser(username, email, password)
-        Token.objects.get_or_create(user=user)
+        with transaction.atomic():
+            user = User.objects.create_user(username, email, password)
+            UserGroupMembership.objects.create(user=user, group=administrators)
         self.stdout.write(self.style.SUCCESS(f'Created admin user "{username}"'))

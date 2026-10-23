@@ -1,4 +1,4 @@
-"""API for storage targets and the storage drivers workers offer (administrators only)."""
+"""API for storage targets and the storage drivers workers offer (global administrators only)."""
 
 from typing import Any
 
@@ -6,7 +6,7 @@ from django.db import transaction
 from django.db.models import Count
 from rest_framework import decorators, response, serializers, status, viewsets
 
-from api.permissions import IsAdmin, IsAdminOrReadOnly, is_admin
+from accounts.access import IsGlobalAdmin, IsGlobalAdminOrReadOnly, is_global_admin
 from api.serializers import driver_param_errors
 from core import workers as registry
 from core.models import Worker
@@ -129,7 +129,7 @@ class StorageTargetSerializer(serializers.ModelSerializer):
 
 
 class StorageTargetSummarySerializer(serializers.ModelSerializer):
-    """What non-administrators see: enough to choose a target for a device."""
+    """What users other than global administrators see: enough to choose a target for a device."""
 
     class Meta:
         model = StorageTarget
@@ -138,15 +138,15 @@ class StorageTargetSummarySerializer(serializers.ModelSerializer):
 
 
 class StorageTargetViewSet(viewsets.ModelViewSet):
-    """Storage targets, administered by admins and readable (as a summary) by everyone.
+    """Storage targets, administered by global admins and readable (as a summary) by everyone.
 
     ``POST /api/storage-targets/{id}/check/`` asks a worker to test the settings.
     """
 
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
 
     def get_serializer_class(self):
-        return StorageTargetSerializer if is_admin(self.request.user) else StorageTargetSummarySerializer
+        return StorageTargetSerializer if is_global_admin(self.request.user) else StorageTargetSummarySerializer
 
     def get_queryset(self):
         return StorageTarget.objects.prefetch_related('workers').annotate(
@@ -164,7 +164,7 @@ class StorageTargetViewSet(viewsets.ModelViewSet):
         target.delete()
         return response.Response(status=status.HTTP_204_NO_CONTENT)
 
-    @decorators.action(detail=True, methods=['post'], permission_classes=[IsAdmin])
+    @decorators.action(detail=True, methods=['post'], permission_classes=[IsGlobalAdmin])
     def check(self, request, pk=None):
         try:
             return response.Response({'ok': True, **check_target(self.get_object())})
@@ -175,7 +175,7 @@ class StorageTargetViewSet(viewsets.ModelViewSet):
 class StorageDriverViewSet(viewsets.ViewSet):
     """Storage drivers offered by approved storage workers."""
 
-    permission_classes = [IsAdmin]
+    permission_classes = [IsGlobalAdmin]
 
     def list(self, request):
         return response.Response(list(registry.storage_driver_catalogue().values()))
