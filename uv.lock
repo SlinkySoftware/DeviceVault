@@ -399,6 +399,7 @@ dependencies = [
     { name = "kombu" },
     { name = "netmiko" },
     { name = "paramiko" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "python-json-logger" },
 ]
@@ -412,6 +413,7 @@ requires-dist = [
     { name = "kombu", specifier = ">=5.6.2,<5.7" },
     { name = "netmiko", specifier = ">=4.6,<5" },
     { name = "paramiko", specifier = ">=4" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6,<3.4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "python-json-logger", specifier = ">=4" },
 ]

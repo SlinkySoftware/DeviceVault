@@ -45,7 +45,7 @@
       <q-input
         v-else
         :model-value="inputValue(field)"
-        :type="field.secret ? 'password' : field.kind === 'string' ? 'text' : 'number'"
+        :type="inputType(field)"
         :autocomplete="field.secret ? 'new-password' : undefined"
         :label="field.label"
         :hint="hint(field)"
@@ -93,6 +93,12 @@ const value = (field: SchemaField) => model.value[field.name] ?? field.default
 
 const inputValue = (field: SchemaField) => model.value[field.name] as string | number | null | undefined
 const listValue = (field: SchemaField) => (value(field) as string[] | undefined) ?? []
+
+const inputType = (field: SchemaField) => {
+  if (field.secret) return 'password'
+  if (field.kind !== 'string') return 'number'
+  return field.multiline ? 'textarea' : 'text'
+}
 
 const hint = (field: SchemaField) => {
   if (field.secret && props.secretsSet.includes(field.name) && !model.value[field.name]) {

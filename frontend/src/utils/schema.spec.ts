@@ -71,3 +71,19 @@ describe('secret settings', () => {
     ])
   })
 })
+
+describe('multi-line settings', () => {
+  it('marks optional multiline strings', () => {
+    const { fields } = schemaFields({
+      properties: {
+        ca_certificate: { anyOf: [{ type: 'string' }, { type: 'null' }], format: 'multiline', default: null },
+        host: { type: 'string' },
+      },
+    })
+
+    expect(fields.map((f) => [f.name, f.kind, f.multiline])).toEqual([
+      ['ca_certificate', 'string', true],
+      ['host', 'string', false],
+    ])
+  })
+})

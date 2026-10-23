@@ -1,12 +1,22 @@
 import gzip
 import io
+import os
+import uuid
 
 import pytest
 from botocore.response import StreamingBody
 from botocore.stub import Stubber
+from psycopg import errors as pg_errors
 from pydantic import ValidationError
 
-from devicevault_worker.storage.drivers import BackupName, StorageError, StorageUnavailable, get_driver, list_drivers
+from devicevault_worker.storage.drivers import (
+    BackupName,
+    StorageError,
+    StorageUnavailable,
+    get_driver,
+    list_drivers,
+    postgresql,
+)
 from devicevault_worker.storage.drivers.s3 import S3Driver
 
 NAME = BackupName(device_key='7-edge', job_id='j1', timestamp='20261023T000000Z', extension='.cfg')
@@ -20,8 +30,8 @@ def driver_and_params(key, **settings):
 def test_bundled_drivers_describe_themselves():
     described = {driver.key: driver.describe() for driver in list_drivers()}
 
-    assert set(described) >= {'filesystem', 'git', 's3'}
-    assert [described[k]['shareable'] for k in ('filesystem', 'git', 's3')] == [False, False, True]
+    assert set(described) >= {'filesystem', 'git', 'postgresql', 's3'}
+    assert [described[k]['shareable'] for k in ('filesystem', 'git', 'postgresql', 's3')] == [False, False, True, True]
     secret = described['s3']['params_schema']['properties']['secret_access_key']['anyOf'][0]
     assert secret.get('writeOnly') and secret.get('format') == 'password'
 
@@ -124,3 +134,121 @@ def test_s3_secret_is_not_in_the_params_repr():
     _, params = driver_and_params('s3', bucket='backups', secret_access_key='very-secret')
 
     assert 'very-secret' not in repr(params) and 'very-secret' not in params.model_dump_json()
+
+
+# --- PostgreSQL ------------------------------------------------------------------------
+
+PG = {'host': 'db.example.com', 'database': 'backups', 'username': 'dv'}
+
+
+@pytest.mark.parametrize(
+    ('tls', 'validation', 'sslmode'),
+    [
+        ('off', 'none', 'disable'),
+        ('preferred', 'none', 'prefer'),
+        ('forced', 'none', 'require'),
+        ('forced', 'ca', 'verify-ca'),
+        ('forced', 'full', 'verify-full'),
+    ],
+)
+def test_postgres_tls_settings_map_to_sslmode(tls, validation, sslmode):
+    _, params = driver_and_params(
+        'postgresql', **PG, tls=tls, certificate_validation=validation, ca_certificate='-----BEGIN CERTIFICATE-----'
+    )
+
+    assert params.sslmode == sslmode
+
+
+@pytest.mark.parametrize(
+    'settings',
+    [
+        {'tls': 'preferred', 'certificate_validation': 'full'},  # validation needs TLS forced
+        {'tls': 'forced', 'certificate_validation': 'ca'},  # CA-only validation needs a CA
+        {'db_schema': 'public; DROP TABLE x'},
+        {'port': 0},
+    ],
+)
+def test_postgres_rejects_bad_settings(settings):
+    with pytest.raises(ValidationError):
+        driver_and_params('postgresql', **PG, **settings)
+
+
+def test_postgres_schema_marks_the_password_secret_and_the_ca_multiline():
+    properties = get_driver('postgresql').describe()['params_schema']['properties']
+
+    assert properties['password']['anyOf'][0].get('writeOnly')
+    assert properties['ca_certificate']['format'] == 'multiline'
+
+
+@pytest.mark.parametrize(
+    ('exc', 'error'),
+    [
+        (pg_errors.OperationalError('connection refused'), StorageUnavailable),
+        (pg_errors.QueryCanceled('statement timeout'), StorageUnavailable),
+        (pg_errors.InvalidPassword('password authentication failed'), StorageError),
+        (
+            pg_errors.OperationalError('connection failed: FATAL:  password authentication failed for user "dv"'),
+            StorageError,
+        ),
+        (pg_errors.OperationalError('connection failed: SSL error: certificate verify failed'), StorageError),
+        (pg_errors.OperationalError('server certificate for "db" does not match host name "10.0.0.1"'), StorageError),
+        (pg_errors.InvalidCatalogName('database "x" does not exist'), StorageError),
+        (pg_errors.InsufficientPrivilege('permission denied'), StorageError),
+    ],
+)
+def test_postgres_errors_are_classified(exc, error):
+    assert type(postgresql._error('store', exc)) is error
+
+
+@pytest.fixture
+def postgres():
+    """A real database, from DV_TEST_POSTGRES_HOST (and _PORT, _DB, _USER, _PASSWORD); skipped without one."""
+    host = os.environ.get('DV_TEST_POSTGRES_HOST')
+    if not host:
+        pytest.skip('set DV_TEST_POSTGRES_HOST to run against PostgreSQL')
+    schema = f'dv_test_{uuid.uuid4().hex[:8]}'
+    settings = {
+        'host': host,
+        'port': int(os.environ.get('DV_TEST_POSTGRES_PORT', '5432')),
+        'database': os.environ.get('DV_TEST_POSTGRES_DB', 'devicevault'),
+        'username': os.environ.get('DV_TEST_POSTGRES_USER', 'devicevault'),
+        'password': os.environ.get('DV_TEST_POSTGRES_PASSWORD', 'devicevault'),
+        'tls': 'off',
+    }
+    driver, params = driver_and_params('postgresql', **settings, db_schema=schema)
+    with driver.connect(driver_and_params('postgresql', **settings)[1], 'setup') as connection:
+        connection.execute(f'CREATE SCHEMA {schema}')
+    yield driver, params, settings
+    with driver.connect(driver_and_params('postgresql', **settings)[1], 'teardown') as connection:
+        connection.execute(f'DROP SCHEMA {schema} CASCADE')
+
+
+def test_postgres_roundtrip(postgres):
+    driver, params, _ = postgres
+    data = bytes(range(256)) * 10
+
+    assert 'no TLS' in driver.check(params)
+    ref = driver.store(data, NAME, params)
+    assert ref == '7-edge/20261023T000000Z-j1.cfg'
+    assert driver.store(data[::-1], NAME, params) == ref  # a retried job replaces its row
+    assert driver.read(ref, params) == data[::-1]
+    driver.delete(ref, params)
+    with pytest.raises(StorageError, match='not found'):
+        driver.read(ref, params)
+
+
+def test_postgres_without_create_table_needs_the_table(postgres):
+    driver, params, _ = postgres
+
+    with pytest.raises(StorageError, match='does not exist'):
+        driver.check(params.model_copy(update={'create_table': False}))
+
+
+def test_postgres_bad_password_is_permanent(postgres):
+    driver, _, settings = postgres
+    _, params = driver_and_params('postgresql', **{**settings, 'password': 'wrong'})
+
+    with pytest.raises(StorageError) as raised:
+        driver.check(params)
+
+    assert raised.type is StorageError

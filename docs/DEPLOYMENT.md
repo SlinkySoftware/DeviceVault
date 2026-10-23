@@ -121,10 +121,28 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
 - **S3 bucket** works with AWS S3 and S3-compatible stores (`endpoint_url`, path-style
   addressing). Several workers can serve one bucket, so a stopped worker doesn't stop
   backups. Leave the access key empty to use the worker's IAM role.
-- Secret settings (the S3 secret key) are never shown again; leave them empty to keep
+- **PostgreSQL database** stores one `bytea` row per backup in a database of its own,
+  independent of DeviceVault's database; define as many as you need. Several workers can
+  serve one target. Settings: host, port, database, user, password, schema (default
+  `public`), TLS (`off`, `preferred`, `forced`), certificate validation (`none`, `ca`,
+  `full`, which needs TLS forced) and an optional PEM CA certificate (empty means the
+  worker's system trust store, which only works with `full`). The driver creates the
+  table in that schema unless **Create table** is off, in which case a DBA creates it
+  first and the user needs only `SELECT, INSERT, UPDATE, DELETE`:
+
+  ```sql
+  CREATE TABLE <schema>.devicevault_backups (
+      ref text PRIMARY KEY,         -- <device_key>/<timestamp>-<job_id><ext>
+      content bytea NOT NULL,
+      stored_at timestamptz NOT NULL DEFAULT now()
+  );
+  ```
+
+  Workers connect with `application_name` `devicevault-worker <worker id>`.
+- Secret settings (the S3 secret key, database passwords) are never shown again; leave them empty to keep
   them.
 - A target that holds backups cannot be deleted, and its driver cannot change. Changing
-  where it writes (path, bucket, prefix) makes earlier backups unreadable unless their
+  where it writes (path, bucket, prefix, database) makes earlier backups unreadable unless their
   data moves too.
 
 ## 5. Flower
