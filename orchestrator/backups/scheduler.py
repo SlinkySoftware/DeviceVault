@@ -66,7 +66,7 @@ def run_due_schedules(now: datetime | None = None) -> int:
             continue
         with transaction.atomic():
             for device in schedule.devices.filter(enabled=True).select_related(
-                'collection_group', 'backup_location', 'credential'
+                'collection_group', 'storage_target', 'credential'
             ):
                 try:
                     _, was_created = create_job(device, trigger=BackupJob.TRIGGER_SCHEDULE, schedule=schedule)

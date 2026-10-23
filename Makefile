@@ -87,4 +87,4 @@ dev-seed:
 # Approve the dev stack's workers (they register as pending on first start).
 dev-approve:
 	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker 'collector-*' --role collector --all-groups
-	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker storage-1 --role storage --backends fs git
+	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker storage-1 --role storage --all-targets

@@ -1,19 +1,13 @@
-import pytest
+import uuid
 
-from devicevault_protocol.names import collection_queue_name, storage_backend_for, storage_queue_name
+from devicevault_protocol.names import collection_queue_name, storage_target_queue_name
 
 
 def test_collection_queue_name():
     assert collection_queue_name('dmz') == 'collector.group.dmz'
 
 
-@pytest.mark.parametrize(
-    ('location_type', 'expected'),
-    [('git', 'git'), ('Filesystem', 'fs'), ('fs', 'fs'), ('s3', None), ('', None), (None, None)],
-)
-def test_storage_backend_for(location_type, expected):
-    assert storage_backend_for(location_type) == expected
+def test_storage_target_queue_name():
+    target = uuid.UUID('6f1c2a7e-0000-4000-8000-000000000001')
 
-
-def test_storage_queue_name():
-    assert storage_queue_name('fs') == 'storage.fs'
+    assert storage_target_queue_name(target) == 'storage.target.6f1c2a7e-0000-4000-8000-000000000001'

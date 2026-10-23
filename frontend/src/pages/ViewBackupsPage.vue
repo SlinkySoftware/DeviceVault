@@ -136,7 +136,7 @@ const columns: QTableColumn<BackupJob>[] = [
   { name: 'type', label: 'Type', field: 'is_binary', format: (binary: boolean) => (binary ? 'Binary' : 'Text'), align: 'center' },
   { name: 'size', label: 'Size', field: 'size_bytes', format: formatBytes, align: 'right' },
   { name: 'duration', label: 'Took', field: 'duration_ms', format: formatDuration, align: 'right' },
-  { name: 'location', label: 'Location', field: 'location_name', align: 'left' },
+  { name: 'target', label: 'Stored in', field: 'storage_target_name', align: 'left' },
   { name: 'encrypted', label: 'Encrypted', field: 'encrypted', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]

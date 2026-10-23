@@ -55,3 +55,19 @@ describe('keepKnown', () => {
     expect(keepKnown({ port: 2222 }, null)).toEqual({})
   })
 })
+
+describe('secret settings', () => {
+  it('marks write-only and password fields as secret', () => {
+    const { fields } = schemaFields({
+      properties: {
+        key: { anyOf: [{ type: 'string', writeOnly: true, format: 'password' }, { type: 'null' }], default: null },
+        bucket: { type: 'string' },
+      },
+    })
+
+    expect(fields.map((f) => [f.name, f.secret])).toEqual([
+      ['key', true],
+      ['bucket', false],
+    ])
+  })
+})

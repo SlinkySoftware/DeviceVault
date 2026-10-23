@@ -16,10 +16,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from django.core.management.base import BaseCommand
+from storage.models import StorageTarget
 
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
-from locations.models import BackupLocation
 from policies.models import BackupSchedule, RetentionPolicy
 
 
@@ -61,15 +61,15 @@ def create_sample_data():
         Credential.objects.get_or_create(name=name, defaults={'credential_type': local_type, 'data': data})
     print(f'✓ Created {len(credentials)} credentials')
 
-    # Backup Locations
-    locations = [
-        # Paths are on the storage worker (the dev stack mounts a volume at /srv/devicevault).
-        ('Local Storage', 'fs', {'path': '/srv/devicevault/fs', 'compress': False}),
-        ('Local Git', 'git', {'path': '/srv/devicevault/git', 'branch': 'main'}),
+    # Storage targets (paths are relative to the storage worker's volume). Workers
+    # are assigned when they are approved (make dev-approve).
+    targets = [
+        ('Local Storage', 'filesystem', {'path': 'fs', 'compress': False}),
+        ('Local Git', 'git', {'path': 'git', 'branch': 'main'}),
     ]
-    for name, loc_type, config in locations:
-        BackupLocation.objects.get_or_create(name=name, defaults={'location_type': loc_type, 'config': config})
-    print(f'✓ Created {len(locations)} backup locations')
+    for name, driver, config in targets:
+        StorageTarget.objects.get_or_create(name=name, defaults={'driver': driver, 'config': config})
+    print(f'✓ Created {len(targets)} storage targets')
 
     # Retention Policies
     policies = [
@@ -130,7 +130,7 @@ def create_sample_data():
         aruba = Manufacturer.objects.get(name='Aruba')
 
         default_cred = Credential.objects.first()
-        default_location = BackupLocation.objects.first()
+        default_target = StorageTarget.objects.get(name='Local Storage')
         default_policy = RetentionPolicy.objects.first()
 
         # Production devices
@@ -162,7 +162,7 @@ def create_sample_data():
                     'backup_method': 'demo_config',
                     'driver_params': {'hostname': name.lower()},
                     'credential': default_cred,
-                    'backup_location': default_location,
+                    'storage_target': default_target,
                     'retention_policy': default_policy,
                     'enabled': True,
                 },
@@ -241,7 +241,7 @@ def create_sample_data():
     print('  - Manage backup schedules at http://localhost:9000/vaultadmin/backup-schedules')
     print('  - Configure device types at http://localhost:9000/vaultadmin/device-types')
     print('  - Set up credentials at http://localhost:9000/vaultadmin/credentials')
-    print('  - Configure backup locations at http://localhost:9000/vaultadmin/backup-locations')
+    print('  - Configure storage targets at http://localhost:9000/vaultadmin/storage-targets')
 
 
 class Command(BaseCommand):

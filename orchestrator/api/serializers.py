@@ -24,6 +24,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group, User
 from jsonschema import Draft202012Validator
 from rest_framework import serializers
+from storage.models import StorageTarget
 
 from api.permissions import is_admin
 from audit.models import AuditLog
@@ -43,7 +44,6 @@ from devices.models import (
     UserDeviceGroupRole,
 )
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
-from locations.models import BackupLocation
 from policies.models import BackupSchedule, RetentionPolicy, validate_cron
 
 
@@ -164,16 +164,6 @@ class AdminOnlyFieldsMixin:
         return data
 
 
-class BackupLocationSerializer(AdminOnlyFieldsMixin, serializers.ModelSerializer):
-    """Serializes BackupLocation model; config (paths, credentials) is admin-only."""
-
-    admin_only_fields = ('config',)
-
-    class Meta:
-        model = BackupLocation
-        fields = '__all__'
-
-
 class CredentialTypeSerializer(serializers.ModelSerializer):
     """Serializes CredentialType model for API responses"""
 
@@ -229,7 +219,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
-            'backup_location',
+            'storage_target',
             'schedule',
             'credential',
             'user_permissions',
@@ -654,7 +644,7 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
-            'backup_location',
+            'storage_target',
             'schedule',
             'credential',
             'user_permissions',
@@ -695,7 +685,7 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             'collection_group',
             'enabled',
             'retention_policy',
-            'backup_location',
+            'storage_target',
             'schedule',
             'credential',
         ]
@@ -736,6 +726,9 @@ class ThemeSettingsSerializer(serializers.ModelSerializer):
 class WorkerSerializer(serializers.ModelSerializer):
     """A registered worker, with its assignment and liveness."""
 
+    storage_targets = serializers.PrimaryKeyRelatedField(
+        queryset=StorageTarget.objects.all(), many=True, required=False
+    )
     is_online = serializers.SerializerMethodField()
     in_sync = serializers.SerializerMethodField()
     assigned_queues = serializers.SerializerMethodField()
@@ -754,7 +747,7 @@ class WorkerSerializer(serializers.ModelSerializer):
             'status',
             'role',
             'collection_groups',
-            'storage_backends',
+            'storage_targets',
             'fingerprint',
             'capabilities',
             'desired_version',
@@ -769,7 +762,7 @@ class WorkerSerializer(serializers.ModelSerializer):
             'last_seen_at',
             'is_online',
         ]
-        read_only_fields = [f for f in fields if f not in ('name', 'role', 'collection_groups', 'storage_backends')]
+        read_only_fields = [f for f in fields if f not in ('name', 'role', 'collection_groups', 'storage_targets')]
 
     def get_is_online(self, obj):
         return is_online(obj)
@@ -790,15 +783,14 @@ class WorkerSerializer(serializers.ModelSerializer):
         capabilities = getattr(self.instance, 'capabilities', {}) or {}
         if role == ROLE_COLLECTOR and not capabilities.get('collector_drivers'):
             raise serializers.ValidationError({'role': 'This worker offers no collector drivers.'})
-        if role == ROLE_STORAGE:
-            offered = set(capabilities.get('storage_backends') or [])
-            backends = set(attrs.get('storage_backends', getattr(self.instance, 'storage_backends', [])))
-            if not backends:
-                raise serializers.ValidationError({'storage_backends': 'Choose at least one storage backend.'})
-            if backends - offered:
-                raise serializers.ValidationError(
-                    {'storage_backends': f'Not offered by this worker: {", ".join(sorted(backends - offered))}'}
-                )
+        if role == ROLE_STORAGE and not capabilities.get('storage_drivers'):
+            raise serializers.ValidationError({'role': 'This worker offers no storage drivers.'})
+        if self.instance is not None and attrs.get('storage_targets'):
+            from core.workers import approval_target_problems
+
+            problems = approval_target_problems(self.instance, attrs['storage_targets'])
+            if problems:
+                raise serializers.ValidationError({'storage_targets': problems})
         return attrs
 
 
@@ -807,7 +799,9 @@ class WorkerApprovalSerializer(serializers.Serializer):
     collection_groups = serializers.PrimaryKeyRelatedField(
         queryset=CollectionGroup.objects.all(), many=True, required=False
     )
-    storage_backends = serializers.ListField(child=serializers.CharField(), required=False)
+    storage_targets = serializers.PrimaryKeyRelatedField(
+        queryset=StorageTarget.objects.all(), many=True, required=False
+    )
 
 
 def driver_param_errors(params: dict, schema: dict) -> list[str]:

@@ -14,6 +14,28 @@ def published(monkeypatch):
     return sent
 
 
+# Simplified versions of the schemas storage workers publish.
+STORAGE_SCHEMAS = {
+    'filesystem': {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {'path': {'type': 'string', 'minLength': 1}, 'compress': {'type': 'boolean'}},
+        'required': ['path'],
+    },
+    's3': {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'bucket': {'type': 'string'},
+            'secret_access_key': {
+                'anyOf': [{'type': 'string', 'writeOnly': True, 'format': 'password'}, {'type': 'null'}]
+            },
+        },
+        'required': ['bucket'],
+    },
+}
+
+
 class WorkerKeys:
     """A fake worker: identity plus a helper to sign events."""
 
@@ -23,7 +45,9 @@ class WorkerKeys:
         self.key = signing.generate_signing_key()
         self.encryption = ecies.generate_private_key()
 
-    def event(self, applied_version=0, drivers=('noop', 'binary_dummy'), backends=('fs', 'git'), **overrides):
+    def event(
+        self, applied_version=0, drivers=('noop', 'binary_dummy'), storage=('filesystem', 'git', 's3'), **overrides
+    ):
         payload = {
             'event': 'heartbeat' if applied_version else 'register',
             'worker_id': self.id,
@@ -44,7 +68,15 @@ class WorkerKeys:
                     }
                     for key in drivers
                 ],
-                'storage_backends': list(backends),
+                'storage_drivers': [
+                    {
+                        'key': key,
+                        'name': key.title(),
+                        'shareable': key == 's3',
+                        'params_schema': STORAGE_SCHEMAS.get(key),
+                    }
+                    for key in storage
+                ],
             },
             'applied_version': applied_version,
             'queues': [],

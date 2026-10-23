@@ -95,20 +95,37 @@ Then, in the UI under **Admin Settings > Workers**, check that the fingerprint
 matches and **Approve** the worker with a role:
 
 - **Collector**: choose the collection groups whose devices it backs up.
-- **Storage**: choose the storage backends it serves (`fs`, `git`).
+- **Storage**: optionally choose the storage targets it serves. Targets can also be
+  assigned later under **Admin Settings > Storage Targets**.
 
 The worker starts consuming within seconds. It pins the orchestrator key shown
 on the Workers page; check that the fingerprint in its `orchestrator_pinned`
 log line matches. To automate approval: `manage.py approve_worker <name>
---role collector --groups <queue id> ...`.
+--role collector --groups <queue id> ...` or `--role storage --targets <name> ...`.
 
 - Keep the `state` volume. Deleting it (or `identity.json`) resets the worker:
   it registers as a new, pending worker.
 - **Revoke** stops a worker consuming. **Forget** removes it; if it is still
   running it registers again as pending.
 
-Filesystem and git backup locations must point under `/srv/devicevault`, which
-is the worker's `storage` volume.
+### Storage targets
+
+Under **Admin Settings > Storage Targets**, create a target per place backups go:
+a storage driver offered by an approved storage worker, its settings (a form built
+from the driver's schema), and the workers that serve it. Each target has its own
+queue, `storage.target.<id>`. **Test** asks one of its workers to check the settings.
+
+- **Filesystem** and **Git repository** write to the worker's `storage` volume
+  (`/srv/devicevault`); their `path` is relative to it. Only one worker can serve
+  such a target.
+- **S3 bucket** works with AWS S3 and S3-compatible stores (`endpoint_url`, path-style
+  addressing). Several workers can serve one bucket, so a stopped worker doesn't stop
+  backups. Leave the access key empty to use the worker's IAM role.
+- Secret settings (the S3 secret key) are never shown again; leave them empty to keep
+  them.
+- A target that holds backups cannot be deleted, and its driver cannot change. Changing
+  where it writes (path, bucket, prefix) makes earlier backups unreadable unless their
+  data moves too.
 
 ## Configuration reference
 

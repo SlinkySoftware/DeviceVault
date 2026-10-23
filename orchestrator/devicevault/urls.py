@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework import routers
+from storage import api as storage_api
 
 from api import views
 from backups import api as backup_api
@@ -33,7 +34,8 @@ router.register(r'devices', views.DeviceViewSet)
 router.register(r'backups', backup_api.BackupJobViewSet, basename='backups')
 router.register(r'retention-policies', views.RetentionPolicyViewSet)
 router.register(r'backup-schedules', views.BackupScheduleViewSet)
-router.register(r'backup-locations', views.BackupLocationViewSet)
+router.register(r'storage-targets', storage_api.StorageTargetViewSet, basename='storage-targets')
+router.register(r'storage-drivers', storage_api.StorageDriverViewSet, basename='storage-drivers')
 router.register(r'credentials', views.CredentialViewSet)
 router.register(r'credential-types', views.CredentialTypeViewSet)
 router.register(r'groups', views.GroupViewSet)

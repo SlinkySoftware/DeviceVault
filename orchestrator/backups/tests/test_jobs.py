@@ -31,9 +31,9 @@ def test_a_job_is_dispatched_as_signed_tasks_for_collector_and_storage(
     task = verify_task(envelope, ORCHESTRATOR())
     assert task['job_id'] == str(job.id)
     assert task['device'] == {'id': setup['device'].id, 'name': 'Edge 01', 'address': '192.0.2.10'}
-    assert task['store']['queue'] == 'storage.fs'
+    assert task['store']['queue'] == f'storage.target.{setup["target"].id}'
     store = verify_task(task['store']['envelope'], ORCHESTRATOR())
-    assert store['config'] == {'path': '/srv'}
+    assert store['config'] == {'path': 'fs'} and store['target']['driver'] == 'filesystem'
     assert store['name']['device_key'] == f'{setup["device"].id}-edge-01'
 
 
@@ -49,7 +49,7 @@ def test_an_active_job_is_reused_instead_of_queueing_another(setup, broker, djan
     ('change', 'message'),
     [
         ({'collection_group': None}, 'no collection group'),
-        ({'backup_location': None}, 'no backup location'),
+        ({'storage_target': None}, 'no storage target'),
     ],
 )
 def test_devices_that_cannot_be_backed_up_are_refused(setup, broker, change, message):
@@ -60,12 +60,14 @@ def test_devices_that_cannot_be_backed_up_are_refused(setup, broker, change, mes
         create_job(setup['device'])
 
 
-def test_unsupported_location_types_are_refused(setup, broker):
-    location = setup['device'].backup_location
-    location.location_type = 's3'
-    location.save()
+def test_devices_need_workers_on_both_sides(setup, broker):
+    setup['target'].workers.clear()
 
-    with pytest.raises(JobError, match='unsupported type'):
+    with pytest.raises(JobError, match='has no approved storage worker'):
+        create_job(setup['device'])
+
+    setup['group'].workers.clear()
+    with pytest.raises(JobError, match='no approved collector'):
         create_job(setup['device'])
 
 

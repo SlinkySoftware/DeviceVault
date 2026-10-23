@@ -54,11 +54,11 @@ def _version() -> str:
 def capabilities() -> dict[str, Any]:
     """What this worker can do; the orchestrator builds its catalogues from these."""
     from devicevault_worker.drivers import list_drivers
-    from devicevault_worker.storage.tasks import STORAGE_BACKENDS
+    from devicevault_worker.storage import drivers as storage
 
     return {
         'collector_drivers': [driver.describe() for driver in list_drivers()],
-        'storage_backends': sorted(STORAGE_BACKENDS),
+        'storage_drivers': [driver.describe() for driver in storage.list_drivers()],
     }
 
 

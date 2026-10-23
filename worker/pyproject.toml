@@ -5,6 +5,7 @@ description = "DeviceVault collection and storage worker"
 requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
+    "boto3>=1.40",
     "celery[redis]>=5.6.3,<5.7",
     "devicevault-protocol",
     "gitpython>=3.1.45",

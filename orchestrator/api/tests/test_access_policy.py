@@ -1,10 +1,10 @@
 import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
+from storage.models import StorageTarget
 
 from credentials.models import Credential, CredentialType
 from devices.models import DeviceGroup, DeviceGroupRole, UserDeviceGroupRole
-from locations.models import BackupLocation
 
 
 def _client(user):
@@ -36,7 +36,7 @@ def user(member):
         '/api/collection-groups/',
         '/api/retention-policies/',
         '/api/backup-schedules/',
-        '/api/backup-locations/',
+        '/api/storage-targets/',
         '/api/credentials/',
         '/api/credential-types/',
     ],
@@ -80,11 +80,12 @@ def test_credential_secrets_are_admin_only(user, admin):
     assert as_admin['data'] == {'password': 'hunter2'}
 
 
-def test_location_config_is_admin_only(user, admin):
-    BackupLocation.objects.create(name='git', location_type='git', config={'url': 'https://u:secret@git'})
+def test_storage_target_settings_are_admin_only(user, admin):
+    StorageTarget.objects.create(name='bucket', driver='s3', config={'bucket': 'b', 'secret_access_key': 'sk'})
 
-    assert 'config' not in user.get('/api/backup-locations/').json()[0]
-    assert admin.get('/api/backup-locations/').json()[0]['config']['url'].endswith('@git')
+    as_user = user.get('/api/storage-targets/').json()[0]
+    assert set(as_user) == {'id', 'name', 'description', 'driver'}
+    assert admin.get('/api/storage-targets/').json()[0]['config']['bucket'] == 'b'
 
 
 def test_admin_assigns_roles_by_id_and_filters_by_user(admin, member):

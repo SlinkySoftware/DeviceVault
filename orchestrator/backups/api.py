@@ -28,7 +28,7 @@ def groups_with(user, permission: str):
 class BackupJobSerializer(serializers.ModelSerializer):
     device_name = serializers.CharField(source='device.name', read_only=True)
     requested_by_username = serializers.CharField(source='requested_by.username', read_only=True, default=None)
-    location_name = serializers.CharField(source='location.name', read_only=True, default=None)
+    storage_target_name = serializers.CharField(source='storage_target.name', read_only=True, default=None)
     duration_ms = serializers.IntegerField(read_only=True)
 
     class Meta:
@@ -44,8 +44,9 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'is_binary',
             'encrypted',
             'size_bytes',
-            'storage_backend',
-            'location_name',
+            'storage_driver',
+            'storage_target',
+            'storage_target_name',
             'collector',
             'storage_worker',
             'attempts',
@@ -79,7 +80,7 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = JobPagination
 
     def get_queryset(self):
-        jobs = BackupJob.objects.select_related('device', 'requested_by', 'location').filter(
+        jobs = BackupJob.objects.select_related('device', 'requested_by', 'storage_target').filter(
             device__device_group__in=groups_with(self.request.user, 'view_backups')
         )
         params = self.request.query_params

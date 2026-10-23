@@ -4,12 +4,11 @@
 import { useQuasar } from 'quasar'
 import { computed, onMounted, ref, type Ref } from 'vue'
 
-import type { ResourceApi } from '@/api/endpoints'
-import type { Id } from '@/api/types'
+import type { Key, ResourceApi } from '@/api/endpoints'
 
 import { useNotify } from './useNotify'
 
-export interface CrudOptions<T extends { id: Id }, F> {
+export interface CrudOptions<T extends { id: Key }, F> {
   api: Pick<ResourceApi<T, F>, 'list' | 'create' | 'update' | 'remove'>
   /** Singular, lower case: "device type". */
   noun: string
@@ -22,7 +21,7 @@ export interface CrudOptions<T extends { id: Id }, F> {
   immediate?: boolean
 }
 
-export function useCrud<T extends { id: Id }, F extends object>(options: CrudOptions<T, F>) {
+export function useCrud<T extends { id: Key }, F extends object>(options: CrudOptions<T, F>) {
   const $q = useQuasar()
   const notify = useNotify()
   const toForm = options.toForm ?? ((row: T) => ({ ...row }) as unknown as F)
@@ -33,7 +32,7 @@ export function useCrud<T extends { id: Id }, F extends object>(options: CrudOpt
   const loading = ref(false)
   const saving = ref(false)
   const dialogOpen = ref(false)
-  const editingId = ref<Id | null>(null)
+  const editingId = ref<Key | null>(null)
   const form = ref(options.emptyForm()) as Ref<F>
   const isEditing = computed(() => editingId.value !== null)
 

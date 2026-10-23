@@ -62,18 +62,46 @@ export interface BackupSchedule {
 
 export type JsonObject = Record<string, unknown>
 
-export interface BackupLocation {
-  id: Id
+export interface StorageDriver {
+  key: string
   name: string
-  location_type: string
-  /** Only returned to administrators. */
-  config?: JsonObject
+  description: string
+  /** Whether several workers can serve one target (a bucket), or only one (a local directory). */
+  shareable: boolean
+  params_schema: JsonSchema | null
+  version: string
+  versions: string[]
+  /** Approved storage workers offering it. */
+  workers: number
 }
 
-export interface BackupLocationWrite {
+/** As administrators see it; others get only id, name, description and driver. */
+export interface StorageTarget {
+  /** UUID. */
+  id: string
   name: string
-  location_type: string
+  description: string
+  driver: string
+  driver_name?: string
+  /** Driver settings; secret settings come back as null (see secrets_set). */
+  config?: JsonObject
+  /** Secret settings that have a stored value. */
+  secrets_set?: string[]
+  workers?: string[]
+  worker_names?: string[]
+  queue?: string
+  device_count?: number
+  job_count?: number
+  created_at?: IsoDateTime
+  updated_at?: IsoDateTime
+}
+
+export interface StorageTargetWrite {
+  name: string
+  description: string
+  driver: string
   config: JsonObject
+  workers: string[]
 }
 
 export interface CredentialType {
@@ -139,7 +167,7 @@ interface DeviceBase {
   last_backup_time: IsoDateTime | null
   last_backup_status: string | null
   retention_policy: Id | null
-  backup_location: Id | null
+  storage_target: string | null
   credential: Id | null
   schedule: Id | null
   user_permissions: DevicePermission[]
@@ -168,7 +196,7 @@ export interface DeviceWrite {
   collection_group: Id | null
   enabled: boolean
   retention_policy: Id | null
-  backup_location: Id | null
+  storage_target: string | null
   credential: Id | null
   schedule: Id | null
 }
@@ -193,8 +221,9 @@ export interface BackupJob {
   is_binary: boolean
   encrypted: boolean
   size_bytes: number | null
-  storage_backend: string
-  location_name: string | null
+  storage_driver: string
+  storage_target: string
+  storage_target_name: string | null
   /** Names of the workers that collected and stored it. */
   collector: string
   storage_worker: string
@@ -344,10 +373,10 @@ export interface Worker {
   status: WorkerStatus
   role: WorkerRole | ''
   collection_groups: Id[]
-  storage_backends: string[]
+  storage_targets: string[]
   /** SSH-style SHA256 fingerprint of the worker's signing key. */
   fingerprint: string
-  capabilities: { collector_drivers?: CollectorDriver[]; storage_backends?: string[] }
+  capabilities: { collector_drivers?: CollectorDriver[]; storage_drivers?: StorageDriver[] }
   desired_version: number
   applied_version: number
   applied_queues: string[]
@@ -365,7 +394,7 @@ export interface Worker {
 export interface WorkerAssignment {
   role: WorkerRole
   collection_groups: Id[]
-  storage_backends: string[]
+  storage_targets: string[]
 }
 
 export interface OrchestratorIdentity {

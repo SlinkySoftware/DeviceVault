@@ -45,17 +45,17 @@ def test_backup_now_needs_the_group_permission(setup, broker):
 
 
 def test_backup_now_explains_misconfigured_devices(setup, broker, admin):
-    setup['device'].backup_location = None
+    setup['device'].storage_target = None
     setup['device'].save()
 
     reply = admin.post(f'/api/devices/{setup["device"].id}/backup_now/')
 
     assert reply.status_code == 400
-    assert 'no backup location' in reply.json()['error']
+    assert 'no storage target' in reply.json()['error']
 
 
 def test_job_history_needs_view_backups(setup, broker):
-    BackupJob.objects.create(device=setup['device'], driver='noop')
+    BackupJob.objects.create(device=setup['device'], storage_target=setup['target'], driver='noop')
 
     assert member(setup, 'view').get('/api/backups/').json()['results'] == []
     [job] = member(setup, 'view_backups').get(f'/api/backups/?device={setup["device"].id}').json()['results']
@@ -63,7 +63,9 @@ def test_job_history_needs_view_backups(setup, broker):
 
 
 def test_content_is_served_as_a_download(setup, broker, admin, monkeypatch):
-    job = BackupJob.objects.create(device=setup['device'], driver='noop', state=BackupJob.STORED)
+    job = BackupJob.objects.create(
+        device=setup['device'], storage_target=setup['target'], driver='noop', state=BackupJob.STORED
+    )
     monkeypatch.setattr('backups.api.read_content', lambda j: b'hostname edge-01\n')
 
     reply = admin.get(f'/api/backups/{job.id}/content/')
@@ -77,7 +79,11 @@ def test_dashboard_counts_finished_jobs(setup, broker, admin):
     now = timezone.now()
     for state in (BackupJob.STORED, BackupJob.STORED, BackupJob.FAILED, BackupJob.QUEUED):
         BackupJob.objects.create(
-            device=setup['device'], driver='noop', state=state, finished_at=None if state == 'queued' else now
+            device=setup['device'],
+            storage_target=setup['target'],
+            driver='noop',
+            state=state,
+            finished_at=None if state == 'queued' else now,
         )
 
     stats = admin.get('/api/dashboard-stats/?days=1').json()

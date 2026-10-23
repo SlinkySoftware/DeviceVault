@@ -22,7 +22,7 @@ Defines user preferences and dashboard layout configuration.
 from django.contrib.auth.models import User
 from django.db import models
 
-from devicevault_protocol.names import collection_queue_name, storage_queue_name
+from devicevault_protocol.names import collection_queue_name
 from devicevault_protocol.registration import (
     ROLE_COLLECTOR,
     ROLE_STORAGE,
@@ -128,7 +128,7 @@ class Worker(models.Model):
     """A collection or storage worker that has registered with the orchestrator.
 
     Workers register themselves (status ``pending``). An administrator approves
-    one with a role and an assignment (collection groups or storage backends);
+    one with a role and an assignment (collection groups or storage targets);
     the orchestrator then pushes a signed assignment, and the worker reports
     which version it has applied in every heartbeat.
     """
@@ -150,7 +150,6 @@ class Worker(models.Model):
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING)
     role = models.CharField(max_length=16, choices=ROLE_CHOICES, blank=True, default='')
     collection_groups = models.ManyToManyField('devices.CollectionGroup', blank=True, related_name='workers')
-    storage_backends = models.JSONField(default=list, blank=True, help_text='Storage backends served (storage role)')
 
     signing_key = models.CharField(max_length=64, help_text='Ed25519 public key (base64), fixed at registration')
     encryption_key = models.CharField(max_length=64, help_text='X25519 public key (base64)')
@@ -182,5 +181,5 @@ class Worker(models.Model):
         if self.role == ROLE_COLLECTOR:
             return sorted(collection_queue_name(g.rabbitmq_queue_id) for g in self.collection_groups.all())
         if self.role == ROLE_STORAGE:
-            return sorted(storage_queue_name(b) for b in self.storage_backends)
+            return sorted(target.queue for target in self.storage_targets.all())
         return []

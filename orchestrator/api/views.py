@@ -42,13 +42,11 @@ from devices.models import (
     UserDeviceGroupRole,
 )
 from devices.permissions import user_has_device_group_permission
-from devicevault_protocol.registration import STATUS_APPROVED
-from locations.models import BackupLocation
+from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy
 
 from .serializers import (
     AuditLogSerializer,
-    BackupLocationSerializer,
     BackupScheduleSerializer,
     ChangePasswordSerializer,
     CollectionGroupSerializer,
@@ -239,10 +237,13 @@ class WorkerViewSet(
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def perform_update(self, serializer):
-        groups = serializer.validated_data.pop('collection_groups', None)
         changes = dict(serializer.validated_data)
-        if groups is not None:
-            changes['collection_groups'] = groups
+        # A worker has one role: switching it drops the other role's assignment.
+        role = changes.get('role', serializer.instance.role)
+        if role != ROLE_COLLECTOR:
+            changes['collection_groups'] = []
+        if role != ROLE_STORAGE:
+            changes['storage_targets'] = []
         worker_registry.update_assignment(serializer.instance, **changes)
 
     def perform_destroy(self, instance):
@@ -259,19 +260,20 @@ class WorkerViewSet(
         # Reuse the worker serializer's capability checks.
         check = WorkerSerializer(
             worker,
-            data={
-                'role': data['role'],
-                'storage_backends': data.get('storage_backends', []),
-            },
+            data={'role': data['role']},
             partial=True,
         )
         check.is_valid(raise_exception=True)
+        targets = data.get('storage_targets', []) if data['role'] == ROLE_STORAGE else []
+        problems = worker_registry.approval_target_problems(worker, targets)
+        if problems:
+            return response.Response({'storage_targets': problems}, status=status.HTTP_400_BAD_REQUEST)
         worker_registry.approve(
             worker,
             role=data['role'],
             user=request.user,
             collection_groups=data.get('collection_groups', []),
-            storage_backends=data.get('storage_backends', []),
+            storage_targets=targets,
         )
         return response.Response(WorkerSerializer(worker, context=self.get_serializer_context()).data)
 
@@ -302,12 +304,6 @@ class BackupScheduleViewSet(viewsets.ModelViewSet):
     queryset = BackupSchedule.objects.all()
     permission_classes = [IsAdminOrReadOnly]
     serializer_class = BackupScheduleSerializer
-
-
-class BackupLocationViewSet(viewsets.ModelViewSet):
-    queryset = BackupLocation.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
-    serializer_class = BackupLocationSerializer
 
 
 class CredentialViewSet(viewsets.ModelViewSet):

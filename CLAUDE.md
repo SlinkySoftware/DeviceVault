@@ -23,14 +23,15 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   task and queue names, the job protocol (`jobs`), the Celery app factory, presence constants, `crypto`.
   Shared by both sides; must not import Django.
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
-  storage tasks, `drivers/` (collector drivers), `storage/` (backends), `identity`
+  storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `identity`
   (persistent worker id and keys), `agent` (registration and assignments), `trust`
   (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `api`, `audit`, `backups`, `core`, `credentials`, `devices`,
-  `locations`, `policies`. Settings are env-only; tests use `devicevault.test_settings`.
-  `core/workers.py` is the worker registry (events, approval, assignments, driver
-  catalogue); `core/signing.py` holds the orchestrator signing key. The orchestrator
+  `policies`, `storage` (storage targets; `storage/service.py` sends their tasks). Settings
+  are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
+  registry (events, approval, assignments, collector and storage driver catalogues);
+  `core/signing.py` holds the signing key and `core/keys.py` the data and vault keys. The orchestrator
   must not import the worker package.
 - `frontend/`: Quasar 2 / Vue 3 SPA in TypeScript. Talks to same-origin `/api` (nginx in
   production, the Quasar dev proxy in development). `src/api/` (axios client,
@@ -71,7 +72,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   SSH CLI platforms subclass `drivers.ssh.NetmikoDriver` (a Netmiko `device_type`, the
   commands, and regexes for volatile lines); see `drivers/cisco.py`. Built-ins are listed in
   `drivers/__init__.py`; third-party drivers register under the
-  `devicevault.collectors` entry point. Storage backends live in `storage/backends.py`.
+  `devicevault.collectors` entry point. Storage drivers subclass `storage.drivers.base.StorageDriver` (see `storage/drivers/local.py`, `s3.py`) and register under
+  `devicevault.storage`; mark secret settings `SecretStr` so the API treats them as write-only.
 - Secrets sent to workers go through `core.keys.add_secret` (sealed per worker when payload
   encryption is on) and come out through `devicevault_worker.payload.secret`. Secret model
   fields use `core.fields.EncryptedJSONField`.

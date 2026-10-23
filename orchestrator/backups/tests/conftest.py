@@ -25,25 +25,27 @@ def broker(monkeypatch):
 @pytest.fixture
 def setup(db, worker_keys):
     """A backed-up device plus an approved collector and storage worker (as WorkerKeys)."""
+    from storage.models import StorageTarget
+
     from core import workers
     from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType
-    from locations.models import BackupLocation
 
     group = CollectionGroup.objects.create(name='DMZ', rabbitmq_queue_id='dmz')
     collector = worker_keys('collector-1')
     workers.approve(workers.handle_event(collector.event()), role='collector', collection_groups=[group])
     storage = worker_keys('storage-1')
-    workers.approve(workers.handle_event(storage.event()), role='storage', storage_backends=['fs'])
+    target = StorageTarget.objects.create(name='Local', driver='filesystem', config={'path': 'fs'})
+    workers.approve(workers.handle_event(storage.event()), role='storage', storage_targets=[target])
     device = Device.objects.create(
         name='Edge 01',
         ip_address='192.0.2.10',
         device_type=DeviceType.objects.create(name='Router'),
         device_group=DeviceGroup.objects.create(name='Core'),
         collection_group=group,
-        backup_location=BackupLocation.objects.create(name='Local', location_type='fs', config={'path': '/srv'}),
+        storage_target=target,
         backup_method='noop',
     )
-    return {'device': device, 'group': group, 'collector': collector, 'storage': storage}
+    return {'device': device, 'group': group, 'collector': collector, 'storage': storage, 'target': target}
 
 
 def job_event(keys, job, event, **details):

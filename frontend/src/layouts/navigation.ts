@@ -42,7 +42,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
     icon: 'backup',
     links: [
       { label: 'Credentials', icon: 'vpn_key', to: '/vaultadmin/credentials' },
-      { label: 'Backup Locations', icon: 'folder', to: '/vaultadmin/backup-locations' },
+      { label: 'Storage Targets', icon: 'storage', to: '/vaultadmin/storage-targets' },
       { label: 'Backup Schedules', icon: 'schedule', to: '/vaultadmin/backup-schedules' },
       { label: 'Retention Policies', icon: 'history', to: '/vaultadmin/retention-policies' },
     ],

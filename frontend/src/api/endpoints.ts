@@ -8,8 +8,6 @@ import type {
   AuthConfig,
   AuthGroup,
   AuthGroupWrite,
-  BackupLocation,
-  BackupLocationWrite,
   BackupJob,
   BackupMethod,
   BackupNowResponse,
@@ -32,6 +30,9 @@ import type {
   LoginResponse,
   Manufacturer,
   RetentionPolicy,
+  StorageDriver,
+  StorageTarget,
+  StorageTargetWrite,
   ThemeColors,
   User,
   UserCreate,
@@ -46,13 +47,16 @@ import type {
 
 type Params = Record<string, string | number | boolean | undefined>
 
+/** A row id: numeric for most resources, a UUID string for some. */
+export type Key = Id | string
+
 export interface ResourceApi<T, W> {
   list(params?: Params): Promise<T[]>
-  get(id: Id): Promise<T>
+  get(id: Key): Promise<T>
   create(body: W): Promise<T>
-  update(id: Id, body: W): Promise<T>
-  patch(id: Id, body: Partial<W>): Promise<T>
-  remove(id: Id): Promise<void>
+  update(id: Key, body: W): Promise<T>
+  patch(id: Key, body: Partial<W>): Promise<T>
+  remove(id: Key): Promise<void>
 }
 
 /** CRUD calls for a DRF ModelViewSet at `path` (with trailing slash). */
@@ -82,7 +86,18 @@ export const backupSchedulesApi = resource<
   BackupSchedule,
   Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at' | 'last_run_at' | 'next_run'>
 >('/backup-schedules/')
-export const backupLocationsApi = resource<BackupLocation, BackupLocationWrite>('/backup-locations/')
+const storageTargets = resource<StorageTarget, StorageTargetWrite>('/storage-targets/')
+
+export const storageTargetsApi = {
+  ...storageTargets,
+  check: async (id: string) =>
+    (await http.post<{ ok: boolean; message?: string; worker?: string; error?: string }>(
+      `/storage-targets/${id}/check/`,
+    )).data,
+}
+export const storageDriversApi = {
+  list: async () => (await http.get<StorageDriver[]>('/storage-drivers/')).data,
+}
 export const credentialsApi = resource<Credential, CredentialWrite>('/credentials/')
 export const credentialTypesApi = resource<CredentialType>('/credential-types/')
 export const deviceGroupsApi = resource<DeviceGroup, Pick<DeviceGroup, 'name' | 'description'>>('/device-groups/')

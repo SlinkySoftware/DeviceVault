@@ -172,8 +172,13 @@ class Device(models.Model):
         blank=True,
         help_text='Backup retention policy',
     )
-    backup_location = models.ForeignKey(
-        'locations.BackupLocation', on_delete=models.SET_NULL, null=True, blank=True, help_text='Where to store backups'
+    storage_target = models.ForeignKey(
+        'storage.StorageTarget',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='devices',
+        help_text='Where backups are stored',
     )
     credential = models.ForeignKey(
         'credentials.Credential',

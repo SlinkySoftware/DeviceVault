@@ -83,12 +83,12 @@ def pipeline(monkeypatch, tmp_path):
     return redis, sent
 
 
-def collect_job(tmp_path, *, driver='demo_config', params=None, backend='fs', vault=None):
+def collect_job(tmp_path, *, driver='demo_config', params=None, storage='filesystem', vault=None):
     job_id = str(uuid.uuid4())
     store = {
         'job_id': job_id,
-        'backend': backend,
-        'config': {'path': str(tmp_path / 'store')},
+        'target': {'id': 't1', 'driver': storage},
+        'config': {'path': 'store'},
         'name': {'device_key': '7-edge', 'job_id': job_id, 'timestamp': '20261023T000000Z', 'extension': '.cfg'},
     }
     job = {
@@ -99,7 +99,7 @@ def collect_job(tmp_path, *, driver='demo_config', params=None, backend='fs', va
         'credentials': {},
         'timeout': 5,
         'encryption': {'kid': vault.current_kid, 'public_key': vault.public_key_b64()} if vault else None,
-        'store': {'queue': f'storage.{backend}', 'envelope': sign_task(store, ORCHESTRATOR)},
+        'store': {'queue': 'storage.target.t1', 'envelope': sign_task(store, ORCHESTRATOR)},
     }
     return job_id, sign_task(job, ORCHESTRATOR)
 
@@ -120,7 +120,7 @@ def test_collected_backup_is_staged_and_handed_to_storage(pipeline, tmp_path):
     assert collected['sha256'] == hashlib.sha256(staged).hexdigest()
     assert collected['is_binary'] is False and collected['encrypted'] is False
     (args, queue), *_ = sent.stores()
-    assert queue == 'storage.fs'
+    assert queue == 'storage.target.t1'
     assert args[1] == {'key': blob_key(job_id), 'sha256': collected['sha256'], 'size': len(staged)}
 
 
@@ -199,6 +199,19 @@ def test_a_redelivered_job_reclaims_its_own_lock(pipeline, tmp_path):
     assert redis.get(device_lock_key(7)) is None
 
 
+def read_back(storage, ref):
+    from devicevault_worker.storage.drivers import get_driver
+
+    driver = get_driver(storage)
+    return driver().read(ref, driver.Params(path='store'))
+
+
+def volume_path():
+    from devicevault_worker.storage.drivers import local
+
+    return local.VOLUME
+
+
 def run_store(sent):
     from devicevault_worker.storage.tasks import store
 
@@ -208,13 +221,12 @@ def run_store(sent):
     return sent.events()
 
 
-@pytest.mark.parametrize('backend', ['fs', 'git'])
-def test_stored_backups_read_back_byte_for_byte(pipeline, tmp_path, backend):
+@pytest.mark.parametrize('storage', ['filesystem', 'git'])
+def test_stored_backups_read_back_byte_for_byte(pipeline, tmp_path, storage):
     from devicevault_worker.collect import collect
-    from devicevault_worker.storage.backends import BACKENDS
 
     redis, sent = pipeline
-    job_id, envelope = collect_job(tmp_path, backend=backend)
+    job_id, envelope = collect_job(tmp_path, storage=storage)
     collect.run(envelope)
     staged = redis.get(blob_key(job_id))
 
@@ -224,7 +236,7 @@ def test_stored_backups_read_back_byte_for_byte(pipeline, tmp_path, backend):
     stored = events[1][1]
     assert stored['sha256'] == hashlib.sha256(staged).hexdigest()
     assert redis.get(blob_key(job_id)) is None
-    assert BACKENDS[backend].read(stored['storage_ref'], {'path': str(tmp_path / 'store')}) == staged
+    assert read_back(storage, stored['storage_ref']) == staged
 
 
 def test_tampered_staged_backups_are_not_stored(pipeline, tmp_path):
@@ -239,7 +251,7 @@ def test_tampered_staged_backups_are_not_stored(pipeline, tmp_path):
 
     assert events[-1][0] == EVENT_FAILED
     assert 'does not match' in events[-1][1]['error']
-    assert not (tmp_path / 'store').exists()
+    assert not list((volume_path() / 'store').rglob('*.cfg'))
 
 
 def test_expired_staged_backups_fail(pipeline, tmp_path):
@@ -263,7 +275,6 @@ def test_backups_are_encrypted_to_the_vault_before_staging(pipeline, tmp_path):
     from devicevault_protocol.crypto import VaultKeyRing, decrypt_backup, is_encrypted
     from devicevault_protocol.crypto.ecies import generate_private_key
     from devicevault_worker.collect import collect
-    from devicevault_worker.storage.backends import BACKENDS
 
     redis, sent = pipeline
     vault = VaultKeyRing({'v1': generate_private_key()})
@@ -275,7 +286,7 @@ def test_backups_are_encrypted_to_the_vault_before_staging(pipeline, tmp_path):
 
     assert is_encrypted(staged) and b'edge-01' not in staged
     assert b'edge-01' in decrypt_backup(staged, vault)
-    assert BACKENDS['fs'].read(stored['storage_ref'], {'path': str(tmp_path / 'store')}) == staged
+    assert read_back('filesystem', stored['storage_ref']) == staged
 
 
 def test_secrets_sealed_for_this_worker_are_opened(pipeline):
@@ -294,3 +305,19 @@ def test_secrets_sealed_for_this_worker_are_opened(pipeline):
         secret({'credentials_sealed': {'someone-else': theirs}}, 'credentials')
     with pytest.raises(PermanentError, match='could not open'):
         secret({'credentials_sealed': {identity.worker_id: theirs}}, 'credentials')
+
+
+def test_check_reports_whether_a_target_works(pipeline):
+    from devicevault_worker.storage.tasks import check
+
+    ok = check.run(sign_task({'target': {'id': 't1', 'driver': 'filesystem'}, 'config': {'path': 'ok'}}, ORCHESTRATOR))
+    bad = check.run(
+        sign_task({'target': {'id': 't1', 'driver': 'filesystem'}, 'config': {'path': '../x'}}, ORCHESTRATOR)
+    )
+    unknown = check.run(sign_task({'target': {'id': 't1', 'driver': 'tape'}, 'config': {}}, ORCHESTRATOR))
+    forged = check.run(sign_task({'target': {'id': 't1', 'driver': 'filesystem'}}, signing.generate_signing_key()))
+
+    assert ok['status'] == 'success' and 'writable' in ok['message']
+    assert bad['status'] == 'failure' and 'invalid storage target settings' in bad['error']
+    assert 'no "tape" storage driver' in unknown['error']
+    assert 'task rejected' in forged['error']

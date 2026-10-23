@@ -53,20 +53,31 @@
 
       <q-select
         v-if="form.role === 'storage'"
-        v-model="form.storage_backends"
-        :options="backendOptions"
+        v-model="form.storage_targets"
+        :options="targetOptions"
+        option-value="id"
+        option-label="name"
         emit-value
         map-options
         multiple
         use-chips
         outlined
-        label="Storage backends"
-        :rules="[(v: string[]) => v.length > 0 || 'Choose at least one backend']"
-      />
+        label="Storage targets"
+        hint="Optional: targets can also be assigned on the Storage Targets page"
+      >
+        <template #option="scope">
+          <q-item v-bind="scope.itemProps">
+            <q-item-section>
+              <q-item-label>{{ scope.opt.name }}</q-item-label>
+              <q-item-label caption>{{ scope.opt.driver_name ?? scope.opt.driver }}</q-item-label>
+            </q-item-section>
+          </q-item>
+        </template>
+      </q-select>
 
       <div class="text-caption text-grey">
         Offers: {{ driverNames || 'no collector drivers' }} ·
-        storage: {{ (worker.capabilities.storage_backends ?? []).join(', ') || 'none' }}
+        storage: {{ storageDriverNames || 'none' }}
       </div>
     </template>
   </FormDialog>
@@ -75,8 +86,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 
-import { collectionGroupsApi, workersApi } from '@/api/endpoints'
-import type { CollectionGroup, Worker, WorkerAssignment } from '@/api/types'
+import { collectionGroupsApi, storageTargetsApi, workersApi } from '@/api/endpoints'
+import type { CollectionGroup, StorageTarget, Worker, WorkerAssignment } from '@/api/types'
 import FormDialog from '@/components/FormDialog.vue'
 import { useNotify } from '@/composables/useNotify'
 
@@ -84,15 +95,14 @@ const props = defineProps<{ worker: Worker | null }>()
 const open = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ saved: [worker: Worker] }>()
 
-const BACKEND_LABELS: Record<string, string> = { fs: 'Filesystem', git: 'Git repository' }
-
 const notify = useNotify()
 const groups = ref<CollectionGroup[]>([])
+const targets = ref<StorageTarget[]>([])
 const saving = ref(false)
-const form = reactive<{ role: WorkerAssignment['role'] | ''; collection_groups: number[]; storage_backends: string[] }>({
+const form = reactive<{ role: WorkerAssignment['role'] | ''; collection_groups: number[]; storage_targets: string[] }>({
   role: '',
   collection_groups: [],
-  storage_backends: [],
+  storage_targets: [],
 })
 
 const approving = computed(() => props.worker?.status !== 'approved')
@@ -101,11 +111,12 @@ const driverNames = computed(() =>
 )
 const roleOptions = computed(() => [
   { label: 'Collector', value: 'collector', disable: !props.worker?.capabilities.collector_drivers?.length },
-  { label: 'Storage', value: 'storage', disable: !props.worker?.capabilities.storage_backends?.length },
+  { label: 'Storage', value: 'storage', disable: !props.worker?.capabilities.storage_drivers?.length },
 ])
-const backendOptions = computed(() =>
-  (props.worker?.capabilities.storage_backends ?? []).map((b) => ({ label: BACKEND_LABELS[b] ?? b, value: b })),
-)
+const offered = computed(() => props.worker?.capabilities.storage_drivers ?? [])
+const storageDriverNames = computed(() => offered.value.map((d) => d.name).join(', '))
+// Only targets whose driver this worker offers.
+const targetOptions = computed(() => targets.value.filter((t) => offered.value.some((d) => d.key === t.driver)))
 
 watch(open, async (isOpen) => {
   if (!isOpen || !props.worker) return
@@ -114,12 +125,15 @@ watch(open, async (isOpen) => {
   Object.assign(form, {
     role: worker.role,
     collection_groups: [...worker.collection_groups],
-    storage_backends: worker.storage_backends.length ? [...worker.storage_backends] : [],
+    storage_targets: [...worker.storage_targets],
   })
   try {
-    groups.value = (await collectionGroupsApi.list()).sort((a, b) => a.name.localeCompare(b.name))
+    const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name)
+    const [groupList, targetList] = await Promise.all([collectionGroupsApi.list(), storageTargetsApi.list()])
+    groups.value = groupList.sort(byName)
+    targets.value = targetList.sort(byName)
   } catch (error) {
-    notify.error(error, 'Failed to load collection groups')
+    notify.error(error, 'Failed to load collection groups and storage targets')
   }
 })
 
@@ -128,7 +142,7 @@ async function submit(): Promise<void> {
   const body: WorkerAssignment = {
     role: form.role,
     collection_groups: form.role === 'collector' ? form.collection_groups : [],
-    storage_backends: form.role === 'storage' ? form.storage_backends : [],
+    storage_targets: form.role === 'storage' ? form.storage_targets : [],
   }
   saving.value = true
   try {

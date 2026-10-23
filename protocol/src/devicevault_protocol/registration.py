@@ -7,8 +7,8 @@ argument a signed envelope (signed with the worker's own key) whose payload is::
      "worker_id": "<uuid>", "name": "...", "celery_hostname": "name@host",
      "hostname": "...", "pid": 123, "version": "0.1.0",
      "signing_key": "<b64 Ed25519 public>", "encryption_key": "<b64 X25519 public>",
-     "capabilities": {"collector_drivers": [{"key", "name", "description", "is_binary"}],
-                      "storage_backends": ["fs", "git"]},
+     "capabilities": {"collector_drivers": [{"key", "name", "version", "is_binary", "params_schema", ...}],
+                      "storage_drivers": [{"key", "name", "version", "shareable", "params_schema", ...}]},
      "applied_version": 0,                 # assignment version currently in effect
      "orchestrator_key": "<b64>" | null}   # pinned orchestrator key, if any
 
@@ -17,7 +17,7 @@ signed envelope (orchestrator key) whose payload is::
 
     {"type": "assignment", "worker_id": "<uuid>", "version": 3,
      "status": "pending" | "approved" | "revoked",
-     "role": "collector" | "storage" | "", "queues": ["collector.group.dmz"],
+     "role": "collector" | "storage" | "", "queues": ["collector.group.dmz" | "storage.target.<uuid>"],
      "orchestrator_key": "<b64 Ed25519 public>"}
 
 The worker pins ``orchestrator_key`` on the first assignment it accepts

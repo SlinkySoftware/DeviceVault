@@ -133,15 +133,16 @@
             :disable="!canModify"
           />
           <q-select
-            v-model="form.backup_location"
-            :options="backupLocations"
+            v-model="form.storage_target"
+            :options="storageTargets"
             option-value="id"
             option-label="name"
             emit-value
             map-options
             clearable
             outlined
-            label="Backup location"
+            label="Storage target"
+            hint="Where backups of this device are stored"
             :disable="!canModify"
           />
           <q-select
@@ -185,7 +186,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
-  backupLocationsApi,
   backupMethodsApi,
   backupSchedulesApi,
   collectionGroupsApi,
@@ -195,9 +195,9 @@ import {
   deviceTypesApi,
   manufacturersApi,
   retentionPoliciesApi,
+  storageTargetsApi,
 } from '@/api/endpoints'
 import type {
-  BackupLocation,
   BackupMethod,
   BackupSchedule,
   CollectionGroup,
@@ -208,6 +208,7 @@ import type {
   DeviceWrite,
   Manufacturer,
   RetentionPolicy,
+  StorageTarget,
 } from '@/api/types'
 import DriverParamsForm from '@/components/DriverParamsForm.vue'
 import { useNotify } from '@/composables/useNotify'
@@ -237,7 +238,7 @@ const form = ref<DeviceWrite>({
   collection_group: null,
   enabled: true,
   retention_policy: null,
-  backup_location: null,
+  storage_target: null,
   credential: null,
   schedule: null,
 })
@@ -248,7 +249,7 @@ const deviceTypes = ref<DeviceType[]>([])
 const manufacturers = ref<Manufacturer[]>([])
 const backupMethods = ref<BackupMethod[]>([])
 const credentials = ref<Credential[]>([])
-const backupLocations = ref<BackupLocation[]>([])
+const storageTargets = ref<StorageTarget[]>([])
 const retentionPolicies = ref<RetentionPolicy[]>([])
 const schedules = ref<BackupSchedule[]>([])
 const deviceGroups = ref<DeviceGroup[]>([])
@@ -293,7 +294,7 @@ function toForm(detail: DeviceDetail): DeviceWrite {
     collection_group: detail.collection_group?.id ?? null,
     enabled: detail.enabled,
     retention_policy: detail.retention_policy,
-    backup_location: detail.backup_location,
+    storage_target: detail.storage_target,
     credential: detail.credential,
     schedule: detail.schedule,
   }
@@ -319,12 +320,12 @@ async function save(): Promise<void> {
 onMounted(async () => {
   try {
     const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name)
-    const [types, makers, methods, creds, locations, policies, scheduleList, groups, collections, detail] = await Promise.all([
+    const [types, makers, methods, creds, targetList, policies, scheduleList, groups, collections, detail] = await Promise.all([
       deviceTypesApi.list(),
       manufacturersApi.list(),
       backupMethodsApi.list(),
       credentialsApi.list(),
-      backupLocationsApi.list(),
+      storageTargetsApi.list(),
       retentionPoliciesApi.list(),
       backupSchedulesApi.list(),
       deviceGroupsApi.list(),
@@ -335,7 +336,7 @@ onMounted(async () => {
     manufacturers.value = makers.sort(byName)
     backupMethods.value = methods
     credentials.value = creds.sort(byName)
-    backupLocations.value = locations.sort(byName)
+    storageTargets.value = targetList.sort(byName)
     retentionPolicies.value = policies.sort(byName)
     schedules.value = scheduleList.sort(byName)
     deviceGroups.value = groups.sort(byName)

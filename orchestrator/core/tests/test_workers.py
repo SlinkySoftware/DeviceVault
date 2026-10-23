@@ -88,12 +88,12 @@ def test_heartbeats_reconcile_until_the_worker_reports_the_current_version(db, w
 
 def test_a_forgotten_worker_is_reapproved_with_a_newer_version(db, worker_keys, published):
     keys = worker_keys('storage-1')
-    worker = workers.approve(workers.handle_event(keys.event()), role='storage', storage_backends=['fs'])
+    worker = workers.approve(workers.handle_event(keys.event()), role='storage')
     workers.revoke(worker)  # version 2, which the worker applies
     Worker.objects.filter(pk=keys.id).delete()
 
     again = workers.handle_event(keys.event(applied_version=2))
-    workers.approve(again, role='storage', storage_backends=['fs'])
+    workers.approve(again, role='storage')
 
     assert assignments(published, again)[-1]['version'] == 3
 
@@ -109,7 +109,7 @@ def test_a_worker_ahead_of_the_database_gets_a_newer_assignment(db, worker_keys,
 
 
 def test_revocation_sends_an_empty_assignment(db, worker_keys, published):
-    worker = workers.approve(workers.handle_event(worker_keys().event()), role='storage', storage_backends=['fs'])
+    worker = workers.approve(workers.handle_event(worker_keys().event()), role='storage')
 
     workers.revoke(worker)
 
@@ -172,15 +172,22 @@ def test_admin_approves_a_worker_through_the_api(db, admin, worker_keys, publish
 
 
 @pytest.mark.parametrize(
-    ('role', 'extra', 'drivers', 'field'),
+    ('role', 'drivers', 'storage', 'target_driver', 'field'),
     [
-        ('collector', {}, (), 'role'),
-        ('storage', {'storage_backends': ['s3']}, ('noop',), 'storage_backends'),
-        ('storage', {}, ('noop',), 'storage_backends'),
+        ('collector', (), (), None, 'role'),
+        ('storage', ('noop',), (), None, 'role'),
+        ('storage', ('noop',), ('filesystem',), 's3', 'storage_targets'),
     ],
 )
-def test_approval_must_match_what_the_worker_offers(db, admin, worker_keys, role, extra, drivers, field):
-    worker = workers.handle_event(worker_keys().event(drivers=drivers))
+def test_approval_must_match_what_the_worker_offers(
+    db, admin, worker_keys, role, drivers, storage, target_driver, field
+):
+    from storage.models import StorageTarget
+
+    worker = workers.handle_event(worker_keys().event(drivers=drivers, storage=storage))
+    extra = {}
+    if target_driver:
+        extra['storage_targets'] = [str(StorageTarget.objects.create(name='t', driver=target_driver).pk)]
 
     resp = admin.post(f'/api/workers/{worker.id}/approve/', {'role': role, **extra}, format='json')
 

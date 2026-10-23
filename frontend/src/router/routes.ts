@@ -60,8 +60,8 @@ const routes: RouteRecordRaw[] = [
       admin('backup-methods', 'backup-methods', 'Backup Methods', () => import('@/pages/admin/BackupMethodsPage.vue')),
       admin('device-groups', 'device-groups', 'Device Groups', () => import('@/pages/admin/DeviceGroupsPage.vue')),
       admin('credentials', 'credentials', 'Credentials', () => import('@/pages/admin/CredentialsPage.vue')),
-      admin('backup-locations', 'backup-locations', 'Backup Locations', () =>
-        import('@/pages/admin/BackupLocationsPage.vue'),
+      admin('storage-targets', 'storage-targets', 'Storage Targets', () =>
+        import('@/pages/admin/StorageTargetsPage.vue'),
       ),
       admin('backup-schedules', 'backup-schedules', 'Backup Schedules', () =>
         import('@/pages/admin/BackupSchedulesPage.vue'),

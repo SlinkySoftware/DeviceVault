@@ -48,7 +48,7 @@ INSTALLED_APPS = [
     'devices',
     'backups',
     'credentials',
-    'locations',
+    'storage',
     'policies',
     'audit',
     'api',

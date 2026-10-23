@@ -52,10 +52,9 @@ class BackupJob(models.Model):
     collector = models.CharField(max_length=255, blank=True, help_text='Worker that collected it')
     storage_worker = models.CharField(max_length=255, blank=True, help_text='Worker that stored it')
 
-    location = models.ForeignKey(
-        'locations.BackupLocation', null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs'
-    )
-    storage_backend = models.CharField(max_length=32, blank=True)
+    # Protected: deleting a target would make its backups unreadable.
+    storage_target = models.ForeignKey('storage.StorageTarget', on_delete=models.PROTECT, related_name='jobs')
+    storage_driver = models.CharField(max_length=64, blank=True, help_text='Storage driver of the target when queued')
     storage_ref = models.CharField(max_length=512, blank=True)
 
     collected_sha256 = models.CharField(max_length=64, blank=True)

@@ -20,7 +20,10 @@ other only through RabbitMQ and Redis.
   `noop` and `binary_dummy` for testing. Per-device driver settings come from each driver's
   schema (form in the UI, validated by the API); more drivers can be installed as
   `devicevault.collectors` entry points
-- Storage to local filesystem or git through Celery storage workers
+- Storage targets, each served by chosen storage workers: local filesystem, git (one commit
+  per backup), or S3 and S3-compatible buckets (shared by several workers); settings from the
+  driver's schema, with a Test button. More drivers can be installed as `devicevault.storage`
+  entry points
 - Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
   orchestrator's vault key, and credentials are sealed to each collector, so RabbitMQ, Redis
   and storage workers only see ciphertext; credentials are also encrypted in the database
@@ -89,7 +92,7 @@ Three independent stacks (infra, orchestrator, workers). See
 
 ```
 protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
-worker/         Collection and storage worker: Celery tasks, collector drivers, storage backends (no Django)
+worker/         Collection and storage worker: Celery tasks, collector and storage drivers (no Django)
 orchestrator/   Django project: API, worker events, result consumers
 frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints

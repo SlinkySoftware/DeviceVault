@@ -1,7 +1,7 @@
 """The orchestrator's encryption keys, besides the signing key (see core.signing).
 
 - Data keys (``DV_DATA_KEYS``, always required): AES-256-GCM keys that encrypt
-  secrets at rest in the database (credentials, location config). A key ring
+  secrets at rest in the database (credentials, storage target settings). A key ring
   ``kid=<base64>,...``; the first key encrypts, any key in the ring decrypts.
 - Vault keys (``DV_VAULT_KEYS``, required when ``DV_PAYLOAD_ENCRYPTION`` is
   on): X25519 private keys. Collectors encrypt backups to the current vault

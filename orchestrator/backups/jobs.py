@@ -9,6 +9,7 @@ from typing import Any
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from storage.service import target_spec, target_workers
 
 from backups.models import BackupJob
 from core import keys
@@ -25,8 +26,8 @@ from devicevault_protocol.jobs import (
     EVENT_STORED,
     STAGE_STORE,
 )
-from devicevault_protocol.names import COLLECT_TASK, collection_queue_name, storage_backend_for, storage_queue_name
-from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
+from devicevault_protocol.names import COLLECT_TASK, collection_queue_name
+from devicevault_protocol.registration import ROLE_COLLECTOR, STATUS_APPROVED
 
 logger = logging.getLogger('devicevault.jobs')
 
@@ -50,18 +51,15 @@ def create_job(device, *, trigger=BackupJob.TRIGGER_MANUAL, user=None, schedule=
     """
     if not device.collection_group:
         raise JobError('the device has no collection group, so no collector can back it up')
-    location = device.backup_location
-    if not location:
-        raise JobError('the device has no backup location')
-    backend = storage_backend_for(location.location_type)
-    if not backend:
-        raise JobError(f'backup location "{location.name}" has an unsupported type "{location.location_type}"')
-    if keys.payload_encryption():
-        # Secrets are sealed to the workers approved now; one approved later cannot open them.
-        if not collectors(device.collection_group):
-            raise JobError(f'no approved collector serves collection group "{device.collection_group.name}"')
-        if not storage_workers(backend):
-            raise JobError(f'no approved storage worker serves the "{backend}" backend')
+    target = device.storage_target
+    if not target:
+        raise JobError('the device has no storage target')
+    # Nobody would consume the job's tasks. (With payload encryption, secrets are
+    # also sealed to the workers approved now; one approved later cannot open them.)
+    if not collectors(device.collection_group):
+        raise JobError(f'no approved collector serves collection group "{device.collection_group.name}"')
+    if not target_workers(target):
+        raise JobError(f'storage target "{target.name}" has no approved storage worker')
 
     with transaction.atomic():
         active = (
@@ -81,8 +79,8 @@ def create_job(device, *, trigger=BackupJob.TRIGGER_MANUAL, user=None, schedule=
             driver=device.backup_method,
             # Provisional (it picks the file extension); the collector's report is authoritative.
             is_binary=bool(driver and driver['is_binary']),
-            location=location,
-            storage_backend=backend,
+            storage_target=target,
+            storage_driver=target.driver,
         )
     transaction.on_commit(lambda: dispatch(job))
     return job, True
@@ -92,11 +90,6 @@ def collectors(group) -> list[Worker]:
     return list(Worker.objects.filter(status=STATUS_APPROVED, role=ROLE_COLLECTOR, collection_groups=group))
 
 
-def storage_workers(backend: str) -> list[Worker]:
-    approved = Worker.objects.filter(status=STATUS_APPROVED, role=ROLE_STORAGE)
-    return [worker for worker in approved if backend in worker.storage_backends]
-
-
 def _device_key(device) -> str:
     slug = re.sub(r'[^a-z0-9]+', '-', device.name.lower()).strip('-')[:64] or 'device'
     return f'{device.pk}-{slug}'
@@ -104,17 +97,16 @@ def _device_key(device) -> str:
 
 def collect_payload(job: BackupJob) -> dict[str, Any]:
     device = job.device
-    store = {
-        'job_id': str(job.id),
-        'backend': job.storage_backend,
-        'name': {
+    store = target_spec(
+        job.storage_target,
+        job_id=str(job.id),
+        name={
             'device_key': _device_key(device),
             'job_id': str(job.id),
             'timestamp': job.created_at.strftime('%Y%m%dT%H%M%SZ'),
             'extension': '.bin' if job.is_binary else '.cfg',
         },
-    }
-    keys.add_secret(store, 'config', job.location.config if job.location else {}, storage_workers(job.storage_backend))
+    )
     collect = {
         'job_id': str(job.id),
         'device': {'id': device.pk, 'name': device.name, 'address': device.ip_address},
@@ -122,7 +114,7 @@ def collect_payload(job: BackupJob) -> dict[str, Any]:
         'driver_params': device.driver_params or {},
         'timeout': settings.DEVICEVAULT_COLLECT_TIMEOUT_SEC,
         'encryption': keys.vault_public(),
-        'store': {'queue': storage_queue_name(job.storage_backend), 'envelope': sign_task(store)},
+        'store': {'queue': job.storage_target.queue, 'envelope': sign_task(store)},
     }
     credentials = device.credential.data if device.credential else {}
     keys.add_secret(collect, 'credentials', credentials, collectors(device.collection_group))

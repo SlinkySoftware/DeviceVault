@@ -20,6 +20,8 @@ export interface JsonSchema {
   anyOf?: JsonSchema[]
   properties?: Record<string, JsonSchema>
   required?: string[]
+  writeOnly?: boolean
+  format?: string
   additionalProperties?: boolean | JsonSchema
   $ref?: string
   $defs?: Record<string, JsonSchema>
@@ -35,6 +37,8 @@ export interface SchemaField {
   default: unknown
   required: boolean
   nullable: boolean
+  /** Write-only (a password or key): never shown, only replaced. */
+  secret: boolean
   options: unknown[]
   min: number | undefined
   max: number | undefined
@@ -104,6 +108,7 @@ export function schemaFields(schema: JsonSchema | null | undefined): { fields: S
       default: property.default,
       required: (schema.required ?? []).includes(name),
       nullable,
+      secret: Boolean(property.writeOnly) || property.format === 'password',
       options: property.enum ?? [],
       min: property.minimum ?? (property.exclusiveMinimum !== undefined ? property.exclusiveMinimum + 1 : undefined),
       max: property.maximum ?? (property.exclusiveMaximum !== undefined ? property.exclusiveMaximum - 1 : undefined),

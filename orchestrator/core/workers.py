@@ -18,6 +18,7 @@ from devicevault_protocol import signing
 from devicevault_protocol.registration import (
     ASSIGNMENT,
     ROLE_COLLECTOR,
+    ROLE_STORAGE,
     STATUS_APPROVED,
     STATUS_PENDING,
     STATUS_REVOKED,
@@ -77,9 +78,10 @@ def push_assignment(worker: Worker) -> None:
 def update_assignment(worker: Worker, **changes: Any) -> Worker:
     """Apply assignment changes, bump the version and push it to the worker.
 
-    ``collection_groups`` (if given) is a list of CollectionGroup instances.
+    ``collection_groups`` and ``storage_targets`` (if given) are lists of model instances.
     """
     groups = changes.pop('collection_groups', None)
+    targets = changes.pop('storage_targets', None)
     with transaction.atomic():
         for field, value in changes.items():
             setattr(worker, field, value)
@@ -87,24 +89,78 @@ def update_assignment(worker: Worker, **changes: Any) -> Worker:
         worker.save()
         if groups is not None:
             worker.collection_groups.set(groups)
+        if targets is not None:
+            worker.storage_targets.set(targets)
     push_assignment(worker)
     return worker
 
 
-def approve(worker: Worker, *, role: str, user=None, collection_groups=None, storage_backends=None) -> Worker:
+def approve(worker: Worker, *, role: str, user=None, collection_groups=None, storage_targets=None) -> Worker:
+    """Approve ``worker`` with a role. Check storage targets with ``approval_target_problems`` first."""
     return update_assignment(
         worker,
         status=STATUS_APPROVED,
         role=role,
         approved_at=timezone.now(),
         approved_by=user,
-        storage_backends=sorted(storage_backends or []) if role != ROLE_COLLECTOR else [],
         collection_groups=list(collection_groups or []) if role == ROLE_COLLECTOR else [],
+        storage_targets=list(storage_targets or []) if role == ROLE_STORAGE else [],
     )
 
 
 def revoke(worker: Worker) -> Worker:
     return update_assignment(worker, status=STATUS_REVOKED)
+
+
+def set_target_workers(target, workers: list[Worker]) -> None:
+    """Assign a storage target to exactly ``workers`` and reassign everyone affected."""
+    with transaction.atomic():
+        before = set(target.workers.all())
+        target.workers.set(workers)
+    for worker in before ^ set(workers):
+        update_assignment(worker)
+
+
+def release_target(target) -> None:
+    """A storage target is about to be deleted: take its queue away from its workers."""
+    affected = list(target.workers.all())
+    target.workers.clear()
+    for worker in affected:
+        update_assignment(worker)
+
+
+def offered_storage_drivers(worker: Worker) -> dict[str, dict[str, Any]]:
+    drivers = (worker.capabilities or {}).get('storage_drivers') or []
+    return {d['key']: d for d in drivers if isinstance(d, dict) and d.get('key')}
+
+
+def _single_worker_problem(driver_key: str, workers) -> list[str]:
+    if len(workers) > 1 and any(not offered_storage_drivers(w).get(driver_key, {}).get('shareable') for w in workers):
+        return [f'the "{driver_key}" driver stores on one worker\'s own volume, so only one worker can serve a target']
+    return []
+
+
+def target_worker_problems(driver_key: str, workers: list[Worker]) -> list[str]:
+    """Why ``workers`` cannot serve a storage target using ``driver_key`` (empty if they can)."""
+    problems = []
+    for worker in workers:
+        if worker.status != STATUS_APPROVED or worker.role != ROLE_STORAGE:
+            problems.append(f'{worker.name} is not an approved storage worker')
+        elif driver_key not in offered_storage_drivers(worker):
+            problems.append(f'{worker.name} does not offer the "{driver_key}" storage driver')
+    return problems or _single_worker_problem(driver_key, workers)
+
+
+def approval_target_problems(worker: Worker, targets) -> list[str]:
+    """Why ``worker`` cannot be approved to serve ``targets`` (empty if it can)."""
+    problems = []
+    for target in targets:
+        if target.driver not in offered_storage_drivers(worker):
+            problems.append(f'{worker.name} does not offer the "{target.driver}" storage driver ({target.name})')
+            continue
+        sharing = [worker, *target.workers.exclude(pk=worker.pk)]
+        problems += [f'{target.name}: {p}' for p in _single_worker_problem(target.driver, sharing)]
+    return problems
 
 
 def bump_collection_group(group) -> None:
@@ -195,32 +251,29 @@ def _version_key(version: str) -> tuple:
     return tuple((0, int(part), '') if part.isdigit() else (1, 0, part) for part in version.split('.'))
 
 
-def driver_catalogue() -> dict[str, dict[str, Any]]:
-    """Collector drivers advertised by approved collectors, by key.
+def _catalogue(role: str, capability: str, flag: str) -> dict[str, dict[str, Any]]:
+    """Drivers advertised under ``capabilities[capability]`` by approved workers of ``role``.
 
-    Each entry: key, name, description, is_binary, params_schema (JSON schema
-    of the per-device parameters), ``workers`` (how many approved collectors
-    offer it) and ``versions``. When collectors run different versions of a
-    driver, the newest one describes it.
+    Each entry: key, name, description, ``flag`` (is_binary or shareable),
+    params_schema (JSON schema of its settings), ``workers`` (how many
+    approved workers offer it) and ``versions``. When workers run different
+    versions of a driver, the newest one describes it.
     """
     catalogue: dict[str, dict[str, Any]] = {}
-    for capabilities in Worker.objects.filter(status=STATUS_APPROVED, role=ROLE_COLLECTOR).values_list(
-        'capabilities', flat=True
-    ):
-        for driver in (capabilities or {}).get('collector_drivers', []):
+    for capabilities in Worker.objects.filter(status=STATUS_APPROVED, role=role).values_list('capabilities', flat=True):
+        for driver in (capabilities or {}).get(capability, []):
             if not isinstance(driver, dict) or not driver.get('key'):
                 continue
             version = str(driver.get('version') or '1')
             entry = catalogue.get(driver['key'])
             if entry is None or _version_key(version) > _version_key(entry['version']):
+                schema = driver.get('params_schema')
                 catalogue[driver['key']] = entry = {
                     'key': driver['key'],
                     'name': driver.get('name') or driver['key'],
                     'description': driver.get('description', ''),
-                    'is_binary': bool(driver.get('is_binary')),
-                    'params_schema': driver.get('params_schema')
-                    if isinstance(driver.get('params_schema'), dict)
-                    else None,
+                    flag: bool(driver.get(flag)),
+                    'params_schema': schema if isinstance(schema, dict) else None,
                     'version': version,
                     'workers': entry['workers'] if entry else 0,
                     'versions': entry['versions'] if entry else set(),
@@ -230,3 +283,13 @@ def driver_catalogue() -> dict[str, dict[str, Any]]:
     for entry in catalogue.values():
         entry['versions'] = sorted(entry['versions'], key=_version_key)
     return dict(sorted(catalogue.items()))
+
+
+def driver_catalogue() -> dict[str, dict[str, Any]]:
+    """Collector drivers offered by approved collectors, by key (see ``_catalogue``)."""
+    return _catalogue(ROLE_COLLECTOR, 'collector_drivers', 'is_binary')
+
+
+def storage_driver_catalogue() -> dict[str, dict[str, Any]]:
+    """Storage drivers offered by approved storage workers, by key (see ``_catalogue``)."""
+    return _catalogue(ROLE_STORAGE, 'storage_drivers', 'shareable')

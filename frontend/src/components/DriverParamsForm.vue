@@ -45,7 +45,8 @@
       <q-input
         v-else
         :model-value="inputValue(field)"
-        :type="field.kind === 'string' ? 'text' : 'number'"
+        :type="field.secret ? 'password' : field.kind === 'string' ? 'text' : 'number'"
+        :autocomplete="field.secret ? 'new-password' : undefined"
         :label="field.label"
         :hint="hint(field)"
         :rules="[(v) => checkField(field, parse(field, v))]"
@@ -71,10 +72,16 @@ import type { JsonObject } from '@/api/types'
 import JsonEditor from '@/components/JsonEditor.vue'
 import { checkField, schemaFields, type JsonSchema, type SchemaField } from '@/utils/schema'
 
-const props = withDefaults(defineProps<{ schema: JsonSchema | null | undefined; title?: string; disable?: boolean }>(), {
-  title: 'Driver settings',
-  disable: false,
-})
+const props = withDefaults(
+  defineProps<{
+    schema: JsonSchema | null | undefined
+    title?: string
+    disable?: boolean
+    /** Secret settings that already have a stored value (left empty, they keep it). */
+    secretsSet?: string[]
+  }>(),
+  { title: 'Driver settings', disable: false, secretsSet: () => [] },
+)
 const model = defineModel<JsonObject>({ required: true })
 
 const parsed = computed(() => schemaFields(props.schema))
@@ -88,7 +95,10 @@ const inputValue = (field: SchemaField) => model.value[field.name] as string | n
 const listValue = (field: SchemaField) => (value(field) as string[] | undefined) ?? []
 
 const hint = (field: SchemaField) => {
-  const fallback = field.default === undefined || field.default === null ? '' : `Default: ${String(field.default)}`
+  if (field.secret && props.secretsSet.includes(field.name) && !model.value[field.name]) {
+    return [field.description, 'A value is stored; leave empty to keep it'].filter(Boolean).join('. ')
+  }
+  const fallback = field.default === undefined || field.default === null || field.default === '' ? '' : `Default: ${String(field.default)}`
   return [field.description, fallback].filter(Boolean).join('. ') || undefined
 }
 
