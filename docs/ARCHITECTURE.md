@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24 and are **proposed**, awaiting sign-off.
 
 ## 1. Goals
 
@@ -112,6 +112,116 @@ Message formats are in `protocol/src/devicevault_protocol/registration.py`.
 
 Orchestrator secrets (Django secret, master key, vault private keys, signing key) come from env or Docker secrets. There is no `config.yaml`.
 
+### 4.4 Authentication, authorization and audit (phases 8-10)
+
+Status: **Proposed** (2026-10-24). Replaces the current role-based device-group RBAC and the staff/superuser admin check.
+
+#### Concepts
+
+- **User**: a local account (password in the DB) or an external one (LDAP, OIDC) created on first login. External users have no usable password.
+- **User group**: a named set of users. *Internal* groups are managed by hand. *External* groups are created from a provider's group names and filled only by that provider's logins. A group optionally carries the **Global administrator** flag.
+- **Device group**: unchanged, a set of devices.
+- **Grant**: one row per (user group, device group) holding the permission flags below. A user's effective permissions on a device group are the union (OR, per flag) of the grants of all the groups they belong to. There are no deny rules.
+- **Global administrator**: a member of any group with the flag. Holds every permission on every device group, including devices that are in no group, and is the only role with application administration: users, user groups and grants, auth providers, device groups, collectors and collection groups, storage targets and drivers, workers, Flower, schedules, retention policies, credential types, audit log. `is_staff` / `is_superuser` no longer authorize anything, and Django's `/admin/` site is removed.
+
+#### Permission set
+
+| Flag | Meaning | Requires |
+|---|---|---|
+| `view` (View Status) | See the device group, its devices, and job state, history, sizes and error summaries. Without it the group does not exist for the user. | none |
+| `backup_now` | Start a backup now | `view` |
+| `view_contents` | See and diff backup contents | `view` |
+| `download` | Download backup contents | `view_contents` |
+| `admin` (Group Administration) | Everything above, plus add, edit, enable/disable and delete devices in the group, use the shared reference data, and manage the group's own credentials | all of the above |
+
+The dependency rules are enforced in the serializer, the model (`CheckConstraint`s) and the UI. Saving `admin` ticks the other four. A grant row without `view` is invalid; remove the row to revoke. Backup contents are never visible to a user who has only `view`: contents, diffs and downloads all require the flag on the device's group, and a diff needs it on both sides (always the same device, hence the same group).
+
+Group administration also covers, for devices in its group:
+- **Reference data**: pick existing schedules, retention policies, collection groups, storage targets, backup methods and credentials when onboarding. Group admins get a minimal read serializer (id, name; never storage settings or secrets). Creating or changing that data is global-admin only.
+- **Credentials**: `Credential` gains a nullable `device_group` owner. Global credentials (no owner) are created by global admins and usable by every group admin. Owned credentials are created, edited, deleted and used only by admins of that group. Secrets stay write-only everywhere. A device may only reference a global credential or one owned by its own group, checked on every device write.
+- **Moving a device** to another group needs `admin` on both groups. Creating, renaming and deleting device groups is global-admin only. `Device.device_group` stays nullable: ungrouped devices are visible and manageable by global administrators only.
+
+Action to permission, enforced in the API (the UI only hides things):
+
+| Action | Needs |
+|---|---|
+| List/retrieve devices, groups, jobs, dashboard counts and recent activity | `view` on the device's group (querysets are filtered, a hidden object is a 404) |
+| `POST /devices/<id>/backup-now/` | `backup_now` |
+| Backup content, compare | `view_contents` |
+| Backup download | `download` |
+| Create, update, delete, enable/disable a device | `admin` on its group (global admin for ungrouped) |
+| Credentials | list: global ones and owned by groups the user administers; write: `admin` on the owner group, or global admin |
+| Everything else under application administration | global administrator |
+
+#### Data model (new app `accounts`; `core.UserProfile` gains `break_glass`)
+
+- `UserGroup`: name (unique), description, `is_global_admin`, `source` (`internal`/`external`), `provider` (FK, external groups only), `external_id`. The built-in internal group **Administrators** (global admin) is created by the bootstrap admin step and can be neither deleted nor stripped of its flag.
+- `UserGroupMembership`: user, group, `source` (`manual` or the provider that supplied it). Provider syncs only touch rows with their own source, so manual membership is never lost.
+- `DeviceGroupGrant`: user_group, device_group, five boolean flags, unique per pair, check constraints for the dependency rules.
+- `AuthProvider`: slug, name, `kind` (`ldap`/`oidc`), enabled, `order`, `config` (`EncryptedJSONField`, validated against the kind's pydantic model, secrets write-only like storage settings), `auto_create_users` (default on), `login_group` (optional: external group the user must be in to log in), `auto_create_groups`.
+- `GroupMappingRule`: provider, `external_group` (exact match, case-insensitive for LDAP), `user_group` (internal or external).
+- `ExternalIdentity`: provider, `subject` (immutable id), user, unique per (provider, subject).
+- Dropped: `DeviceGroupRole`, `DeviceGroupPermission`, `UserDeviceGroupRole`, `GroupDeviceGroupRole`, `DeviceGroupDjangoPermissions` and the per-group `dg_*` Django permissions with their signals, `django.contrib.auth.Group` usage, `rest_framework.authtoken`.
+- Single enforcement module `accounts/access.py`: `is_global_admin(user)`, `grants_for(user)` (a `{device_group_id: frozenset[flag]}` map, computed once per request), `can(user, flag, device_group)`, `visible_device_groups(user)` and a `Device` queryset helper. DRF classes `IsGlobalAdmin`, `IsGlobalAdminOrReadOnly` (reads for authenticated users, as `IsAdminOrReadOnly` today) and `HasDeviceGroupPermission(flag)`. These replace `api/permissions.py` and `devices/permissions.py`; there is no second checker.
+
+#### Sessions
+
+Server-side Django sessions replace DRF tokens for every login method. The cookie is HttpOnly, `SameSite=Lax` (needed for the OIDC redirect), `Secure` outside dev; sessions live in the database so both orchestrator nodes share them, and the scheduler leader prunes expired ones. CSRF is enforced for unsafe methods: `GET /api/auth/csrf/` sets the cookie, the SPA sends `X-CSRFToken`. Timeouts are an idle timeout and an absolute lifetime. The Flower cookie (decision 12) binds to the session instead of the token. Permissions are read from the database on every request, so a grant, membership or `is_active` change applies immediately for internal changes; for external groups it applies at the user's next login, bounded by the absolute lifetime.
+
+#### Login flows
+
+- **Local**: `POST /api/auth/login/` with username and password. When `DV_LOCAL_AUTH_ENABLED=false` only **break-glass** users (a flag on local users, set on the bootstrap admin, toggled by global admins) can still use it.
+- **LDAP / AD**: the same form. The orchestrator tries local users first, then each enabled LDAP provider in `order`. Implemented with `python-ldap` directly, because `django-auth-ldap` reads one static Django-settings configuration and providers here are database records. Search-and-bind: bind as the service account, search the user with a filter (the username is escaped), bind as the found DN with the password. Config: server URIs (several, for failover), LDAPS or StartTLS, CA bundle, bind DN and password, user base and filter, attribute map (username, email, first and last name), identity attribute (`entryUUID`, or `objectGUID` for AD), group base and filter or a `memberOf` attribute, optional nested-group matching (AD `LDAP_MATCHING_RULE_IN_CHAIN`), timeouts. The orchestrator must reach the directory.
+- **OIDC** (Entra ID, Okta, Authentik, any compliant IdP) using `authlib`: Authorization Code with PKCE, discovery URL, client id and secret, scopes, username claim, groups claim (default `groups`), ID-token validation against the IdP's JWKS, state and nonce. The login page lists enabled OIDC providers as buttons. `GET /api/auth/oidc/<slug>/login/` redirects out and `GET /api/auth/oidc/<slug>/callback/` creates the session and redirects into the SPA; the redirect URI to register at the IdP is shown in the provider form. Logout is local, with optional IdP end-session redirect.
+- **Linking**: an external login matches only on (provider, immutable subject: OIDC `sub`, LDAP identity attribute). It never matches on username or email, so an IdP-controlled email cannot take over a local or other account. A new username that collides is made unique. Name and email are refreshed at each login.
+- **Provisioning**: first login creates the user when `auto_create_users` is on, and the user lands with no access until a group grants some. `login_group`, if set, refuses everyone not in it.
+- **Group sync** at each login: the provider's group names are matched to `GroupMappingRule`s; with `auto_create_groups`, unmatched names also become external user groups (named `<provider>:<name>`, no grants). The user's provider-sourced memberships are set to exactly that result, adding and removing.
+- **Limitation**: Entra ID omits the groups claim and sends an overage pointer above ~200 groups. This phase does not follow it. Configure the app to emit assigned groups/roles only, and log a warning when the pointer is seen.
+
+#### Safeguards
+
+- Login throttling per username and per IP (`DV_LOGIN_MAX_FAILURES` within `DV_LOGIN_LOCKOUT_MIN`), applied to local and LDAP; the same generic error is returned for unknown user and wrong password.
+- The last active global administrator cannot be disabled, deleted, removed from the flagged group, or have the flag removed; nor can users disable or delete themselves.
+- Local passwords use Django's validators; external users cannot set passwords.
+- Provider secrets (OIDC client secret, LDAP bind password) are encrypted at rest and never returned by the API. A provider's **Test** action checks discovery/JWKS (OIDC) or bind plus a sample user and group lookup (LDAP).
+
+#### Audit
+
+The existing `AuditLog` is extended with `outcome` (`success`/`failure`/`denied`), `actor_name` (a snapshot, so failed logins by unknown names and deleted users stay readable), `ip`, `user_agent`, and a nullable `device_group` (replacing `label_scope`). Recorded: logins and failures (provider, reason), logout and session expiry; user, user-group, grant, membership, provider and mapping-rule changes and global-admin flag changes, each with before and after; backup content views, diffs and downloads (device, job, group); authorization denials (403) and Backup Now (who, device). Global administrators can read and filter the log; group-scoped log access is later.
+
+#### Configuration
+
+Identity providers are data, edited in the UI. Only security knobs and bootstrap stay in the environment (documented in `docs/DEPLOYMENT.md` and `orchestrator.env.example` with each phase):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local users to sign in (break-glass users always can) |
+| `DV_SESSION_IDLE_MIN` | `60` | Idle session timeout |
+| `DV_SESSION_MAX_HOURS` | `12` | Absolute session lifetime |
+| `DV_LOGIN_MAX_FAILURES` / `DV_LOGIN_LOCKOUT_MIN` | `5` / `15` | Throttle |
+| `DV_ADMIN_*` | as today | Bootstrap: creates a local, break-glass member of Administrators |
+
+#### Frontend
+
+- **Users**: list with source (local or provider), active state, groups; create local users, disable, reset a local password, break-glass toggle.
+- **User Groups**: editor per group: members, global-admin tick, and the group's grants as a list of device groups with the five flags (dependent boxes tick and disable themselves). External groups show membership read-only.
+- **Access** (read-only matrix): device groups as rows, user groups as columns, each cell the flags held (`S B C D A`), filterable on either axis, global-admin groups highlighted.
+- **Auth Providers**: LDAP and OIDC forms (schema-driven like storage targets), mapping rules, Test.
+- **Audit log** page for global administrators.
+- `GET /api/auth/user/` returns `is_global_admin` and `grants`; the auth store, router guard and the device, backup and credential pages use them to hide controls. This is cosmetic, as the API enforces.
+
+#### Out of scope
+
+MFA for local users; API keys and service accounts; per-device grants and deny rules; SCIM or scheduled directory sync (groups sync at login only); SAML 2.0 (may return as a provider kind, since providers are pluggable); delegated membership management by group admins (group admins see no user administration); Entra group-overage resolution.
+
+#### Delivery
+
+1. **Phase 8 `feat/aaa-rbac`**: `accounts` app, groups, memberships and grants, `access.py` replacing both checkers, enforcement across every view (`CLAUDE.md` rule: every view states its permission class), credential ownership, sessions replacing tokens, audit extension, Users / User Groups / Access / Audit pages, drop of the old RBAC, local auth only.
+2. **Phase 9 `feat/auth-providers`**: provider records, mapping rules, group sync, linking, break-glass, LDAP, Auth Providers UI.
+3. **Phase 10 `feat/auth-oidc`**: OIDC provider kind and login flow; tested against a mock IdP.
+
+Tests, per phase: the dependency rules (model, API), the union semantics, a matrix of role x endpoint (including that hidden objects 404 and contents/download are refused), the last-admin guard, CSRF, session timeouts, identity linking (no email takeover), group sync add and remove, LDAP filter escaping, and OIDC state/nonce/signature failures.
+
 ## 5. Backup data path
 
 Large payloads don't go through RabbitMQ: RabbitMQ 4 defaults to a 16 MiB message cap, and backups can be tens of MB. Instead, **blobs are staged in Redis** (ciphertext when payload encryption is on) (`dv:blob:<uuid>`, TTL 24h). Messages carry only `{blob_ref, sha256, size}`. Redis streams are dropped: all events go over RabbitMQ (durable quorum queue `dv.orchestrator`), so retries and acks are uniform.
@@ -184,7 +294,10 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, per-recipient sealed secrets, credential encryption at rest, retry semantics, collector driver framework (Netmiko base; Cisco IOS and MikroTik drivers), schema-driven device form | yes |
 | 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |
 | 7 | `feat/flower-ha` | FlowerEndpoint and nginx proxy, scheduler leader election verified with 2 nodes, HA docs | yes |
-| later | — | Retention enforcement, push collection, new vendor drivers, external auth, Redis Sentinel | — |
+| 8 | `feat/aaa-rbac` | User groups, device-group grants and the permission matrix, global administrators, server-side sessions, audit extension, replaces the old RBAC (section 4.4) | yes |
+| 9 | `feat/auth-providers` | Auth provider records, group mapping and sync, identity linking, break-glass, LDAP | yes |
+| 10 | `feat/auth-oidc` | OIDC provider kind (Entra, Okta, Authentik) | yes |
+| later | — | Retention enforcement, push collection, new vendor drivers, Redis Sentinel | — |
 
 Each backend phase ships its own UI changes, so master never has a broken frontend.
 
@@ -197,7 +310,7 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 3 | Redis streams dropped. Events go over RabbitMQ, and payloads are staged in Redis as blobs. |
 | 4 | Infra HA and the front-end VIP/LB are documented, not shipped in compose. |
 | 5 | Config comes from env and Docker secrets only; no `config.yaml`. SQLite→Postgres migration is a `manage.py` command. |
-| 6 | External auth (LDAP/SAML/Entra) deps removed; external auth becomes a later phase. |
+| 6 | External auth (LDAP/SAML/Entra) deps removed; external auth becomes a later phase. Superseded by decisions 14-22 (phases 8-10); SAML is not planned. |
 | 7 | No CI for now (no GitHub Actions minutes). A CI-agnostic `Makefile` is ready for a future GitLab or Gitea pipeline. |
 | 8 | (phase 5) Secrets in transit are sealed per recipient worker rather than to collection-group keys: simpler, no key distribution or re-keying on membership change, and cheap at the expected 6-8 collectors. The vault public key and the payload-encryption switch travel in each signed task rather than in assignments. |
 | 9 | (phase 5) Collector drivers use Netmiko for SSH CLI platforms; Scrapli can be added as a second base when a platform needs it. |
@@ -205,4 +318,13 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 11 | (phase 6) Reads and target checks are request/response tasks answered through the Celery result backend, not `read.result` events: the API needs the answer within the same HTTP request, which an event handled by any `events` process cannot give it. The content itself still travels through Redis, checked against the job's recorded SHA-256. |
 | 12 | (phase 7) A proxied Flower is authorised by a short-lived signed cookie, scoped to `/flower/<slug>/` and bound to the user's API token, that the UI requests before opening it: the SPA's token lives in browser storage, which a new tab doesn't send. The API names the upstream in the `auth_request` response, so the nginx configuration stays static. |
 | 13 | (phase 7) One database per message bus: `migrate` claims Redis for its database's installation id and a node with another database refuses to start. This enforces single-node SQLite and also catches nodes pointed at different PostgreSQL databases. |
+| 14 | (phase 8) The role-based device-group RBAC (roles, per-group Django permissions, user and auth-group role assignments) is dropped for **user groups with grants**: one row per (user group, device group) holding five dependent flags (view, backup now, view contents, download, admin). Effective rights are the union across a user's groups; there are no deny rules. One checker (`accounts/access.py`). |
+| 15 | (phase 8) **Global administrator** is a flag on a user group, not on the user. `is_staff`/`is_superuser` authorize nothing and the Django admin site is removed. The built-in Administrators group and the last active global admin are protected. |
+| 16 | (phase 8) Server-side session cookies (HttpOnly, SameSite=Lax, CSRF) replace DRF tokens for all login methods, which makes OIDC redirects and server-side logout and timeouts straightforward. The Flower cookie binds to the session. |
+| 17 | (phase 8) `Credential.device_group` is an optional owner: global credentials are admin-managed and shared, owned ones are managed and usable by that group's admins only. |
+| 18 | (phase 9) Identity providers are database records edited in the UI, several can coexist, secrets encrypted at rest. This is application data, not deployment configuration, so it is an exception to decision 5; bootstrap and security timeouts stay in the environment. |
+| 19 | (phase 9) External identities link on (provider, immutable subject), never on email or username. Provisioning is just-in-time per provider. |
+| 20 | (phase 9) External group membership is synced at login only, by mapping rules and optional auto-created external groups, tagged by source so manual membership is untouched. |
+| 21 | (phase 9) Break-glass: the bootstrap admin is a local user flagged to log in even when local authentication is disabled. |
+| 22 | (phases 9-10) LDAP uses `python-ldap` directly (django-auth-ldap is single-configuration, settings-based); OIDC uses `authlib`. SAML is out of scope. |
 | — | Retention enforcement: in scope, designed in a later phase. |
