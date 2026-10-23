@@ -105,6 +105,7 @@
             map-options
             outlined
             label="Backup method"
+            :hint="backupMethods.length ? undefined : 'No approved collector offers a backup method yet (Admin Settings > Workers)'"
             :disable="!canModify"
             :rules="[required('Backup method')]"
           />

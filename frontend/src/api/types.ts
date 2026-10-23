@@ -23,6 +23,8 @@ export interface CollectionGroup {
   description: string
   rabbitmq_queue_id: string
   device_count: number
+  /** Approved collectors consuming this group's queue. */
+  collector_count: number
   created_at: IsoDateTime
   updated_at: IsoDateTime
 }
@@ -93,6 +95,8 @@ export interface BackupMethod {
   friendly_name: string
   description: string
   is_binary: boolean
+  /** Approved collectors offering this method. */
+  collectors: number
 }
 
 // --- Devices -----------------------------------------------------------------
@@ -283,26 +287,53 @@ export interface UserPreferences {
 
 // --- Monitoring --------------------------------------------------------------
 
-export interface WorkerStatus {
-  worker_id: string
-  worker_name: string
-  worker_type: string
-  hostname: string
-  pid: number | null
-  queues: string[]
-  last_seen_at: IsoDateTime | null
-  last_heartbeat_at: IsoDateTime | null
-  last_ping_at: IsoDateTime | null
-  last_pong_at: IsoDateTime | null
-  is_online: boolean
-  status: 'online' | 'offline'
+export type WorkerStatus = 'pending' | 'approved' | 'revoked'
+export type WorkerRole = 'collector' | 'storage'
+
+export interface CollectorDriver {
+  key: string
+  name: string
+  description: string
+  is_binary: boolean
 }
 
-export interface WorkerRegistry {
-  workers: WorkerStatus[]
+export interface Worker {
+  id: string
+  name: string
+  celery_hostname: string
+  hostname: string
+  pid: number | null
+  version: string
+  status: WorkerStatus
+  role: WorkerRole | ''
+  collection_groups: Id[]
+  storage_backends: string[]
+  /** SSH-style SHA256 fingerprint of the worker's signing key. */
+  fingerprint: string
+  capabilities: { collector_drivers?: CollectorDriver[]; storage_backends?: string[] }
+  desired_version: number
+  applied_version: number
+  applied_queues: string[]
+  assigned_queues: string[]
+  in_sync: boolean
+  /** Whether the key the worker pinned is this orchestrator's; null until it pins one. */
+  pinned_orchestrator_matches: boolean | null
+  registered_at: IsoDateTime
+  approved_at: IsoDateTime | null
+  approved_by_username: string | null
+  last_seen_at: IsoDateTime | null
+  is_online: boolean
+}
+
+export interface WorkerAssignment {
+  role: WorkerRole
+  collection_groups: Id[]
+  storage_backends: string[]
+}
+
+export interface OrchestratorIdentity {
+  fingerprint: string
   online_timeout_seconds: number
-  pong_grace_seconds: number
-  generated_at: IsoDateTime
 }
 
 export interface DailyStat {

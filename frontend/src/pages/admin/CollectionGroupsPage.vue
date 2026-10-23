@@ -14,6 +14,12 @@
       <template #body-cell-device_count="props">
         <q-td :props="props"><q-badge color="info" :label="props.row.device_count" /></q-td>
       </template>
+      <template #body-cell-collector_count="props">
+        <q-td :props="props">
+          <q-badge :color="props.row.collector_count ? 'positive' : 'negative'" :label="props.row.collector_count" />
+          <q-tooltip v-if="!props.row.collector_count">No approved collector serves this group, so its backups will wait</q-tooltip>
+        </q-td>
+      </template>
       <template #body-cell-actions="props">
         <q-td :props="props">
           <RowActions
@@ -73,6 +79,7 @@ const columns: QTableColumn<CollectionGroup>[] = [
   { name: 'description', label: 'Description', field: 'description', align: 'left' },
   { name: 'queue', label: 'Queue', field: 'rabbitmq_queue_id', align: 'left' },
   { name: 'device_count', label: 'Devices', field: 'device_count', align: 'center', sortable: true },
+  { name: 'collector_count', label: 'Collectors', field: 'collector_count', align: 'center', sortable: true },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]
 </script>

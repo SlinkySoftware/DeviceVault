@@ -1,7 +1,15 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-  <PageCard title="Backup Methods" caption="Collector plugins available to devices (read-only)">
-    <q-table flat :rows="methods" :columns="columns" row-key="key" :loading="loading" class="admin-table">
+  <PageCard title="Backup Methods" caption="Collector drivers offered by approved collectors (read-only)">
+    <q-table
+      flat
+      :rows="methods"
+      :columns="columns"
+      row-key="key"
+      :loading="loading"
+      no-data-label="No approved collectors yet. Approve a collector under Workers to make its backup methods available."
+      class="admin-table"
+    >
       <template #body-cell-friendly_name="props">
         <q-td :props="props">
           <strong>{{ props.row.friendly_name }}</strong>
@@ -34,6 +42,7 @@ const columns: QTableColumn<BackupMethod>[] = [
   { name: 'friendly_name', label: 'Backup Method', field: 'friendly_name', align: 'left', sortable: true },
   { name: 'is_binary', label: 'Output', field: 'is_binary', align: 'center' },
   { name: 'description', label: 'Description', field: 'description', align: 'left' },
+  { name: 'collectors', label: 'Collectors', field: 'collectors', align: 'center', sortable: true },
 ]
 
 onMounted(async () => {

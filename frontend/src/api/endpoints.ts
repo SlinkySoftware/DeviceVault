@@ -38,7 +38,9 @@ import type {
   UserDetails,
   UserPreferences,
   UserRoleAssignment,
-  WorkerRegistry,
+  OrchestratorIdentity,
+  Worker,
+  WorkerAssignment,
 } from './types'
 
 type Params = Record<string, string | number | boolean | undefined>
@@ -169,7 +171,16 @@ export const settingsApi = {
 }
 
 export const workersApi = {
-  registry: async () => (await http.get<WorkerRegistry>('/worker-registry/')).data,
+  list: async () => (await http.get<Worker[]>('/workers/')).data,
+  orchestrator: async () => (await http.get<OrchestratorIdentity>('/workers/orchestrator/')).data,
+  approve: async (id: string, body: WorkerAssignment) =>
+    (await http.post<Worker>(`/workers/${id}/approve/`, body)).data,
+  update: async (id: string, body: Partial<WorkerAssignment> & { name?: string }) =>
+    (await http.patch<Worker>(`/workers/${id}/`, body)).data,
+  revoke: async (id: string) => (await http.post<Worker>(`/workers/${id}/revoke/`)).data,
+  forget: async (id: string) => {
+    await http.delete(`/workers/${id}/`)
+  },
 }
 
 export const dashboardApi = {
