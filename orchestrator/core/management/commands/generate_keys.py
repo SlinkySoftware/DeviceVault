@@ -12,6 +12,8 @@ from devicevault_protocol.crypto.constants import AES_KEY_BYTES
 
 class Command(BaseCommand):
     help = 'Print new orchestrator keys as env lines (DV_SIGNING_KEY, DV_DATA_KEYS, DV_VAULT_KEYS)'
+    # The key checks would fail for want of the very keys this creates.
+    requires_system_checks = []
 
     def add_arguments(self, parser):
         parser.add_argument(
