@@ -21,6 +21,7 @@ import json
 import os
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth.models import Group, Permission, User
 from django.db.models import Avg, Count, OuterRef, Subquery
 from django.utils import timezone
@@ -32,9 +33,9 @@ from rest_framework.views import APIView
 
 from audit.models import AuditLog
 from backups.models import Backup, StoredBackup
-from celery_app import app as celery_app
 from core.models import DashboardLayout, WorkerRegistration
 from credentials.models import Credential, CredentialType
+from devices.dispatch import DispatchError, dispatch_collection
 from devices.models import (
     CollectionGroup,
     Device,
@@ -47,7 +48,6 @@ from devices.models import (
     UserDeviceGroupRole,
 )
 from devices.permissions import user_has_device_group_permission
-from devicevault_worker import collection_queue_name_from_group
 from locations.models import BackupLocation
 from policies.models import BackupSchedule, RetentionPolicy
 
@@ -128,14 +128,14 @@ class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Read-only ViewSet for listing available backup method plugins
 
-    Returns all plugins discovered under backups.plugins with their
+    Returns all plugins discovered under devicevault_worker.plugins with their
     friendly_name, description, and is_binary flag.
     """
 
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
-        from backups.plugins import list_plugins
+        from devicevault_worker.plugins import list_plugins
 
         plugins = list_plugins()
         data = [
@@ -209,36 +209,14 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 {'error': 'Not authorized for Backup Now on this device group'}, status=status.HTTP_403_FORBIDDEN
             )
 
-        # Enqueue backup task via Celery (orchestrator workers will perform the work)
-        cfg = {
-            'device_id': device.id,
-            'task_identifier': f'backup_now:{device.id}:{timezone.now().isoformat()}',
-            'ip': device.ip_address,
-            'credentials': device.credential.data if device.credential else {},
-            'backup_method': device.backup_method,
-            'plugin_params': {},
-            'timeout': 240,
-        }
-
-        queue = None
-        if device.collection_group:
-            queue_name = collection_queue_name_from_group(device.collection_group)
-            if queue_name:
-                queue = queue_name
-
-        try:
-            task = celery_app.send_task('device.collect', args=[json.dumps(cfg)], queue=queue)
-            return response.Response({'task_id': task.id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
-        except Exception as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return self._dispatch(device, 'backup_now')
 
     @decorators.action(detail=True, methods=['post'])
     def collect(self, request, pk=None):
         """Enqueue a collection task for this device.
 
-        Routing: If device.collection_group is set, the task will be queued to
-        the group's queue (collector.group.<rabbitmq_queue_id>); otherwise the
-        default broker routing will be used.
+        The task is queued to the device's collection group queue
+        (collector.group.<rabbitmq_queue_id>).
         """
         device = self.get_object()
         # Permission check - reuse existing RBAC for 'backup_now'
@@ -253,28 +231,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 {'error': 'Not authorized to start backup for this device'}, status=status.HTTP_403_FORBIDDEN
             )
 
-        cfg = {
-            'device_id': device.id,
-            'task_identifier': f'collect:{device.id}:{timezone.now().isoformat()}',
-            'ip': device.ip_address,
-            'credentials': device.credential.data if device.credential else {},
-            'backup_method': device.backup_method,
-            'plugin_params': {},
-            'timeout': 240,
-        }
+        return self._dispatch(device, 'collect')
 
-        queue = None
-        if device.collection_group:
-            queue_name = collection_queue_name_from_group(device.collection_group)
-            if queue_name:
-                queue = queue_name
-
-        # Use send_task to set routing dynamically
+    def _dispatch(self, device, trigger):
         try:
-            task = celery_app.send_task('device.collect', args=[json.dumps(cfg)], queue=queue)
-            return response.Response({'task_id': task.id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
+            task_id, queue = dispatch_collection(device, trigger)
+        except DispatchError as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
             return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return response.Response({'task_id': task_id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
 
 
 class BackupViewSet(viewsets.ModelViewSet):
@@ -369,8 +335,8 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 
             from django.http import FileResponse
 
-            from backups.plugins import get_plugin
             from backups.storage_client import read_backup_via_worker
+            from devicevault_worker.plugins import get_plugin
 
             # Check if backup is binary by looking up the device's backup method plugin
             is_binary = False
@@ -437,7 +403,6 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         # Parse the log field (JSON array of log entries) from collection
-        import json
 
         try:
             log_data = json.loads(backup_result.log) if backup_result.log else []
@@ -446,7 +411,7 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Normalize log entries: support both string (legacy) and structured formats
         normalized_logs = []
-        from backups.plugins import get_plugin
+        from devicevault_worker.plugins import get_plugin
 
         plugin_key = backup_result.device.backup_method if backup_result.device else 'unknown'
         plugin = get_plugin(plugin_key) if plugin_key else None
@@ -616,20 +581,9 @@ class WorkerRegistryView(APIView):
 
     permission_classes = [IsAdminUser]
 
-    @staticmethod
-    def _read_int_env(name: str, default: int) -> int:
-        raw = os.environ.get(name, '')
-        if not raw:
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return value if value > 0 else default
-
     def get(self, request):
-        online_timeout_sec = self._read_int_env('DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC', 90)
-        pong_grace_sec = self._read_int_env('DEVICEVAULT_WORKER_PONG_GRACE_SEC', 45)
+        online_timeout_sec = settings.DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC
+        pong_grace_sec = settings.DEVICEVAULT_WORKER_PONG_GRACE_SEC
         now = timezone.now()
         online_cutoff = now - timedelta(seconds=online_timeout_sec)
         pong_cutoff = now - timedelta(seconds=pong_grace_sec)
@@ -717,24 +671,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return (not user.has_usable_password()) or has_social
 
     def _is_local_auth_enabled(self):
-        """Check if local auth is enabled in config.yaml"""
-        from pathlib import Path
-
-        import yaml
-
-        config_path = os.environ.get(
-            'DEVICEVAULT_CONFIG', str(Path(__file__).resolve().parent.parent / 'config' / 'config.yaml')
-        )
-        if not os.path.exists(config_path):
-            return False
-
-        try:
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-            auth_config = config.get('auth', {})
-            return auth_config.get('local_enabled', False) or auth_config.get('type', '').lower() == 'local'
-        except Exception:
-            return False
+        return settings.DEVICEVAULT_LOCAL_AUTH_ENABLED
 
     def create(self, request, *args, **kwargs):
         """Create a new user - only allowed if local auth is enabled"""
@@ -805,14 +742,24 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 @decorators.api_view(['GET'])
-def onboarding(request):
-    from pathlib import Path
+@decorators.authentication_classes([])
+@decorators.permission_classes([AllowAny])
+def health(request):
+    """Liveness/readiness probe: the process is serving and the database is reachable."""
+    from django.db import connection
 
-    config_path = os.environ.get(
-        'DEVICEVAULT_CONFIG', str(Path(__file__).resolve().parent.parent / 'config' / 'config.yaml')
-    )
-    exists = os.path.exists(config_path)
-    return response.Response({'configured': exists})
+    try:
+        connection.ensure_connection()
+    except Exception:
+        return response.Response({'status': 'unavailable'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    return response.Response({'status': 'ok'})
+
+
+@decorators.api_view(['GET'])
+def onboarding(request):
+    # Configuration is supplied by the deployment environment, so an
+    # orchestrator that is serving requests is configured by definition.
+    return response.Response({'configured': True})
 
 
 @decorators.api_view(['GET'])
@@ -943,29 +890,10 @@ class AuthConfigView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        from pathlib import Path
+        local_enabled = settings.DEVICEVAULT_LOCAL_AUTH_ENABLED
+        auth_type = 'Local' if local_enabled else None
 
-        import yaml
-
-        config_path = os.environ.get(
-            'DEVICEVAULT_CONFIG', str(Path(__file__).resolve().parent.parent / 'config' / 'config.yaml')
-        )
-        local_enabled = False
-        auth_type = None
-
-        if os.path.exists(config_path):
-            try:
-                with open(config_path) as f:
-                    config = yaml.safe_load(f)
-                auth_config = config.get('auth', {})
-                local_enabled = auth_config.get('local_enabled', False)
-                auth_type = auth_config.get('type')
-            except Exception:
-                pass
-
-        return response.Response(
-            {'providers': ['LDAP', 'SAML', 'EntraID', 'Local'], 'local_enabled': local_enabled, 'auth_type': auth_type}
-        )
+        return response.Response({'providers': ['Local'], 'local_enabled': local_enabled, 'auth_type': auth_type})
 
 
 class LoginView(APIView):

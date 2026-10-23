@@ -14,42 +14,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
+# All configuration comes from DV_* environment variables; each also accepts
+# <NAME>_FILE for Docker secrets. See deploy/orchestrator/orchestrator.env.example.
+
 from pathlib import Path
 
-import yaml
+from devicevault_protocol.bus import BusSettings
+from devicevault_protocol.env import ConfigError, env_bool, env_int, env_list, env_str
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(env_str('DV_DATA_DIR', str(BASE_DIR / 'var')))
 
+DEBUG = env_bool('DV_DEBUG', False)
+SECRET_KEY = env_str('DV_SECRET_KEY')
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ConfigError('DV_SECRET_KEY must be set when DV_DEBUG is false')
+    SECRET_KEY = 'insecure-development-key'
 
-def _env_flag(name, default):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+ALLOWED_HOSTS = env_list('DV_ALLOWED_HOSTS', ['*'] if DEBUG else [])
+CSRF_TRUSTED_ORIGINS = env_list('DV_CSRF_TRUSTED_ORIGINS')
 
-
-def _env_list(name, default):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    parsed = [item.strip() for item in value.split(',') if item.strip()]
-    return parsed or default
-
-
-CONFIG_PATH = os.environ.get('DEVICEVAULT_CONFIG', str(BASE_DIR / 'config' / 'config.yaml'))
-if os.path.exists(CONFIG_PATH):
-    with open(CONFIG_PATH, encoding='utf-8') as config_handle:
-        cfg = yaml.safe_load(config_handle) or {}
-else:
-    cfg = {}
-
-SECRET_KEY = os.environ.get(
-    'DEVICEVAULT_SECRET_KEY',
-    cfg.get('secret_key', 'dev-secret'),
-)
-DEBUG = _env_flag('DEBUG', cfg.get('debug', True))
-ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', cfg.get('allowed_hosts', ['*']))
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -59,7 +44,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
-    'corsheaders',
     'core',
     'devices',
     'backups',
@@ -70,7 +54,6 @@ INSTALLED_APPS = [
     'api',
 ]
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -79,6 +62,9 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+if not DEBUG:
+    # Serves collected static files (admin, DRF) in the image; runserver does it in DEBUG.
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 ROOT_URLCONF = 'devicevault.urls'
 TEMPLATES = [
     {
@@ -97,97 +83,71 @@ TEMPLATES = [
 ]
 WSGI_APPLICATION = 'devicevault.wsgi.application'
 
-DB_CFG = cfg.get('database', {})
-ENGINE = (os.environ.get('DEVICEVAULT_DB_ENGINE') or DB_CFG.get('engine') or 'sqlite').strip().lower()
-
-if ENGINE == 'sqlite':
+DB_ENGINE = env_str('DV_DB_ENGINE', 'sqlite').strip().lower()
+if DB_ENGINE == 'sqlite':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': os.environ.get(
-                'DEVICEVAULT_DB_NAME',
-                DB_CFG.get('name', str(BASE_DIR / 'devicevault.sqlite3')),
-            ),
+            'NAME': env_str('DV_DB_NAME', str(DATA_DIR / 'devicevault.sqlite3')),
+            'OPTIONS': {
+                # Several orchestrator processes share one SQLite file.
+                'transaction_mode': 'IMMEDIATE',
+                'timeout': 20,
+                'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;',
+            },
         }
     }
-elif ENGINE == 'postgres':
+elif DB_ENGINE == 'postgres':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get(
-                'DEVICEVAULT_DB_NAME',
-                os.environ.get('POSTGRES_DB', DB_CFG.get('name', 'devicevault')),
-            ),
-            'USER': os.environ.get(
-                'DEVICEVAULT_DB_USER',
-                os.environ.get('POSTGRES_USER', DB_CFG.get('user', '')),
-            ),
-            'PASSWORD': os.environ.get(
-                'DEVICEVAULT_DB_PASSWORD',
-                os.environ.get('POSTGRES_PASSWORD', DB_CFG.get('password', '')),
-            ),
-            'HOST': os.environ.get(
-                'DEVICEVAULT_DB_HOST',
-                os.environ.get('POSTGRES_HOST', DB_CFG.get('host', 'localhost')),
-            ),
-            'PORT': os.environ.get(
-                'DEVICEVAULT_DB_PORT',
-                os.environ.get('POSTGRES_PORT', DB_CFG.get('port', '5432')),
-            ),
+            'NAME': env_str('DV_DB_NAME', 'devicevault'),
+            'USER': env_str('DV_DB_USER', 'devicevault'),
+            'PASSWORD': env_str('DV_DB_PASSWORD', ''),
+            'HOST': env_str('DV_DB_HOST', 'localhost'),
+            'PORT': env_int('DV_DB_PORT', 5432),
+            'CONN_MAX_AGE': 60,
+            'CONN_HEALTH_CHECKS': True,
         }
     }
 else:
-    raise ValueError(f'Unsupported database engine: {ENGINE}')
+    raise ConfigError(f'DV_DB_ENGINE must be sqlite or postgres, got {DB_ENGINE!r}')
+
 LANGUAGE_CODE = 'en-us'
-# Application timezone for display - read from config.yaml or default to Australia/Sydney
-DEVICEVAULT_DISPLAY_TIMEZONE = cfg.get('timezone', 'Australia/Sydney')
-# Django timezone - always UTC for database storage
+# Display timezone; the database always stores UTC.
+DEVICEVAULT_DISPLAY_TIMEZONE = env_str('DV_TIMEZONE', 'UTC')
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = '/static/'
-CORS_ALLOW_ALL_ORIGINS = _env_flag('DEVICEVAULT_CORS_ALLOW_ALL_ORIGINS', True)
-CORS_ALLOW_CREDENTIALS = _env_flag('DEVICEVAULT_CORS_ALLOW_CREDENTIALS', True)
 
-_cors_allowed_origins_raw = os.environ.get('DEVICEVAULT_CORS_ALLOWED_ORIGINS', '')
-if _cors_allowed_origins_raw:
-    CORS_ALLOWED_ORIGINS = [
-        origin.strip().rstrip('/') for origin in _cors_allowed_origins_raw.split(',') if origin.strip()
-    ]
-elif not CORS_ALLOW_ALL_ORIGINS:
-    CORS_ALLOWED_ORIGINS = [
-        'http://localhost:9000',
-        'http://127.0.0.1:9000',
-    ]
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
+
+# Behind nginx, which terminates TLS.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.BasicAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
 }
 
-# Celery configuration: prefer explicit env var, then config.yaml 'celery' section, then sensible defaults
-CELERY_BROKER_URL = os.environ.get(
-    'DEVICEVAULT_BROKER_URL', cfg.get('celery', {}).get('broker', 'amqp://guest:guest@localhost:5672//')
-)
-DEVICEVAULT_REDIS_URL = os.environ.get(
-    'DEVICEVAULT_REDIS_URL', cfg.get('redis', {}).get('url', 'redis://localhost:6379/1')
-)
-CELERY_RESULT_BACKEND = os.environ.get(
-    'DEVICEVAULT_RESULT_BACKEND', cfg.get('celery', {}).get('result_backend', DEVICEVAULT_REDIS_URL)
-)
-# RabbitMQ management API for Flower - uses HTTP port (15672 by default)
-CELERY_BROKER_API = os.environ.get(
-    'DEVICEVAULT_BROKER_API', cfg.get('celery', {}).get('broker_api', 'http://guest:guest@localhost:15672/api/')
-)
-DEVICEVAULT_RESULTS_STREAM = cfg.get('results_stream', os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results'))
-DEVICEVAULT_STORAGE_RESULTS_STREAM = os.environ.get(
-    'DEVICEVAULT_STORAGE_RESULTS_STREAM', cfg.get('storage_results_stream', 'storage:results')
-)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': env_str('DV_LOG_LEVEL', 'INFO')},
+}
 
-# Encryption configuration - loaded from config.yaml 'encryption' section / env vars.
-# The heavy lifting (key provider init, crypto wrapper) is done lazily in
-# crypto.config to keep settings.py import-time fast and fail-safe.
-DEVICEVAULT_ENCRYPTION = cfg.get('encryption', {})
+DEVICEVAULT_BUS = BusSettings.from_env()
+DEVICEVAULT_LOCAL_AUTH_ENABLED = env_bool('DV_LOCAL_AUTH_ENABLED', True)
+DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC = env_int('DV_WORKER_ONLINE_TIMEOUT_SEC', 90, minimum=1)
+DEVICEVAULT_WORKER_PONG_GRACE_SEC = env_int('DV_WORKER_PONG_GRACE_SEC', 45, minimum=1)
+DEVICEVAULT_WORKER_PING_INTERVAL_SEC = env_int('DV_WORKER_PING_INTERVAL_SEC', 30, minimum=1)

@@ -11,8 +11,8 @@ from typing import Any
 from celery.signals import worker_ready, worker_shutdown
 from kombu import Connection, Consumer, Exchange, Producer, Queue
 
-from celery_app import BROKER
-from core.worker_presence_protocol import (
+from devicevault_protocol.env import env_list
+from devicevault_protocol.presence import (
     EVENT_HEARTBEAT,
     EVENT_PING,
     EVENT_PONG,
@@ -21,6 +21,7 @@ from core.worker_presence_protocol import (
     WORKER_EVENTS_EXCHANGE,
     WORKER_EVENTS_ROUTING_KEY,
 )
+from devicevault_worker.app import bus
 
 logger = logging.getLogger('devicevault.worker.presence')
 
@@ -48,38 +49,13 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _extract_queue_names(sender: Any) -> list[str]:
-    names = set()
-
-    consumer = getattr(sender, 'consumer', None)
-    task_consumer = getattr(consumer, 'task_consumer', None)
-    task_queues = getattr(task_consumer, 'queues', None)
-    if task_queues:
-        for queue in task_queues:
-            name = getattr(queue, 'name', '')
-            if name:
-                names.add(name)
-
-    if not names:
-        app = getattr(sender, 'app', None)
-        amqp = getattr(app, 'amqp', None)
-        queues = getattr(amqp, 'queues', None)
-        if isinstance(queues, dict):
-            names.update(str(q) for q in queues.keys() if q)
-        elif queues is not None:
-            for queue in queues:
-                name = getattr(queue, 'name', '') or str(queue)
-                if name:
-                    names.add(name)
-
-    if not names:
-        raw = os.environ.get('DEVICEVAULT_WORKER_QUEUES', '')
-        if raw:
-            for item in raw.split(','):
-                queue = item.strip()
-                if queue:
-                    names.add(queue)
-
-    return sorted(names)
+    """Return the queues this worker consumes (-Q), not every queue Celery knows about."""
+    configured = env_list('DV_WORKER_QUEUES')
+    if configured:
+        return sorted(set(configured))
+    app = getattr(sender, 'app', None)
+    consume_from = getattr(getattr(getattr(app, 'amqp', None), 'queues', None), 'consume_from', None)
+    return sorted(consume_from or [])
 
 
 def _infer_worker_type(queues: list[str]) -> str:
@@ -106,9 +82,9 @@ class WorkerPresenceAgent:
         self.queues = queues
         self.worker_type = _infer_worker_type(queues)
 
-        self.heartbeat_interval_sec = _read_int_env('DEVICEVAULT_WORKER_HEARTBEAT_INTERVAL_SEC', 30)
-        self.reconnect_delay_sec = _read_int_env('DEVICEVAULT_WORKER_RECONNECT_DELAY_SEC', 5)
-        self.accepted_message_ttl_sec = _read_int_env('DEVICEVAULT_WORKER_CONTROL_MESSAGE_TTL_SEC', 60)
+        self.heartbeat_interval_sec = _read_int_env('DV_WORKER_HEARTBEAT_INTERVAL_SEC', 30)
+        self.reconnect_delay_sec = _read_int_env('DV_WORKER_RECONNECT_DELAY_SEC', 5)
+        self.accepted_message_ttl_sec = _read_int_env('DV_WORKER_CONTROL_MESSAGE_TTL_SEC', 60)
 
         self._stop_event = threading.Event()
         self._thread = None
@@ -241,7 +217,7 @@ def _on_worker_ready(sender=None, **kwargs):
         pid = os.getpid()
 
         _presence_agent = WorkerPresenceAgent(
-            broker_url=BROKER,
+            broker_url=bus.broker_url,
             worker_id=worker_name,
             worker_name=worker_name,
             hostname=hostname,

@@ -48,6 +48,7 @@ router.register(r'audit-logs', views.AuditLogViewSet)
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/health/', views.health),
     path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', views.dashboard_stats),
     path('api/recent-backup-activity/', views.recent_backup_activity),

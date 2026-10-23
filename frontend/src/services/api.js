@@ -23,7 +23,7 @@ import config from './config'
  * Create axios HTTP client instance with base configuration
  * 
  * Configuration:
- * - baseURL: Backend API URL from config (e.g., http://localhost:8000/api)
+ * - baseURL: same-origin /api (see services/config.js)
  * - Content-Type: application/json for all requests
  */
 const api = axios.create({

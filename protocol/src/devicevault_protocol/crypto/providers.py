@@ -24,8 +24,8 @@ from cryptography.hazmat.primitives.keywrap import (
     aes_key_wrap,
 )
 
-from crypto.constants import AES_KEY_BYTES
-from crypto.exceptions import (
+from devicevault_protocol.crypto.constants import AES_KEY_BYTES
+from devicevault_protocol.crypto.exceptions import (
     KeyProviderError,
     KeyUnwrapError,
     MasterKeyNotFoundError,
@@ -82,17 +82,8 @@ class LocalKeyProvider(KeyProvider):
     Supports multiple named keys in the key ring for rotation scenarios.
     Keys are base64-encoded 256-bit AES keys.
 
-    Config structure (config.yaml ``encryption.keys`` section)::
-
-        encryption:
-          keys:
-            mk-1: <base64-encoded-32-byte-key>
-            mk-2: <base64-encoded-32-byte-key>
-          default_key_id: mk-2
-
-    Alternatively, a single key can be supplied via the
-    ``DEVICEVAULT_LOCAL_MASTER_KEY`` environment variable (KID defaults
-    to ``local-env``).
+    Keys are supplied by :func:`devicevault_protocol.crypto.config.get_key_provider`
+    from ``DV_ENCRYPTION_KEYS`` (``kid=<base64>,...``) and ``DV_ENCRYPTION_DEFAULT_KID``.
     """
 
     def __init__(self, keys: dict[str, str] | None = None, default_kid: str | None = None):
@@ -110,17 +101,8 @@ class LocalKeyProvider(KeyProvider):
             for kid, key_b64 in keys.items():
                 self._add_key(kid, key_b64)
 
-        # Fallback: single key from environment variable
         if not self._ring:
-            env_key = os.environ.get('DEVICEVAULT_LOCAL_MASTER_KEY', '')
-            if env_key:
-                self._add_key('local-env', env_key)
-
-        if not self._ring:
-            raise KeyProviderError(
-                'No master keys configured. Set encryption.keys in config.yaml '
-                'or DEVICEVAULT_LOCAL_MASTER_KEY environment variable.'
-            )
+            raise KeyProviderError('No master keys configured. Set DV_ENCRYPTION_KEYS.')
 
         # Set default KID
         if default_kid and default_kid in self._ring:

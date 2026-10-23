@@ -6,17 +6,17 @@ requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
     "celery[redis]>=5.6.3,<5.7",
-    "cryptography>=46",
+    "devicevault-protocol",
+    # Temporary: the API reads the collector plugin catalogue from the worker
+    # package. Replaced by worker-advertised capabilities in phase 4.
+    "devicevault-worker",
     "django>=6.1.2,<6.2",
-    "django-cors-headers>=4.9",
     "djangorestframework>=3.18.3,<3.19",
     "flower>=2.2,<2.3",
-    "gitpython>=3.1.45",
+    "gunicorn>=23",
     "kombu>=5.6.2,<5.7",
-    "paramiko>=4",
     "psycopg[binary]>=3.3.6,<3.4",
-    "python-json-logger>=4",
-    "pyyaml>=6.0.3",
+    "whitenoise>=6.11",
 ]
 
 [dependency-groups]
@@ -29,7 +29,11 @@ dev = [
 [tool.uv]
 package = false
 
+[tool.uv.sources]
+devicevault-protocol = { workspace = true }
+devicevault-worker = { workspace = true }
+
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "devicevault.settings"
+DJANGO_SETTINGS_MODULE = "devicevault.test_settings"
 python_files = ["test_*.py", "tests.py"]
 addopts = "-ra --strict-markers"

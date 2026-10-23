@@ -37,3 +37,10 @@ def test_user_without_group_access_cannot_delete_device(device):
 
     assert resp.status_code == 404
     assert Device.objects.filter(pk=device.pk).exists()
+
+
+def test_health_needs_no_authentication(db):
+    resp = APIClient().get('/api/health/')
+
+    assert resp.status_code == 200
+    assert resp.json() == {'status': 'ok'}

@@ -26,9 +26,9 @@
  * 
  * @type {string}
  */
-const apiUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
-  || (typeof process !== 'undefined' && process.env && process.env.VUE_APP_API_URL)
-  || 'http://localhost:8000/api'
+// The API is always served from the same origin under /api (nginx in
+// production, the Quasar dev-server proxy in development).
+const apiUrl = '/api'
 
 /**
  * Application Configuration Object

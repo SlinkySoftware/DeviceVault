@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import os
 import signal
 import time
 import uuid
 from datetime import UTC, datetime
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone as django_timezone
 from kombu import Connection, Consumer, Exchange, Producer, Queue
 
-from celery_app import BROKER
 from core.models import WorkerRegistration
-from core.worker_presence_protocol import (
+from devicevault_protocol.presence import (
     EVENT_HEARTBEAT,
     EVENT_PONG,
     EVENT_REGISTER,
@@ -23,17 +22,6 @@ from core.worker_presence_protocol import (
 )
 
 
-def _read_int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name, '')
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -42,8 +30,9 @@ class Command(BaseCommand):
     help = 'Monitor worker registration/heartbeat events and send periodic RabbitMQ liveliness probes'
 
     def handle(self, *args, **options):
-        ping_interval_sec = _read_int_env('DEVICEVAULT_WORKER_PING_INTERVAL_SEC', 30)
-        reconnect_delay_sec = _read_int_env('DEVICEVAULT_WORKER_RECONNECT_DELAY_SEC', 5)
+        ping_interval_sec = settings.DEVICEVAULT_WORKER_PING_INTERVAL_SEC
+        reconnect_delay_sec = 5
+        broker_url = settings.DEVICEVAULT_BUS.broker_url
 
         running = True
 
@@ -54,9 +43,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
 
-        self.stdout.write(
-            self.style.SUCCESS(f'Worker monitor started (broker={BROKER}, ping_interval={ping_interval_sec}s)')
-        )
+        self.stdout.write(self.style.SUCCESS(f'Worker monitor started (ping_interval={ping_interval_sec}s)'))
 
         while running:
             try:
@@ -69,7 +56,7 @@ class Command(BaseCommand):
                     durable=True,
                 )
 
-                with Connection(BROKER, heartbeat=30) as connection:
+                with Connection(broker_url, heartbeat=30) as connection:
                     with connection.channel() as channel:
                         producer = Producer(channel)
                         event_queue.maybe_bind(connection)

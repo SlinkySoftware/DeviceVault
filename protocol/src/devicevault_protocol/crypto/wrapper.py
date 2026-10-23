@@ -8,7 +8,7 @@ calls to encrypt and decrypt backup data transparently.
 
 Usage in the storage task pipeline::
 
-    from crypto.wrapper import CryptoStorage
+    from devicevault_protocol.crypto.wrapper import CryptoStorage
 
     crypto = CryptoStorage(key_provider, chunk_size=1_048_576)
     # Wrap a store call
@@ -31,10 +31,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from crypto.constants import DEFAULT_CHUNK_SIZE
-from crypto.engine import decrypt_backup, encrypt_backup
-from crypto.header import is_encrypted
-from crypto.providers import KeyProvider
+from devicevault_protocol.crypto.constants import DEFAULT_CHUNK_SIZE
+from devicevault_protocol.crypto.engine import decrypt_backup, encrypt_backup
+from devicevault_protocol.crypto.header import is_encrypted
+from devicevault_protocol.crypto.providers import KeyProvider
 
 logger = logging.getLogger('devicevault.crypto.wrapper')
 

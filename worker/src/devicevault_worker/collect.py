@@ -17,52 +17,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import json
-import logging
-import os
 import time
 from datetime import datetime
 
-# Celery + Django integration for distributed collection
 from celery.exceptions import SoftTimeLimitExceeded
 
-from backups.plugins import get_plugin
-from celery_app import REDIS_URL, RESULTS_STREAM
-from celery_app import app as celery_app
+from devicevault_protocol.names import COLLECT_RESULTS_STREAM, COLLECT_TASK, device_lock_key
+from devicevault_worker.app import app, get_logger, redis_client
+from devicevault_worker.plugins import get_plugin
 
-# provide `app` symbol for legacy decorators in this module
-app = celery_app
-
-# Redis for distributed locking
-# Structured JSON logging
-from pythonjsonlogger.json import JsonFormatter
-from redis import Redis
-
-logger = logging.getLogger('devicevault.worker')
-handler = logging.StreamHandler()
-formatter = JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(os.environ.get('DEVICEVAULT_LOG_LEVEL', 'INFO'))
-
-# Celery configuration: prefer Django settings when available, then env vars
-# Redis client for locks (use centralized REDIS_URL)
-redis_client = Redis.from_url(REDIS_URL)
-
-
-def collection_queue_name_from_group(collection_group) -> str:
-    """Return queue name for a given CollectionGroup instance or raw id.
-
-    Queue name convention: "collector.group.<rabbitmq_queue_id>"
-    """
-    if not collection_group:
-        return ''
-    qid = getattr(collection_group, 'rabbitmq_queue_id', None) or str(collection_group)
-    return f'collector.group.{qid}'
+logger = get_logger('devicevault.worker')
 
 
 @app.task(
     bind=True,
-    name='device.collect',
+    name=COLLECT_TASK,
     soft_time_limit=300,
     time_limit=350,
     acks_late=True,
@@ -101,7 +70,7 @@ def device_collect_task(self, config_json: str) -> dict:
     task_identifier = cfg.get('task_identifier') or f'collect:{device_id}:{datetime.utcnow().isoformat()}'
     timeout = cfg.get('timeout', 240)
 
-    lock_key = f'lock:device:{device_id}' if device_id else None
+    lock_key = device_lock_key(device_id) if device_id else None
     lock = None
     lock_acquired = False
 
@@ -197,7 +166,7 @@ def device_collect_task(self, config_json: str) -> dict:
                 'is_binary': str(plugin.is_binary),  # NEW: propagate binary flag
             }
             # redis-py requires mapping values to be bytes/str
-            redis_client.xadd(RESULTS_STREAM, payload)
+            redis_client.xadd(COLLECT_RESULTS_STREAM, payload)
         except Exception:
             logger.exception('failed_to_publish_result')
 

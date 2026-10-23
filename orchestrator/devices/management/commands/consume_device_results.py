@@ -2,30 +2,33 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import time
 from datetime import datetime
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from redis import Redis
 
-from celery_app import app as celery_app
 from devices.models import Device, DeviceBackupResult
+from devicevault.celery import app as celery_app
+from devicevault_protocol.names import (
+    COLLECT_RESULTS_GROUP,
+    COLLECT_RESULTS_STREAM,
+    STORE_TASK,
+    storage_backend_for,
+    storage_queue_name,
+)
 
 
 class Command(BaseCommand):
     help = 'Consume device backup results from Redis Stream and persist to the DB'
 
-    storage_backend_map = {
-        'git': 'git',
-        'fs': 'fs',
-        'filesystem': 'fs',
-    }
-
     def handle(self, *args, **options):
-        redis_url = os.environ.get('DEVICEVAULT_REDIS_URL', 'redis://localhost:6379/1')
-        stream = os.environ.get('DEVICEVAULT_RESULTS_STREAM', 'device:results')
-        group = os.environ.get('DEVICEVAULT_RESULTS_GROUP', 'devicevault')
-        consumer = os.environ.get('DEVICEVAULT_RESULTS_CONSUMER', f'consumer-{os.getpid()}')
+        redis_url = settings.DEVICEVAULT_BUS.redis_url
+        stream = COLLECT_RESULTS_STREAM
+        group = COLLECT_RESULTS_GROUP
+        consumer = f'{socket.gethostname()}-{os.getpid()}'
 
         r = Redis.from_url(redis_url)
 
@@ -179,7 +182,7 @@ class Command(BaseCommand):
             )
             return
 
-        backend_key = self.storage_backend_map.get((location.location_type or '').lower())
+        backend_key = storage_backend_for(location.location_type)
         if not backend_key:
             self.stderr.write(
                 self.style.WARNING(
@@ -198,11 +201,11 @@ class Command(BaseCommand):
             'encrypt_backup': device_obj.encrypt_backups,
         }
 
-        queue = f'storage.{backend_key}'
+        queue = storage_queue_name(backend_key)
 
         try:
             celery_app.send_task(
-                'storage.store',
+                STORE_TASK,
                 args=[payload],
                 queue=queue,
                 routing_key=queue,

@@ -18,30 +18,27 @@ License: GPLv3+
 
 import base64
 import os
-import sys
 import unittest
 
 # Ensure backend is on path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from crypto.constants import (
+from devicevault_protocol.crypto.constants import (
     AES_KEY_BYTES,
     CIPHER_ID,
     ENC_VERSION,
     GCM_NONCE_BYTES,
     HEADER_MAGIC,
 )
-from crypto.engine import _zeroize, decrypt_backup, encrypt_backup
-from crypto.exceptions import (
+from devicevault_protocol.crypto.engine import _zeroize, decrypt_backup, encrypt_backup
+from devicevault_protocol.crypto.exceptions import (
     HeaderError,
     KeyProviderError,
     KeyUnwrapError,
     MasterKeyNotFoundError,
     TamperDetectedError,
 )
-from crypto.header import EncryptionHeader, is_encrypted
-from crypto.providers import LocalKeyProvider
-from crypto.wrapper import CryptoStorage
+from devicevault_protocol.crypto.header import EncryptionHeader, is_encrypted
+from devicevault_protocol.crypto.providers import LocalKeyProvider
+from devicevault_protocol.crypto.wrapper import CryptoStorage
 
 
 def _make_provider(*keys, default=None):
@@ -170,14 +167,8 @@ class TestLocalKeyProvider(unittest.TestCase):
 
     def test_no_keys_raises(self):
         """Empty key ring raises KeyProviderError."""
-        # Clear env to avoid fallback
-        old = os.environ.pop('DEVICEVAULT_LOCAL_MASTER_KEY', None)
-        try:
-            with self.assertRaises(KeyProviderError):
-                LocalKeyProvider(keys={})
-        finally:
-            if old is not None:
-                os.environ['DEVICEVAULT_LOCAL_MASTER_KEY'] = old
+        with self.assertRaises(KeyProviderError):
+            LocalKeyProvider(keys={})
 
     def test_generate_master_key(self):
         """Generated key is valid base64 and correct length."""

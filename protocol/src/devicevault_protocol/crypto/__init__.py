@@ -20,10 +20,10 @@ Copyright (C) 2026, Slinky Software
 License: GPLv3+
 """
 
-from crypto.engine import decrypt_backup, encrypt_backup
-from crypto.header import HEADER_MAGIC, EncryptionHeader
-from crypto.providers import KeyProvider, LocalKeyProvider
-from crypto.wrapper import CryptoStorage
+from devicevault_protocol.crypto.engine import decrypt_backup, encrypt_backup
+from devicevault_protocol.crypto.header import HEADER_MAGIC, EncryptionHeader
+from devicevault_protocol.crypto.providers import KeyProvider, LocalKeyProvider
+from devicevault_protocol.crypto.wrapper import CryptoStorage
 
 __all__ = [
     'KeyProvider',

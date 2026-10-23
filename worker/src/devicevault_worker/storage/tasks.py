@@ -4,32 +4,18 @@ These tasks are intentionally standalone and avoid Django imports.
 """
 
 import json
-import logging
-import os
 import re
 import time
 from datetime import datetime
 
 from celery.exceptions import SoftTimeLimitExceeded
-from pythonjsonlogger.json import JsonFormatter
-from redis import Redis
 
-from celery_app import REDIS_URL, STORAGE_RESULTS_STREAM
-from celery_app import app as celery_app
-from storage import fs as fs_storage
-from storage import git as git_storage
+from devicevault_protocol.names import READ_TASK, STORE_RESULTS_STREAM, STORE_TASK, storage_backend_for
+from devicevault_worker.app import app, get_logger, redis_client
+from devicevault_worker.storage import fs as fs_storage
+from devicevault_worker.storage import git as git_storage
 
-# Provide app alias for Celery discovery
-app = celery_app
-
-logger = logging.getLogger('devicevault.storage.worker')
-_handler = logging.StreamHandler()
-_formatter = JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
-logger.setLevel(os.environ.get('DEVICEVAULT_LOG_LEVEL', 'INFO'))
-
-redis_client = Redis.from_url(REDIS_URL)
+logger = get_logger('devicevault.storage.worker')
 
 STORAGE_BACKENDS = {
     'git': {
@@ -37,10 +23,6 @@ STORAGE_BACKENDS = {
         'read': git_storage.read_backup,
     },
     'fs': {
-        'store': fs_storage.store_backup,
-        'read': fs_storage.read_backup,
-    },
-    'filesystem': {
         'store': fs_storage.store_backup,
         'read': fs_storage.read_backup,
     },
@@ -70,8 +52,8 @@ def _get_crypto_storage():
 
     _crypto_checked = True
     try:
-        from crypto.config import get_chunk_size, get_key_provider
-        from crypto.wrapper import CryptoStorage
+        from devicevault_protocol.crypto.config import get_chunk_size, get_key_provider
+        from devicevault_protocol.crypto.wrapper import CryptoStorage
 
         kp = get_key_provider(force=True)
         if kp is None:
@@ -95,10 +77,6 @@ def _get_crypto_storage():
 
 def _iso_now() -> str:
     return datetime.utcnow().isoformat() + 'Z'
-
-
-def _storage_queue_name(storage_backend: str) -> str:
-    return f'storage.{storage_backend}' if storage_backend else 'storage'
 
 
 def _sanitize_rel_path(device_id: int | None, task_identifier: str) -> str:
@@ -125,14 +103,14 @@ def _publish_result(result: dict) -> None:
             'enc_kid': result.get('enc_kid', '') or '',
             'enc_edk': result.get('enc_edk', '') or '',
         }
-        redis_client.xadd(STORAGE_RESULTS_STREAM, payload)  # type: ignore
+        redis_client.xadd(STORE_RESULTS_STREAM, payload)
     except Exception:
         logger.exception('storage_result_publish_failed')
 
 
 @app.task(
     bind=True,
-    name='storage.store',
+    name=STORE_TASK,
     soft_time_limit=300,
     time_limit=360,
     acks_late=True,
@@ -159,7 +137,8 @@ def storage_store_task(self, payload: dict) -> dict:
         except Exception:
             payload = {}
 
-    storage_backend = payload.get('storage_backend')
+    requested_backend = payload.get('storage_backend')
+    storage_backend = storage_backend_for(requested_backend) or requested_backend
     storage_config = payload.get('storage_config') or {}
     device_config = payload.get('device_config')
     task_identifier = payload.get('task_identifier') or f'storage:{_iso_now()}'
@@ -354,7 +333,7 @@ def storage_store_task(self, payload: dict) -> dict:
 
 @app.task(
     bind=True,
-    name='storage.read',
+    name=READ_TASK,
     soft_time_limit=120,
     time_limit=150,
     acks_late=True,
@@ -375,6 +354,7 @@ def storage_read_task(
     tid = getattr(getattr(self, 'request', None), 'id', None)
     task_identifier = task_identifier or f'read:{storage_ref}'
     operation = 'read'
+    storage_backend = storage_backend_for(storage_backend) or storage_backend
 
     if not storage_backend or storage_backend not in STORAGE_BACKENDS:
         msg = f'unsupported storage backend: {storage_backend}'

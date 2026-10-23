@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["orchestrator"]
+members = ["protocol", "worker", "orchestrator"]
 
 [tool.ruff]
 line-length = 120
@@ -15,13 +15,13 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Closures are invoked within the same loop iteration; both modules are replaced in phase 4.
-"orchestrator/core/worker_presence.py" = ["B023"]
+"worker/src/devicevault_worker/presence.py" = ["B023"]
 "orchestrator/core/management/commands/monitor_worker_registry.py" = ["B023"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "api", "audit", "backups", "celery_app", "core", "credentials", "crypto", "devices",
-    "devicevault", "devicevault_worker", "locations", "policies", "storage",
+    "api", "audit", "backups", "core", "credentials", "devices", "devicevault",
+    "devicevault_protocol", "devicevault_worker", "locations", "policies",
 ]
 
 [tool.ruff.format]

@@ -187,7 +187,7 @@ class DeviceSerializer(serializers.ModelSerializer):
 
     def get_backup_method_display(self, obj):
         """Get friendly name of backup method plugin"""
-        from backups.plugins import get_plugin
+        from devicevault_worker.plugins import get_plugin
 
         plugin = get_plugin(obj.backup_method)
         return plugin.friendly_name if plugin else obj.backup_method
@@ -249,7 +249,7 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
 
     def get_is_text(self, obj):
         """Determine if backup is text or binary by checking device's backup method plugin."""
-        from backups.plugins import get_plugin
+        from devicevault_worker.plugins import get_plugin
 
         if not obj.device or not obj.device.backup_method:
             return True  # Default to text if no method specified
@@ -678,7 +678,7 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
 
     def get_backup_method_display(self, obj):
         """Get friendly name of backup method plugin"""
-        from backups.plugins import get_plugin
+        from devicevault_worker.plugins import get_plugin
 
         plugin = get_plugin(obj.backup_method)
         return plugin.friendly_name if plugin else obj.backup_method

@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from celery_app import app as celery_app
+from devicevault.celery import app as celery_app
+from devicevault_protocol.names import READ_TASK, storage_backend_for, storage_queue_name
 
 
 def read_backup_via_worker(
@@ -32,9 +33,9 @@ def read_backup_via_worker(
     Returns:
         Dict with 'content' (str or base64-encoded for binary) and metadata.
     """
-    queue = f'storage.{storage_backend}'
+    queue = storage_queue_name(storage_backend_for(storage_backend) or storage_backend)
     task = celery_app.send_task(
-        'storage.read',
+        READ_TASK,
         kwargs={
             'storage_backend': storage_backend,
             'storage_ref': storage_ref,

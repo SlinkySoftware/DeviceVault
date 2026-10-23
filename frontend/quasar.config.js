@@ -40,7 +40,12 @@ export default function (ctx) {
     devServer: {
       port: 9000,
       host: '0.0.0.0',
-      open: false
+      open: false,
+      // Same-origin API in development, mirroring nginx in production.
+      proxy: Object.fromEntries(['/api', '/admin', '/static'].map((prefix) => [
+        prefix,
+        { target: process.env.DV_DEV_API_TARGET || 'http://localhost:8000', changeOrigin: false }
+      ]))
     },
     framework: {
       config: {},

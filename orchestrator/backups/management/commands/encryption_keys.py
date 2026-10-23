@@ -75,16 +75,14 @@ class Command(BaseCommand):
 
     def _handle_generate(self, options):
         """Generate a new random master key."""
-        from crypto.providers import LocalKeyProvider
+        from devicevault_protocol.crypto.providers import LocalKeyProvider
 
         key_b64 = LocalKeyProvider.generate_master_key()
         self.stdout.write(self.style.SUCCESS('Generated new 256-bit master key:'))
         self.stdout.write(f'  {key_b64}')
         self.stdout.write('')
-        self.stdout.write('Add this to config.yaml under encryption.keys:')
-        self.stdout.write('  encryption:')
-        self.stdout.write('    keys:')
-        self.stdout.write(f'      new-key-id: {key_b64}')
+        self.stdout.write('Add it to DV_ENCRYPTION_KEYS on the orchestrator and storage workers:')
+        self.stdout.write(f'  DV_ENCRYPTION_KEYS=<existing keys>,new-key-id={key_b64}')
 
     def _handle_set_default(self, options):
         """Set the default KID."""
@@ -98,9 +96,7 @@ class Command(BaseCommand):
         kp.set_default_key_id(kid)
         self.stdout.write(self.style.SUCCESS(f'Default KID changed: {old_default} -> {kid}'))
         self.stdout.write(
-            self.style.WARNING(
-                'Note: This change is runtime-only. To persist, update encryption.default_key_id in config.yaml.'
-            )
+            self.style.WARNING('Note: This change is runtime-only. To persist, set DV_ENCRYPTION_DEFAULT_KID.')
         )
 
     def _handle_rewrap(self, options):
@@ -176,7 +172,7 @@ class Command(BaseCommand):
 
     def _handle_status(self, options):
         """Show encryption configuration status."""
-        from crypto.config import (
+        from devicevault_protocol.crypto.config import (
             get_allow_plaintext_fallback,
             get_chunk_size,
             get_encryption_enabled,
@@ -214,14 +210,11 @@ class Command(BaseCommand):
 
     def _get_provider(self):
         """Get the key provider or raise CommandError."""
-        from crypto.config import get_encryption_enabled, get_key_provider
-        from crypto.exceptions import KeyProviderError
+        from devicevault_protocol.crypto.config import get_encryption_enabled, get_key_provider
+        from devicevault_protocol.crypto.exceptions import KeyProviderError
 
         if not get_encryption_enabled():
-            raise CommandError(
-                'Encryption is not enabled. Set encryption.enabled: true in '
-                'config.yaml or DEVICEVAULT_ENCRYPTION_ENABLED=true'
-            )
+            raise CommandError('Encryption is not enabled. Set DV_ENCRYPTION_ENABLED=true and DV_ENCRYPTION_KEYS.')
 
         try:
             kp = get_key_provider()

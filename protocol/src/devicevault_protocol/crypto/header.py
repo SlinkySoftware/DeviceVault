@@ -32,7 +32,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any
 
-from crypto.constants import (
+from devicevault_protocol.crypto.constants import (
     CIPHER_ID,
     DEFAULT_CHUNK_SIZE,
     ENC_VERSION,
@@ -40,7 +40,7 @@ from crypto.constants import (
     GCM_TAG_BYTES,
     HEADER_MAGIC,
 )
-from crypto.exceptions import HeaderError
+from devicevault_protocol.crypto.exceptions import HeaderError
 
 # Re-export for convenience
 __all__ = ['EncryptionHeader', 'HEADER_MAGIC']

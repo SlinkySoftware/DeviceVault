@@ -31,7 +31,7 @@ from typing import Any
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from crypto.constants import (
+from devicevault_protocol.crypto.constants import (
     AES_KEY_BYTES,
     CIPHER_ID,
     DEFAULT_CHUNK_SIZE,
@@ -40,14 +40,14 @@ from crypto.constants import (
     GCM_TAG_BYTES,
     MAX_CHUNK_COUNT,
 )
-from crypto.exceptions import (
+from devicevault_protocol.crypto.exceptions import (
     ChunkLimitExceededError,
     DecryptionError,
     EncryptionError,
     TamperDetectedError,
 )
-from crypto.header import EncryptionHeader, is_encrypted
-from crypto.providers import KeyProvider
+from devicevault_protocol.crypto.header import EncryptionHeader, is_encrypted
+from devicevault_protocol.crypto.providers import KeyProvider
 
 logger = logging.getLogger('devicevault.crypto.engine')
 

@@ -2,24 +2,27 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import time
 from datetime import datetime
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from redis import Redis
 
 from backups.models import StoredBackup
 from devices.models import Device
+from devicevault_protocol.names import STORE_RESULTS_GROUP, STORE_RESULTS_STREAM
 
 
 class Command(BaseCommand):
     help = 'Consume storage results from Redis Stream and persist to StoredBackup'
 
     def handle(self, *args, **options):
-        redis_url = os.environ.get('DEVICEVAULT_REDIS_URL', 'redis://localhost:6379/1')
-        stream = os.environ.get('DEVICEVAULT_STORAGE_RESULTS_STREAM', 'storage:results')
-        group = os.environ.get('DEVICEVAULT_STORAGE_RESULTS_GROUP', 'devicevault-storage')
-        consumer = os.environ.get('DEVICEVAULT_STORAGE_RESULTS_CONSUMER', f'storage-consumer-{os.getpid()}')
+        redis_url = settings.DEVICEVAULT_BUS.redis_url
+        stream = STORE_RESULTS_STREAM
+        group = STORE_RESULTS_GROUP
+        consumer = f'{socket.gethostname()}-{os.getpid()}'
 
         r = Redis.from_url(redis_url)
 
