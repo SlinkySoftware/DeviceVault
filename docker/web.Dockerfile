@@ -4,7 +4,8 @@
 FROM node:24-alpine AS build
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+# Scripts run at build time below, once the source (quasar.config.ts) is present.
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --ignore-scripts
 COPY frontend ./
 RUN npx quasar build
 

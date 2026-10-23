@@ -172,7 +172,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 0 | `plan/architecture` | This document and `CLAUDE.md` | yes |
 | 1 | `chore/foundation` | New layout, uv workspace, Py 3.14, Django 6.1, pinned deps, ruff/pytest, `Makefile`, cruft and docs removal, squashed migrations, MySQL removed, unused external-auth deps removed | yes (behaviour unchanged) |
 | 2 | `feat/deploy-layout` | Dockerfiles, `deploy/{infra,orchestrator,worker,dev}`, `protocol/` + `worker/` packages (worker de-Djangoed, still old routing), env-only config | yes |
-| 3 | `feat/frontend-rewrite` | Straight port of existing pages to the new stack | yes |
+| 3 | `feat/frontend-rewrite` | Port of existing pages to TypeScript, `<script setup>`, Pinia and Vitest, with shared CRUD/dialog components; fixes for device writes and API access control found on the way | yes |
 | 4 | `feat/registration` | protocol package, keys, signing, register/approve/assign, liveness, Workers UI | yes |
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, credential encryption, retry semantics, collector driver framework (Netmiko/Scrapli bases), schema-driven device form | yes |
 | 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |

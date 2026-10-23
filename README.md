@@ -12,9 +12,10 @@ other only through RabbitMQ and Redis.
 ## What works today
 
 - Device inventory with device types, manufacturers, device groups and collection groups
-- Device-group RBAC (per-group roles for users and auth groups)
+- Device-group RBAC (per-group roles for users and auth groups), enforced by the API;
+  configuration and user management are administrator-only
 - On-demand ("backup now") collection through Celery collectors, routed by collection group
-- Backup methods as plugins (`noop`, `binary_dummy`, `mikrotik_ssh`)
+- Backup methods as plugins (`noop`, `binary_dummy`, `mikrotik_ssh_export`)
 - Storage to local filesystem or git through Celery storage workers
 - Optional envelope encryption of stored backups (AES-256-GCM)
 - Backup viewing, download and side-by-side comparison
@@ -31,7 +32,7 @@ database storage, push collection, external authentication (LDAP/SAML/Entra ID).
 |---|---|
 | Orchestrator | Python 3.14, Django 6.1, Django REST Framework |
 | Workers | Celery 5.6 on RabbitMQ, Redis for locks and results |
-| Frontend | Vue 3.5, Quasar 2, Node 24 |
+| Frontend | Vue 3.5, Quasar 2, TypeScript, Pinia, Vitest, Node 24 |
 | Database | SQLite (single node) or PostgreSQL |
 | Tooling | uv, ruff, pytest, Docker |
 
@@ -64,6 +65,8 @@ Ports can be moved with `DV_DEV_WEB_PORT`, `DV_DEV_API_PORT`, `DV_DEV_FLOWER_POR
 make lint            # ruff lint + format check
 make fmt             # apply ruff fixes and formatting
 make test            # pytest for protocol, worker and orchestrator
+make frontend-lint   # ESLint + vue-tsc type check
+make frontend-test   # Vitest unit tests
 make frontend-build  # production build of the SPA
 make check           # all of the above
 make lock            # refresh uv.lock after editing a pyproject.toml
@@ -81,7 +84,7 @@ Three independent stacks (infra, orchestrator, workers). See
 protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
 worker/         Collection and storage worker: Celery tasks, plugins, storage backends (no Django)
 orchestrator/   Django project: API, result consumers, worker monitor
-frontend/       Quasar/Vue single-page app
+frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints
 deploy/         Compose stacks: infra, orchestrator, worker, dev
 docs/           Architecture, delivery plan and deployment guide

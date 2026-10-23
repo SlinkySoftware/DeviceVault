@@ -17,11 +17,13 @@ DEV_COMPOSE = docker compose -f deploy/dev/compose.yaml
 
 PY_PACKAGES = protocol worker orchestrator
 
-.PHONY: help dev-image lock lint fmt test check frontend-install frontend-build images \
-	dev-up dev-down dev-reset dev-ps dev-logs dev-seed
+FRONTEND_DEPS = frontend/node_modules/.package-lock.json
+
+.PHONY: help dev-image lock lint fmt test check frontend-install frontend-lint frontend-test frontend-build \
+	images dev-up dev-down dev-reset dev-ps dev-logs dev-seed
 
 help:
-	@echo "Quality:   lint fmt test check"
+	@echo "Quality:   lint fmt test frontend-lint frontend-test check"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
 	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed"
@@ -41,10 +43,19 @@ fmt: dev-image
 test: dev-image
 	$(PY) sh -c 'set -e; for pkg in $(PY_PACKAGES); do (cd $$pkg && pytest); done'
 
-check: lint test frontend-build
+check: lint test frontend-lint frontend-test frontend-build
 
-frontend-install:
+# Reinstall only when the lockfile changes.
+$(FRONTEND_DEPS): frontend/package.json frontend/package-lock.json
 	$(NODE) npm ci --no-audit --no-fund
+
+frontend-install: $(FRONTEND_DEPS)
+
+frontend-lint: frontend-install
+	$(NODE) sh -c 'npm run -s lint && npm run -s typecheck'
+
+frontend-test: frontend-install
+	$(NODE) npm run -s test
 
 frontend-build: frontend-install
 	$(NODE) npx quasar build

@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Typed calls to the orchestrator API, one object per resource.
+
+import { http } from './client'
+import type {
+  ActivityItem,
+  ActivityWindow,
+  AuthConfig,
+  AuthGroup,
+  AuthGroupWrite,
+  BackupLocation,
+  BackupLocationWrite,
+  BackupMethod,
+  BackupSchedule,
+  CollectionGroup,
+  Credential,
+  CredentialWrite,
+  CredentialType,
+  CurrentUser,
+  DashboardStats,
+  Device,
+  DeviceDetail,
+  DeviceGroup,
+  DeviceGroupRole,
+  DeviceType,
+  DeviceWrite,
+  DispatchResponse,
+  DjangoPermission,
+  Id,
+  LogEntry,
+  LoginResponse,
+  Manufacturer,
+  RetentionPolicy,
+  StoredBackup,
+  ThemeColors,
+  User,
+  UserCreate,
+  UserDetails,
+  UserPreferences,
+  UserRoleAssignment,
+  WorkerRegistry,
+} from './types'
+
+type Params = Record<string, string | number | boolean | undefined>
+
+export interface ResourceApi<T, W> {
+  list(params?: Params): Promise<T[]>
+  get(id: Id): Promise<T>
+  create(body: W): Promise<T>
+  update(id: Id, body: W): Promise<T>
+  patch(id: Id, body: Partial<W>): Promise<T>
+  remove(id: Id): Promise<void>
+}
+
+/** CRUD calls for a DRF ModelViewSet at `path` (with trailing slash). */
+export function resource<T, W = Omit<T, 'id'>>(path: string): ResourceApi<T, W> {
+  return {
+    list: async (params) => (await http.get<T[]>(path, { params })).data,
+    get: async (id) => (await http.get<T>(`${path}${id}/`)).data,
+    create: async (body) => (await http.post<T>(path, body)).data,
+    update: async (id, body) => (await http.put<T>(`${path}${id}/`, body)).data,
+    patch: async (id, body) => (await http.patch<T>(`${path}${id}/`, body)).data,
+    remove: async (id) => {
+      await http.delete(`${path}${id}/`)
+    },
+  }
+}
+
+// --- Reference data ------------------------------------------------------------
+
+export const deviceTypesApi = resource<DeviceType>('/device-types/')
+export const manufacturersApi = resource<Manufacturer>('/manufacturers/')
+export const collectionGroupsApi = resource<
+  CollectionGroup,
+  Pick<CollectionGroup, 'name' | 'description' | 'rabbitmq_queue_id'>
+>('/collection-groups/')
+export const retentionPoliciesApi = resource<RetentionPolicy>('/retention-policies/')
+export const backupSchedulesApi = resource<
+  BackupSchedule,
+  Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at'>
+>('/backup-schedules/')
+export const backupLocationsApi = resource<BackupLocation, BackupLocationWrite>('/backup-locations/')
+export const credentialsApi = resource<Credential, CredentialWrite>('/credentials/')
+export const credentialTypesApi = resource<CredentialType>('/credential-types/')
+export const deviceGroupsApi = resource<DeviceGroup, Pick<DeviceGroup, 'name' | 'description'>>('/device-groups/')
+
+export const backupMethodsApi = {
+  list: async () => (await http.get<BackupMethod[]>('/backup-methods/')).data,
+}
+
+// --- Devices and backups ---------------------------------------------------------
+
+const devices = resource<Device, DeviceWrite>('/devices/')
+
+export const devicesApi = {
+  list: devices.list,
+  remove: devices.remove,
+  get: async (id: Id) => (await http.get<DeviceDetail>(`/devices/${id}/`)).data,
+  create: async (body: DeviceWrite) => (await http.post<DeviceDetail>('/devices/', body)).data,
+  update: async (id: Id, body: DeviceWrite) => (await http.put<DeviceDetail>(`/devices/${id}/`, body)).data,
+  backupNow: async (id: Id) => (await http.post<DispatchResponse>(`/devices/${id}/backup_now/`)).data,
+}
+
+export const storedBackupsApi = {
+  listForDevice: async (deviceId: Id) =>
+    (await http.get<StoredBackup[]>('/stored-backups/', { params: { device: deviceId } })).data,
+  get: async (id: Id) => (await http.get<StoredBackup>(`/stored-backups/${id}/`)).data,
+  downloadText: async (id: Id) =>
+    (await http.get<string>(`/stored-backups/${id}/download/`, { responseType: 'text' })).data,
+  downloadBlob: async (id: Id) =>
+    (await http.get<Blob>(`/stored-backups/${id}/download/`, { responseType: 'blob' })).data,
+  logs: async (id: Id) => (await http.get<{ logs: LogEntry[] }>(`/stored-backups/${id}/logs/`)).data.logs,
+}
+
+// --- Users and access ------------------------------------------------------------
+
+const users = resource<User, UserCreate>('/users/')
+
+export const usersApi = {
+  list: users.list,
+  create: users.create,
+  updateDetails: async (id: Id, body: UserDetails) =>
+    (await http.patch<User>(`/users/${id}/update_details/`, body)).data,
+}
+
+export const groupsApi = resource<AuthGroup, AuthGroupWrite>('/groups/')
+
+export const permissionsApi = {
+  list: async () => (await http.get<DjangoPermission[]>('/device-group-permissions/')).data,
+}
+
+export const deviceGroupRolesApi = {
+  list: async () => (await http.get<DeviceGroupRole[]>('/device-group-roles/')).data,
+}
+
+export const userRolesApi = {
+  listForUser: async (userId: Id) =>
+    (await http.get<UserRoleAssignment[]>('/user-device-group-roles/', { params: { user: userId } })).data,
+  assign: async (userId: Id, roleId: Id) =>
+    (await http.post<UserRoleAssignment>('/user-device-group-roles/', { user: userId, role: roleId })).data,
+  remove: async (assignmentId: Id) => {
+    await http.delete(`/user-device-group-roles/${assignmentId}/`)
+  },
+}
+
+export const authApi = {
+  login: async (username: string, password: string) =>
+    (await http.post<LoginResponse>('/auth/login/', { username, password })).data,
+  logout: async () => {
+    await http.post('/auth/logout/')
+  },
+  currentUser: async () => (await http.get<CurrentUser>('/auth/user/')).data,
+  updateCurrentUser: async (body: UserDetails) => (await http.patch<CurrentUser>('/auth/user/', body)).data,
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    await http.post('/auth/change-password/', { current_password: currentPassword, new_password: newPassword })
+  },
+  config: async () => (await http.get<AuthConfig>('/auth/config/')).data,
+  preferences: async () => (await http.get<UserPreferences>('/user/preferences/')).data,
+  updatePreferences: async (body: Partial<UserPreferences>) =>
+    (await http.patch<UserPreferences>('/user/preferences/', body)).data,
+}
+
+// --- Settings and monitoring -------------------------------------------------------
+
+export const settingsApi = {
+  timezone: async () => (await http.get<{ timezone: string }>('/timezone/')).data.timezone,
+  theme: async () => (await http.get<ThemeColors>('/theme-settings/')).data,
+  updateTheme: async (body: ThemeColors) => (await http.put<ThemeColors>('/theme-settings/', body)).data,
+}
+
+export const workersApi = {
+  registry: async () => (await http.get<WorkerRegistry>('/worker-registry/')).data,
+}
+
+export const dashboardApi = {
+  stats: async (days?: number) =>
+    (await http.get<DashboardStats>('/dashboard-stats/', { params: days ? { days } : undefined })).data,
+  activity: async (window: ActivityWindow) =>
+    (await http.get<ActivityItem[]>('/recent-backup-activity/', { params: { time_filter: window } })).data,
+}

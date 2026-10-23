@@ -10,6 +10,7 @@ orchestrator/staticfiles
 frontend/node_modules
 frontend/.quasar
 frontend/dist
+frontend/branding
 deploy
 docs
 *.md
