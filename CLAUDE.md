@@ -68,7 +68,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   (what approved collectors advertise), not from worker code.
 - Collector drivers subclass `CollectorDriver` (`worker/src/devicevault_worker/drivers/base.py`)
   with a pydantic `Params` model, and raise `TransientError` (retried) or `PermanentError`.
-  Built-ins are listed in `drivers/__init__.py`; third-party drivers register under the
+  SSH CLI platforms subclass `drivers.ssh.NetmikoDriver` (a Netmiko `device_type`, the
+  commands, and regexes for volatile lines); see `drivers/cisco.py`. Built-ins are listed in
+  `drivers/__init__.py`; third-party drivers register under the
   `devicevault.collectors` entry point. Storage backends live in `storage/backends.py`.
 - Secrets sent to workers go through `core.keys.add_secret` (sealed per worker when payload
   encryption is on) and come out through `devicevault_worker.payload.secret`. Secret model

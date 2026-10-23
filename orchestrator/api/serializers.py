@@ -22,6 +22,7 @@ Includes authentication serializers for login and user profile management.
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group, User
+from jsonschema import Draft202012Validator
 from rest_framework import serializers
 
 from api.permissions import is_admin
@@ -708,6 +709,17 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f'No approved collector offers the backup method "{value}"')
         return value
 
+    def validate(self, attrs):
+        method = attrs.get('backup_method', getattr(self.instance, 'backup_method', None))
+        params = attrs.get('driver_params', getattr(self.instance, 'driver_params', None)) or {}
+        changed = 'backup_method' in attrs or 'driver_params' in attrs
+        driver = drivers(self.context).get(method)
+        if changed and driver and driver['params_schema']:
+            errors = driver_param_errors(params, driver['params_schema'])
+            if errors:
+                raise serializers.ValidationError({'driver_params': errors})
+        return attrs
+
     def to_representation(self, instance):
         return DeviceDetailedSerializer(instance, context=self.context).data
 
@@ -796,3 +808,12 @@ class WorkerApprovalSerializer(serializers.Serializer):
         queryset=CollectionGroup.objects.all(), many=True, required=False
     )
     storage_backends = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+def driver_param_errors(params: dict, schema: dict) -> list[str]:
+    """Problems with a device's driver parameters, checked against the driver's JSON schema."""
+    validator = Draft202012Validator(schema)
+    return [
+        f'{".".join(str(part) for part in error.absolute_path) or "parameters"}: {error.message}'
+        for error in sorted(validator.iter_errors(params), key=lambda error: list(error.absolute_path))
+    ]

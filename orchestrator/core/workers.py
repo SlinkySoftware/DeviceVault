@@ -190,11 +190,18 @@ def is_online(worker: Worker, now=None) -> bool:
     return worker.last_seen_at >= cutoff
 
 
+def _version_key(version: str) -> tuple:
+    """Orders '2' < '10' and keeps mixed parts ('1.0b') comparable."""
+    return tuple((0, int(part), '') if part.isdigit() else (1, 0, part) for part in version.split('.'))
+
+
 def driver_catalogue() -> dict[str, dict[str, Any]]:
     """Collector drivers advertised by approved collectors, by key.
 
-    Each entry: key, name, description, is_binary, and ``workers`` (how many
-    approved collectors offer it).
+    Each entry: key, name, description, is_binary, params_schema (JSON schema
+    of the per-device parameters), ``workers`` (how many approved collectors
+    offer it) and ``versions``. When collectors run different versions of a
+    driver, the newest one describes it.
     """
     catalogue: dict[str, dict[str, Any]] = {}
     for capabilities in Worker.objects.filter(status=STATUS_APPROVED, role=ROLE_COLLECTOR).values_list(
@@ -203,15 +210,23 @@ def driver_catalogue() -> dict[str, dict[str, Any]]:
         for driver in (capabilities or {}).get('collector_drivers', []):
             if not isinstance(driver, dict) or not driver.get('key'):
                 continue
-            entry = catalogue.setdefault(
-                driver['key'],
-                {
+            version = str(driver.get('version') or '1')
+            entry = catalogue.get(driver['key'])
+            if entry is None or _version_key(version) > _version_key(entry['version']):
+                catalogue[driver['key']] = entry = {
                     'key': driver['key'],
                     'name': driver.get('name') or driver['key'],
                     'description': driver.get('description', ''),
                     'is_binary': bool(driver.get('is_binary')),
-                    'workers': 0,
-                },
-            )
+                    'params_schema': driver.get('params_schema')
+                    if isinstance(driver.get('params_schema'), dict)
+                    else None,
+                    'version': version,
+                    'workers': entry['workers'] if entry else 0,
+                    'versions': entry['versions'] if entry else set(),
+                }
             entry['workers'] += 1
+            entry['versions'].add(version)
+    for entry in catalogue.values():
+        entry['versions'] = sorted(entry['versions'], key=_version_key)
     return dict(sorted(catalogue.items()))

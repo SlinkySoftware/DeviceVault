@@ -133,6 +133,9 @@ class BackupMethodViewSet(viewsets.ViewSet):
                 'friendly_name': d['name'],
                 'description': d['description'],
                 'is_binary': d['is_binary'],
+                'params_schema': d['params_schema'],
+                'version': d['version'],
+                'versions': d['versions'],
                 'collectors': d['workers'],
             }
             for d in driver_catalogue().values()

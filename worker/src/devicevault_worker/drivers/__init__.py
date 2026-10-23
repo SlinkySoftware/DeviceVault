@@ -5,6 +5,7 @@ import logging
 from functools import cache
 
 from .base import CollectorDriver
+from .cisco import CiscoIosDriver
 from .demo import BinaryDummyDriver, DemoConfigDriver, NoopDriver
 from .mikrotik import MikrotikExportDriver
 
@@ -15,6 +16,7 @@ BUILTIN_DRIVERS: tuple[type[CollectorDriver], ...] = (
     DemoConfigDriver,
     BinaryDummyDriver,
     MikrotikExportDriver,
+    CiscoIosDriver,
 )
 
 ENTRY_POINT_GROUP = 'devicevault.collectors'

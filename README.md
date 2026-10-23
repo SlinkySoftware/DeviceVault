@@ -16,8 +16,10 @@ other only through RabbitMQ and Redis.
   configuration and user management are administrator-only
 - Backup jobs, on demand ("backup now") or on schedules (daily, weekly, monthly, cron) in the
   display timezone, tracked from request to storage with retries, timeouts and per-job logs
-- Collector drivers (`demo_config`, `noop`, `binary_dummy`, `mikrotik_ssh_export`), with
-  per-device driver parameters; more can be installed as `devicevault.collectors` entry points
+- Collector drivers: `cisco_ios` and `mikrotik_ssh_export` (SSH via Netmiko), plus `demo_config`,
+  `noop` and `binary_dummy` for testing. Per-device driver settings come from each driver's
+  schema (form in the UI, validated by the API); more drivers can be installed as
+  `devicevault.collectors` entry points
 - Storage to local filesystem or git through Celery storage workers
 - Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
   orchestrator's vault key, and credentials are sealed to each collector, so RabbitMQ, Redis

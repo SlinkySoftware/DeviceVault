@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Shapes of the orchestrator API (see orchestrator/api/serializers.py).
 
+import type { JsonSchema } from '@/utils/schema'
+
 export type Id = number
 export type IsoDateTime = string
 
@@ -98,6 +100,11 @@ export interface BackupMethod {
   friendly_name: string
   description: string
   is_binary: boolean
+  /** JSON schema of the per-device parameters (driver_params), if the driver has any. */
+  params_schema: JsonSchema | null
+  /** Newest version among approved collectors, and every version they run. */
+  version: string
+  versions: string[]
   /** Approved collectors offering this method. */
   collectors: number
 }

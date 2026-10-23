@@ -108,6 +108,17 @@
             :hint="backupMethods.length ? undefined : 'No approved collector offers a backup method yet (Admin Settings > Workers)'"
             :disable="!canModify"
             :rules="[required('Backup method')]"
+            @update:model-value="onMethodChange"
+          />
+          <q-banner v-if="selectedMethod && selectedMethod.versions.length > 1" dense rounded class="bg-warning text-black">
+            Collectors run different versions of this driver ({{ selectedMethod.versions.join(', ') }}); the form
+            follows the newest.
+          </q-banner>
+          <DriverParamsForm
+            v-model="form.driver_params"
+            :schema="selectedMethod?.params_schema"
+            :title="`${selectedMethod?.friendly_name ?? 'Driver'} settings`"
+            :disable="!canModify"
           />
           <q-select
             v-model="form.credential"
@@ -198,10 +209,12 @@ import type {
   Manufacturer,
   RetentionPolicy,
 } from '@/api/types'
+import DriverParamsForm from '@/components/DriverParamsForm.vue'
 import { useNotify } from '@/composables/useNotify'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/datetime'
 import { statusColor } from '@/utils/format'
+import { keepKnown } from '@/utils/schema'
 
 const route = useRoute()
 const router = useRouter()
@@ -240,6 +253,14 @@ const retentionPolicies = ref<RetentionPolicy[]>([])
 const schedules = ref<BackupSchedule[]>([])
 const deviceGroups = ref<DeviceGroup[]>([])
 const collectionGroups = ref<CollectionGroup[]>([])
+
+const selectedMethod = computed(() => backupMethods.value.find((method) => method.key === form.value.backup_method))
+
+// A different driver keeps only the settings it also has.
+function onMethodChange(key: string): void {
+  const method = backupMethods.value.find((m) => m.key === key)
+  form.value.driver_params = keepKnown(form.value.driver_params, method?.params_schema)
+}
 
 const canModify = computed(() => (device.value ? device.value.user_permissions.includes('modify') : true))
 const title = computed(() => {
