@@ -1,115 +1,97 @@
-# DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
-# Copyright (C) 2026, Slinky Software
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Backup jobs: one row per backup attempt of a device, from request to storage."""
 
-"""
-Backup Record Models
-Tracks all backup operations, their status, and location of backup artifacts.
-"""
+import uuid
 
+from django.contrib.auth.models import User
 from django.db import models
 
 
-class Backup(models.Model):
-    """
-    Backup Model: Records a single backup operation for a device
+class BackupJob(models.Model):
+    """A backup of one device, tracked through collection and storage.
 
-    Fields:
-        - device (ForeignKey): The device that was backed up
-        - location (ForeignKey): Where the backup was stored
-        - timestamp (DateTimeField): When the backup was created
-        - status (CharField): Backup result (success, failed, pending, etc.)
-        - size_bytes (BigIntegerField): Size of backed up configuration in bytes
-        - artifact_path (CharField): Path/identifier of backup artifact in storage location
-        - is_text (BooleanField): Whether artifact is text (True) or binary (False)
-
-    Methods:
-        - __str__(): Returns formatted string with device ID and timestamp
-
-    Usage:
-        Each successful backup operation creates a Backup record. These records are
-        used for:
-        - Tracking backup history and success rates
-        - Enforcing retention policies (age and count limits)
-        - Displaying restore options to users
-        - Audit and compliance reporting
+    States: queued -> collecting -> collected -> stored, or failed / timed_out
+    at any point. ``stored`` is the only successful outcome.
     """
 
-    device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, help_text='Device that was backed up')
+    QUEUED = 'queued'
+    COLLECTING = 'collecting'
+    COLLECTED = 'collected'
+    STORING = 'storing'
+    STORED = 'stored'
+    FAILED = 'failed'
+    TIMED_OUT = 'timed_out'
+
+    STATE_CHOICES = [
+        (QUEUED, 'Queued'),
+        (COLLECTING, 'Collecting'),
+        (COLLECTED, 'Collected'),
+        (STORING, 'Storing'),
+        (STORED, 'Stored'),
+        (FAILED, 'Failed'),
+        (TIMED_OUT, 'Timed out'),
+    ]
+    ACTIVE_STATES = (QUEUED, COLLECTING, COLLECTED, STORING)
+    TERMINAL_STATES = (STORED, FAILED, TIMED_OUT)
+
+    TRIGGER_MANUAL = 'manual'
+    TRIGGER_SCHEDULE = 'schedule'
+    TRIGGER_CHOICES = [(TRIGGER_MANUAL, 'Manual'), (TRIGGER_SCHEDULE, 'Schedule')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, related_name='backup_jobs')
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default=QUEUED, db_index=True)
+    trigger = models.CharField(max_length=16, choices=TRIGGER_CHOICES, default=TRIGGER_MANUAL)
+    requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    schedule = models.ForeignKey(
+        'policies.BackupSchedule', null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs'
+    )
+
+    driver = models.CharField(max_length=128, help_text='Collector driver used')
+    is_binary = models.BooleanField(default=False)
+    collector = models.CharField(max_length=255, blank=True, help_text='Worker that collected it')
+    storage_worker = models.CharField(max_length=255, blank=True, help_text='Worker that stored it')
+
     location = models.ForeignKey(
-        'locations.BackupLocation', on_delete=models.SET_NULL, null=True, help_text='Where this backup is stored'
+        'locations.BackupLocation', null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs'
     )
-    timestamp = models.DateTimeField(auto_now_add=True, help_text='When this backup record was created')
-    requested_at = models.DateTimeField(null=True, blank=True, help_text='When this backup was requested')
-    started_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution started')
-    completed_at = models.DateTimeField(null=True, blank=True, help_text='When backup execution completed')
-    status = models.CharField(
-        max_length=32, default='pending', help_text='Backup status: pending, in_progress, success, failed'
-    )
-    size_bytes = models.BigIntegerField(null=True, blank=True, help_text='Size of configuration backup in bytes')
-    artifact_path = models.CharField(max_length=256, help_text='Path or identifier of backup in storage location')
-    is_text = models.BooleanField(default=True, help_text='True if text artifact (configs), False if binary')
+    storage_backend = models.CharField(max_length=32, blank=True)
+    storage_ref = models.CharField(max_length=512, blank=True)
 
-    @property
-    def duration_seconds(self):
-        """Return duration in seconds if start and completion timestamps are available."""
-        if self.started_at and self.completed_at:
-            return int((self.completed_at - self.started_at).total_seconds())
-        return None
+    collected_sha256 = models.CharField(max_length=64, blank=True)
+    stored_sha256 = models.CharField(max_length=64, blank=True)
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+    encrypted = models.BooleanField(default=False)
 
-    def __str__(self):
-        """Return formatted string with device ID and timestamp"""
-        return f'{self.device_id} @ {self.timestamp}'
+    attempts = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True)
+    log = models.JSONField(default=list, blank=True, help_text='Structured log entries from every stage')
 
-
-class StoredBackup(models.Model):
-    """Authoritative index of where a collected backup was stored."""
-
-    task_id = models.CharField(max_length=64, db_index=True)
-    task_identifier = models.CharField(max_length=128, db_index=True)
-    device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, db_index=True)
-    storage_backend = models.CharField(max_length=32, db_index=True)
-    storage_ref = models.CharField(max_length=256)
-    status = models.CharField(max_length=16)
-    timestamp = models.DateTimeField()
-    log = models.TextField(help_text='JSON serialized list of log messages')
-
-    # Timing metrics (in milliseconds)
-    storage_duration_ms = models.IntegerField(
-        null=True, blank=True, help_text='Storage execution time in milliseconds (step 7)'
-    )
-
-    # Encryption metadata (nullable for backward compatibility with legacy v0 plaintext backups)
-    # When enc_version is null or 0, the stored object is plaintext (no decryption needed).
-    enc_version = models.IntegerField(
-        null=True, blank=True, help_text='Encryption format version (null/0 = plaintext, 1 = AES-256-GCM chunked)'
-    )
-    enc_cipher = models.CharField(max_length=32, null=True, blank=True, help_text='Cipher identifier, e.g. AES-256-GCM')
-    enc_kid = models.CharField(
-        max_length=128, null=True, blank=True, db_index=True, help_text='Master key identifier used to wrap the DEK'
-    )
-    enc_edk = models.TextField(null=True, blank=True, help_text='Encrypted DEK (base64-encoded)')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    collected_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    collect_duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    store_duration_ms = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
-        ordering = ['-timestamp']
-
-    @property
-    def is_encrypted(self):
-        """Return True if this backup was stored with encryption."""
-        return bool(self.enc_version and self.enc_version > 0)
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['device', '-created_at'])]
 
     def __str__(self):
-        enc = f' [encrypted v{self.enc_version}]' if self.is_encrypted else ''
-        return f'{self.task_identifier} -> {self.storage_backend}:{self.storage_ref}{enc}'
+        return f'{self.device} {self.created_at:%Y-%m-%d %H:%M} [{self.state}]'
+
+    @property
+    def is_active(self) -> bool:
+        return self.state in self.ACTIVE_STATES
+
+    @property
+    def succeeded(self) -> bool:
+        return self.state == self.STORED
+
+    @property
+    def duration_ms(self) -> int | None:
+        """Request to completion."""
+        if not self.finished_at:
+            return None
+        return int((self.finished_at - self.created_at).total_seconds() * 1000)

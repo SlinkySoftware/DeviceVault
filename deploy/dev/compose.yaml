@@ -53,15 +53,10 @@ services:
     ports:
       - "${DV_DEV_API_PORT:-8000}:8000"
 
-  collect-results:
+  scheduler:
     <<: *orchestrator
     entrypoint: [dv-orchestrator]
-    command: [collect-results]
-
-  store-results:
-    <<: *orchestrator
-    entrypoint: [dv-orchestrator]
-    command: [store-results]
+    command: [scheduler]
 
   events:
     <<: *orchestrator

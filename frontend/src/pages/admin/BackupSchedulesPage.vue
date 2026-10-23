@@ -5,11 +5,6 @@
       <q-btn color="primary" icon="add" label="Add Schedule" @click="crud.openCreate" />
     </template>
 
-    <q-banner dense rounded class="bg-warning text-black q-mb-md">
-      <template #avatar><q-icon name="info" /></template>
-      Schedules are saved but not yet executed; use "Backup Now" until the scheduler is delivered.
-    </q-banner>
-
     <q-table flat :rows="crud.rows.value" :columns="columns" row-key="id" :loading="crud.loading.value" class="admin-table">
       <template #body-cell-enabled="props">
         <q-td :props="props">
@@ -100,9 +95,10 @@ import FormDialog from '@/components/FormDialog.vue'
 import PageCard from '@/components/PageCard.vue'
 import RowActions from '@/components/RowActions.vue'
 import { useCrud } from '@/composables/useCrud'
+import { formatDateTime } from '@/utils/datetime'
 import { integerBetween, required } from '@/utils/rules'
 
-type Form = Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at'>
+type Form = Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at' | 'last_run_at' | 'next_run'>
 
 const TYPE_OPTIONS: { label: string; value: ScheduleType }[] = [
   { label: 'Daily', value: 'daily' },
@@ -129,7 +125,7 @@ const crud = useCrud<BackupSchedule, Form>({
     cron_expression: '',
     enabled: true,
   }),
-  toForm: ({ id: _id, created_at: _c, updated_at: _u, ...form }) => form,
+  toForm: ({ id: _id, created_at: _c, updated_at: _u, last_run_at: _l, next_run: _n, ...form }) => form,
 })
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -151,6 +147,8 @@ function describe(schedule: BackupSchedule): string {
 const columns: QTableColumn<BackupSchedule>[] = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
   { name: 'schedule', label: 'Schedule', field: (row) => describe(row), align: 'left' },
+  { name: 'last_run_at', label: 'Last run', field: 'last_run_at', format: formatDateTime, align: 'left' },
+  { name: 'next_run', label: 'Next run', field: 'next_run', format: formatDateTime, align: 'left' },
   { name: 'enabled', label: 'Status', field: 'enabled', align: 'center', sortable: true },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]

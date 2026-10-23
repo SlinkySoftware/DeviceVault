@@ -53,19 +53,11 @@ def _version() -> str:
 
 def capabilities() -> dict[str, Any]:
     """What this worker can do; the orchestrator builds its catalogues from these."""
-    from devicevault_worker.plugins import list_plugins
+    from devicevault_worker.drivers import list_drivers
     from devicevault_worker.storage.tasks import STORAGE_BACKENDS
 
     return {
-        'collector_drivers': [
-            {
-                'key': plugin.key,
-                'name': plugin.friendly_name,
-                'description': plugin.description,
-                'is_binary': plugin.is_binary,
-            }
-            for plugin in sorted(list_plugins(), key=lambda p: p.key)
-        ],
+        'collector_drivers': [driver.describe() for driver in list_drivers()],
         'storage_backends': sorted(STORAGE_BACKENDS),
     }
 
@@ -203,6 +195,8 @@ class RegistrationAgent:
                                 connection.drain_events(timeout=1)
                             except TimeoutError:
                                 pass
+                            # Without this the broker drops the connection after two missed heartbeats.
+                            connection.heartbeat_check()
             except Exception:
                 logger.exception('registration_loop_failed')
                 self._stop.wait(self.reconnect_delay)

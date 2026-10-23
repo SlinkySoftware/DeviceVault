@@ -13,56 +13,66 @@
     </template>
 
     <q-table
+      v-model:pagination="pagination"
       flat
-      :rows="backups"
+      :rows="jobs"
       :columns="columns"
       row-key="id"
       :loading="loading"
-      :pagination="{ rowsPerPage: 20, sortBy: 'timestamp', descending: true }"
-      :rows-per-page-options="[20, 50, 100, 0]"
+      :rows-per-page-options="[20, 50, 100]"
       no-data-label="No backups found for this device"
       class="admin-table"
+      @request="onRequest"
     >
       <template #body-cell-select-a="props">
         <q-td :props="props">
-          <q-radio v-if="comparable(props.row)" v-model="selectedA" :val="props.row.id" :aria-label="`Compare as A`" />
+          <q-radio v-if="comparable(props.row)" v-model="selectedA" :val="props.row.id" aria-label="Compare as A" />
         </q-td>
       </template>
       <template #body-cell-select-b="props">
         <q-td :props="props">
-          <q-radio v-if="comparable(props.row)" v-model="selectedB" :val="props.row.id" :aria-label="`Compare as B`" />
+          <q-radio v-if="comparable(props.row)" v-model="selectedB" :val="props.row.id" aria-label="Compare as B" />
         </q-td>
       </template>
-      <template #body-cell-status="props">
+      <template #body-cell-state="props">
         <q-td :props="props">
-          <q-badge :color="statusColor(props.row.status)">{{ props.row.status }}</q-badge>
+          <StatusLabel :status="props.row.state" />
+          <q-tooltip v-if="props.row.error">{{ props.row.error }}</q-tooltip>
         </q-td>
       </template>
       <template #body-cell-encrypted="props">
         <q-td :props="props">
           <q-icon
-            :name="props.row.is_encrypted ? 'lock' : 'lock_open'"
-            :color="props.row.is_encrypted ? 'primary' : 'grey-5'"
+            v-if="props.row.state === 'stored'"
+            :name="props.row.encrypted ? 'lock' : 'lock_open'"
+            :color="props.row.encrypted ? 'primary' : 'grey-5'"
             size="sm"
           >
-            <q-tooltip>{{ props.row.is_encrypted ? 'Encrypted at rest' : 'Not encrypted' }}</q-tooltip>
+            <q-tooltip>{{ props.row.encrypted ? 'Encrypted at rest' : 'Not encrypted' }}</q-tooltip>
           </q-icon>
         </q-td>
       </template>
       <template #body-cell-actions="props">
-        <q-td :props="props" class="q-gutter-xs">
-          <q-btn v-if="comparable(props.row)" dense size="sm" color="primary" icon="visibility" label="View" @click="view(props.row)" />
+        <q-td :props="props" class="no-wrap">
+          <q-btn v-if="comparable(props.row)" dense round flat color="primary" icon="visibility" aria-label="View" @click="view(props.row)">
+            <q-tooltip>View</q-tooltip>
+          </q-btn>
           <q-btn
-            v-if="props.row.status === 'success'"
+            v-if="props.row.state === 'stored'"
             dense
-            size="sm"
+            round
+            flat
             color="primary"
             icon="download"
-            :label="props.row.is_text ? 'Download' : 'Download (binary)'"
+            aria-label="Download"
             :loading="downloading.has(props.row.id)"
             @click="download(props.row)"
-          />
-          <q-btn dense size="sm" color="info" icon="description" label="Logs" @click="openLogs(props.row)" />
+          >
+            <q-tooltip>{{ props.row.is_binary ? 'Download (binary)' : 'Download' }}</q-tooltip>
+          </q-btn>
+          <q-btn dense round flat color="info" icon="description" aria-label="Logs" @click="openLogs(props.row)">
+            <q-tooltip>Logs</q-tooltip>
+          </q-btn>
         </q-td>
       </template>
     </q-table>
@@ -87,58 +97,88 @@
 </template>
 
 <script setup lang="ts">
-import type { QTableColumn } from 'quasar'
+import type { QTableColumn, QTableProps } from 'quasar'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, type RouteLocationRaw } from 'vue-router'
 
-import { devicesApi, storedBackupsApi } from '@/api/endpoints'
-import type { Id, StoredBackup } from '@/api/types'
+import { backupJobsApi, devicesApi } from '@/api/endpoints'
+import type { BackupJob } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
 import PageCard from '@/components/PageCard.vue'
+import StatusLabel from '@/components/StatusLabel.vue'
 import type { BackupLogInfo } from '@/components/types'
 import { useNotify } from '@/composables/useNotify'
+import { usePolling } from '@/composables/usePolling'
 import { filenameTimestamp, formatDateTime } from '@/utils/datetime'
 import { safeFilename, saveFile } from '@/utils/download'
-import { statusColor } from '@/utils/format'
+import { capitalise, formatBytes, formatDuration, isActiveJob, statusLabel } from '@/utils/format'
+
+type Pagination = NonNullable<QTableProps['pagination']>
 
 const route = useRoute()
 const notify = useNotify()
 const deviceId = computed(() => Number(route.params.id))
 
 const deviceName = ref('device')
-const backups = ref<StoredBackup[]>([])
+const jobs = ref<BackupJob[]>([])
 const loading = ref(false)
-const selectedA = ref<Id | null>(null)
-const selectedB = ref<Id | null>(null)
-const downloading = reactive(new Set<Id>())
+const pagination = ref<Pagination>({ page: 1, rowsPerPage: 20, rowsNumber: 0 })
+const selectedA = ref<string | null>(null)
+const selectedB = ref<string | null>(null)
+const downloading = reactive(new Set<string>())
 
-const columns: QTableColumn<StoredBackup>[] = [
+const columns: QTableColumn<BackupJob>[] = [
   { name: 'select-a', label: 'A', field: 'id', align: 'center', style: 'width: 48px' },
   { name: 'select-b', label: 'B', field: 'id', align: 'center', style: 'width: 48px' },
-  { name: 'timestamp', label: 'Date/Time', field: 'timestamp', format: formatDateTime, align: 'left', sortable: true },
-  { name: 'type', label: 'Type', field: 'is_text', format: (text: boolean) => (text ? 'Text' : 'Binary'), align: 'center' },
-  { name: 'storage_backend', label: 'Backend', field: 'storage_backend', align: 'left' },
-  { name: 'status', label: 'Status', field: 'status', align: 'center', sortable: true },
-  { name: 'encrypted', label: 'Encrypted', field: 'is_encrypted', align: 'center' },
+  { name: 'created_at', label: 'Requested', field: 'created_at', format: formatDateTime, align: 'left' },
+  { name: 'state', label: 'Status', field: 'state', align: 'left' },
+  { name: 'trigger', label: 'Trigger', field: 'trigger', format: capitalise, align: 'left' },
+  { name: 'type', label: 'Type', field: 'is_binary', format: (binary: boolean) => (binary ? 'Binary' : 'Text'), align: 'center' },
+  { name: 'size', label: 'Size', field: 'size_bytes', format: formatBytes, align: 'right' },
+  { name: 'duration', label: 'Took', field: 'duration_ms', format: formatDuration, align: 'right' },
+  { name: 'location', label: 'Location', field: 'location_name', align: 'left' },
+  { name: 'encrypted', label: 'Encrypted', field: 'encrypted', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]
 
-const comparable = (backup: StoredBackup) => backup.status === 'success' && backup.is_text
+const comparable = (job: BackupJob) => job.state === 'stored' && !job.is_binary
 const canCompare = computed(
   () => selectedA.value !== null && selectedB.value !== null && selectedA.value !== selectedB.value,
 )
 const compareTarget = computed<RouteLocationRaw>(() => ({
   name: 'device-backups-compare',
   params: { id: deviceId.value },
-  query: { a: String(selectedA.value), b: String(selectedB.value) },
+  query: { a: selectedA.value ?? '', b: selectedB.value ?? '' },
 }))
+
+async function load(): Promise<void> {
+  const { page = 1, rowsPerPage = 20 } = pagination.value
+  try {
+    const result = await backupJobsApi.list({ device: deviceId.value, page, page_size: rowsPerPage })
+    jobs.value = result.results
+    pagination.value = { ...pagination.value, rowsNumber: result.count }
+  } catch (error) {
+    notify.error(error, 'Failed to load backups')
+  }
+}
+
+async function onRequest(request: { pagination: Pagination }): Promise<void> {
+  pagination.value = { ...pagination.value, ...request.pagination }
+  loading.value = true
+  await load()
+  loading.value = false
+}
+
+// Refresh while a backup is in progress, so its outcome appears without a reload.
+const interval = computed(() => (jobs.value.some((job) => isActiveJob(job.state)) ? 5_000 : 60_000))
+usePolling(load, interval)
 
 const viewer = reactive({ open: false, loading: false, title: '', content: '' })
 
-async function view(backup: StoredBackup): Promise<void> {
-  Object.assign(viewer, { open: true, loading: true, title: formatDateTime(backup.timestamp), content: '' })
+async function view(job: BackupJob): Promise<void> {
+  Object.assign(viewer, { open: true, loading: true, title: formatDateTime(job.created_at), content: '' })
   try {
-    viewer.content = (await storedBackupsApi.downloadText(backup.id)) || '(empty backup)'
+    viewer.content = (await backupJobsApi.contentText(job.id)) || '(empty backup)'
   } catch (error) {
     viewer.open = false
     notify.error(error, 'Failed to load backup content')
@@ -147,47 +187,39 @@ async function view(backup: StoredBackup): Promise<void> {
   }
 }
 
-async function download(backup: StoredBackup): Promise<void> {
-  downloading.add(backup.id)
+async function download(job: BackupJob): Promise<void> {
+  downloading.add(job.id)
   try {
-    const base = `${safeFilename(deviceName.value)}_${backup.id}_${filenameTimestamp(backup.timestamp)}`
-    if (backup.is_text) {
-      saveFile(await storedBackupsApi.downloadText(backup.id), `${base}.txt`)
+    const base = `${safeFilename(deviceName.value)}_${filenameTimestamp(job.created_at)}`
+    if (job.is_binary) {
+      saveFile(await backupJobsApi.contentBlob(job.id), `${base}.bin`)
     } else {
-      saveFile(await storedBackupsApi.downloadBlob(backup.id), `${base}.bin`)
+      saveFile(await backupJobsApi.contentText(job.id), `${base}.txt`)
     }
   } catch (error) {
     notify.error(error, 'Failed to download backup')
   } finally {
-    downloading.delete(backup.id)
+    downloading.delete(job.id)
   }
 }
 
-const logs = reactive<{ open: boolean; backupId: Id | null; info: BackupLogInfo | null }>({
+const logs = reactive<{ open: boolean; backupId: string | null; info: BackupLogInfo | null }>({
   open: false,
   backupId: null,
   info: null,
 })
 
-function openLogs(backup: StoredBackup): void {
-  logs.backupId = backup.id
-  logs.info = { deviceName: deviceName.value, timestamp: formatDateTime(backup.timestamp), status: backup.status }
+function openLogs(job: BackupJob): void {
+  logs.backupId = job.id
+  logs.info = { deviceName: deviceName.value, timestamp: formatDateTime(job.created_at), status: statusLabel(job.state) }
   logs.open = true
 }
 
 onMounted(async () => {
-  loading.value = true
   try {
-    const [device, list] = await Promise.all([
-      devicesApi.get(deviceId.value),
-      storedBackupsApi.listForDevice(deviceId.value),
-    ])
-    deviceName.value = device.name
-    backups.value = list
+    deviceName.value = (await devicesApi.get(deviceId.value)).name
   } catch (error) {
-    notify.error(error, 'Failed to load backups')
-  } finally {
-    loading.value = false
+    notify.error(error, 'Failed to load device')
   }
 })
 </script>

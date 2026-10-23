@@ -53,6 +53,9 @@ export interface BackupSchedule {
   enabled: boolean
   created_at: IsoDateTime
   updated_at: IsoDateTime
+  last_run_at: IsoDateTime | null
+  /** Null when disabled. */
+  next_run: IsoDateTime | null
 }
 
 export type JsonObject = Record<string, unknown>
@@ -123,14 +126,15 @@ interface DeviceBase {
   manufacturer: Manufacturer | null
   backup_method: string
   backup_method_display: string
+  driver_params: JsonObject
   collection_group: CollectionGroup | null
   enabled: boolean
-  encrypt_backups: boolean
   last_backup_time: IsoDateTime | null
   last_backup_status: string | null
   retention_policy: Id | null
   backup_location: Id | null
   credential: Id | null
+  schedule: Id | null
   user_permissions: DevicePermission[]
 }
 
@@ -152,39 +156,65 @@ export interface DeviceWrite {
   device_type: Id | null
   manufacturer: Id | null
   backup_method: string
+  driver_params: JsonObject
   device_group: Id | null
   collection_group: Id | null
   enabled: boolean
-  encrypt_backups: boolean
   retention_policy: Id | null
   backup_location: Id | null
   credential: Id | null
-}
-
-export interface DispatchResponse {
-  task_id: string
-  queued_on: string
+  schedule: Id | null
 }
 
 // --- Backups -------------------------------------------------------------------
 
-export type BackupStatus = 'success' | 'failure'
+/** A backup job's lifecycle; `stored` is the only successful outcome. */
+export type JobState = 'queued' | 'collecting' | 'collected' | 'storing' | 'stored' | 'failed' | 'timed_out'
 
-export interface StoredBackup {
-  id: Id
+export type JobTrigger = 'manual' | 'schedule'
+
+/** One backup of a device, from request to storage. */
+export interface BackupJob {
+  /** UUID. */
+  id: string
   device: Id
-  timestamp: IsoDateTime
-  task_identifier: string
-  backup_status: string
-  storage_status: string | null
-  storage_backend: string | null
-  storage_ref: string | null
-  storage_timestamp: IsoDateTime | null
-  /** Overall status: success only if both collection and storage succeeded. */
-  status: BackupStatus
-  is_text: boolean
-  is_encrypted: boolean
-  enc_kid: string | null
+  device_name: string
+  state: JobState
+  trigger: JobTrigger
+  requested_by_username: string | null
+  driver: string
+  is_binary: boolean
+  encrypted: boolean
+  size_bytes: number | null
+  storage_backend: string
+  location_name: string | null
+  /** Names of the workers that collected and stored it. */
+  collector: string
+  storage_worker: string
+  attempts: number
+  error: string
+  created_at: IsoDateTime
+  started_at: IsoDateTime | null
+  collected_at: IsoDateTime | null
+  finished_at: IsoDateTime | null
+  collect_duration_ms: number | null
+  store_duration_ms: number | null
+  /** Request to completion. */
+  duration_ms: number | null
+}
+
+export interface BackupNowResponse {
+  job: BackupJob
+  /** False if the device already had a backup in progress, which `job` is. */
+  created: boolean
+}
+
+/** A page of a paginated list endpoint. */
+export interface Page<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
 }
 
 export type LogSeverity = 'DEBUG' | 'INFO' | 'WARN' | 'WARNING' | 'ERROR'
@@ -360,16 +390,15 @@ export interface DashboardStats {
 export type ActivityWindow = '1h' | '24h' | '7d'
 
 export interface ActivityItem {
-  /** Backup result id; also the key for its logs. */
-  id: Id
-  task_identifier: string
+  /** Job id; also the key for its logs. */
+  id: string
+  device_id: Id
   device_name: string
-  device_type: string
-  timestamp: IsoDateTime | null
-  status: string
-  status_display: string
-  storage_status: string
-  storage_status_display: string
-  duration: number | null
-  log: string | null
+  state: JobState
+  trigger: JobTrigger
+  created_at: IsoDateTime
+  finished_at: IsoDateTime | null
+  duration_ms: number | null
+  error: string
+  has_log: boolean
 }

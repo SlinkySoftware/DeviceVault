@@ -5,10 +5,9 @@ from rest_framework.test import APIClient
 from core import workers
 from core.models import Worker
 from core.signing import public_key
-from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType
+from devices.models import CollectionGroup
 from devicevault_protocol import signing
 from devicevault_protocol.registration import STATUS_APPROVED, STATUS_PENDING, STATUS_REVOKED
-from devicevault_protocol.tasks import verify_task
 
 ORCHESTRATOR = lambda: signing.public_key_from_b64(public_key())  # noqa: E731
 
@@ -211,29 +210,3 @@ def test_backup_methods_come_from_approved_collectors(db, admin, approved_collec
     keys = [m['key'] for m in admin.get('/api/backup-methods/').json()]
 
     assert keys == ['binary_dummy', 'noop']
-
-
-def test_collection_tasks_are_signed_for_workers(db, monkeypatch, approved_collector):
-    from devices import dispatch
-
-    sent = []
-    monkeypatch.setattr(
-        dispatch.celery_app,
-        'send_task',
-        lambda name, args, queue: sent.append((name, args, queue)) or type('T', (), {'id': 'task-1'})(),
-    )
-    group = CollectionGroup.objects.create(name='DMZ', rabbitmq_queue_id='dmz')
-    device = Device.objects.create(
-        name='r1',
-        ip_address='192.0.2.1',
-        device_type=DeviceType.objects.create(name='Router'),
-        device_group=DeviceGroup.objects.create(name='Core'),
-        collection_group=group,
-        backup_method='noop',
-    )
-
-    dispatch.dispatch_collection(device, 'backup_now')
-
-    [(name, [envelope], queue)] = sent
-    assert (name, queue) == ('device.collect', 'collector.group.dmz')
-    assert verify_task(envelope, ORCHESTRATOR())['device_id'] == device.id

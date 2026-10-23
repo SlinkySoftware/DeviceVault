@@ -145,10 +145,19 @@
             label="Retention policy"
             :disable="!canModify"
           />
-          <q-toggle v-model="form.encrypt_backups" :disable="!canModify">
-            <q-icon name="lock" :color="form.encrypt_backups ? 'primary' : 'grey-6'" class="q-mr-xs" />
-            Encrypt backups at rest
-          </q-toggle>
+          <q-select
+            v-model="form.schedule"
+            :options="schedules"
+            option-value="id"
+            option-label="name"
+            emit-value
+            map-options
+            clearable
+            outlined
+            label="Backup schedule"
+            hint="Leave empty to back up only on demand"
+            :disable="!canModify"
+          />
 
           <div class="row q-gutter-sm">
             <q-btn v-if="canModify" type="submit" color="primary" label="Save" :loading="saving" />
@@ -167,6 +176,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   backupLocationsApi,
   backupMethodsApi,
+  backupSchedulesApi,
   collectionGroupsApi,
   credentialsApi,
   deviceGroupsApi,
@@ -178,6 +188,7 @@ import {
 import type {
   BackupLocation,
   BackupMethod,
+  BackupSchedule,
   CollectionGroup,
   Credential,
   DeviceDetail,
@@ -208,13 +219,14 @@ const form = ref<DeviceWrite>({
   device_type: null,
   manufacturer: null,
   backup_method: 'noop',
+  driver_params: {},
   device_group: null,
   collection_group: null,
   enabled: true,
-  encrypt_backups: false,
   retention_policy: null,
   backup_location: null,
   credential: null,
+  schedule: null,
 })
 const loading = ref(true)
 const saving = ref(false)
@@ -225,6 +237,7 @@ const backupMethods = ref<BackupMethod[]>([])
 const credentials = ref<Credential[]>([])
 const backupLocations = ref<BackupLocation[]>([])
 const retentionPolicies = ref<RetentionPolicy[]>([])
+const schedules = ref<BackupSchedule[]>([])
 const deviceGroups = ref<DeviceGroup[]>([])
 const collectionGroups = ref<CollectionGroup[]>([])
 
@@ -254,13 +267,14 @@ function toForm(detail: DeviceDetail): DeviceWrite {
     device_type: detail.device_type?.id ?? null,
     manufacturer: detail.manufacturer?.id ?? null,
     backup_method: detail.backup_method,
+    driver_params: detail.driver_params,
     device_group: detail.device_group?.id ?? null,
     collection_group: detail.collection_group?.id ?? null,
     enabled: detail.enabled,
-    encrypt_backups: detail.encrypt_backups,
     retention_policy: detail.retention_policy,
     backup_location: detail.backup_location,
     credential: detail.credential,
+    schedule: detail.schedule,
   }
 }
 
@@ -284,13 +298,14 @@ async function save(): Promise<void> {
 onMounted(async () => {
   try {
     const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name)
-    const [types, makers, methods, creds, locations, policies, groups, collections, detail] = await Promise.all([
+    const [types, makers, methods, creds, locations, policies, scheduleList, groups, collections, detail] = await Promise.all([
       deviceTypesApi.list(),
       manufacturersApi.list(),
       backupMethodsApi.list(),
       credentialsApi.list(),
       backupLocationsApi.list(),
       retentionPoliciesApi.list(),
+      backupSchedulesApi.list(),
       deviceGroupsApi.list(),
       collectionGroupsApi.list(),
       deviceId.value !== null ? devicesApi.get(deviceId.value) : Promise.resolve(null),
@@ -301,6 +316,7 @@ onMounted(async () => {
     credentials.value = creds.sort(byName)
     backupLocations.value = locations.sort(byName)
     retentionPolicies.value = policies.sort(byName)
+    schedules.value = scheduleList.sort(byName)
     deviceGroups.value = groups.sort(byName)
     collectionGroups.value = collections.sort(byName)
     if (detail) {

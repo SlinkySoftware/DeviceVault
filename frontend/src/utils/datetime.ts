@@ -2,13 +2,17 @@
 // Timestamps arrive from the API as UTC ISO strings and are shown in the
 // orchestrator's configured display timezone (DV_TIMEZONE), so every user sees
 // the same wall-clock times the server uses for "last 24h" and daily buckets.
+// The timezone is reactive: it loads after the first render, and anything
+// formatted before then re-renders when it arrives.
 
-let displayTimeZone: string | undefined
+import { shallowRef } from 'vue'
+
+const timeZoneRef = shallowRef<string | undefined>()
 let displayLocale: string | undefined
 
 /** Set the IANA timezone used for display; undefined falls back to the browser's. */
 export function setDisplayTimeZone(timeZone: string | undefined): void {
-  displayTimeZone = timeZone && isValidTimeZone(timeZone) ? timeZone : undefined
+  timeZoneRef.value = timeZone && isValidTimeZone(timeZone) ? timeZone : undefined
 }
 
 /** Override the display locale (mainly for tests); undefined uses the browser's. */
@@ -34,7 +38,7 @@ function toDate(value: string | null | undefined): Date | null {
 function format(value: string | null | undefined, options: Intl.DateTimeFormatOptions): string {
   const date = toDate(value)
   if (!date) return ''
-  return new Intl.DateTimeFormat(displayLocale, { timeZone: displayTimeZone, ...options }).format(date)
+  return new Intl.DateTimeFormat(displayLocale, { timeZone: timeZoneRef.value, ...options }).format(date)
 }
 
 export function formatDateTime(value: string | null | undefined): string {
@@ -83,7 +87,7 @@ export function filenameTimestamp(value: string): string {
   if (!date) return 'unknown'
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
-      timeZone: displayTimeZone,
+      timeZone: timeZoneRef.value,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

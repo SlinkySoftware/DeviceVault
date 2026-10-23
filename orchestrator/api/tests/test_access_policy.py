@@ -52,7 +52,6 @@ def test_reference_data_is_readable_but_not_writable_by_users(user, path):
         '/api/users/',
         '/api/groups/',
         '/api/audit-logs/',
-        '/api/backups/',
         '/api/device-group-roles/',
         '/api/device-group-permissions/',
         '/api/user-device-group-roles/',

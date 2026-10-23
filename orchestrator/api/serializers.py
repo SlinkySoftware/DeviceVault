@@ -26,7 +26,6 @@ from rest_framework import serializers
 
 from api.permissions import is_admin
 from audit.models import AuditLog
-from backups.models import Backup
 from core.models import Worker
 from core.theme_settings import ThemeSettings
 from core.workers import driver_catalogue, is_online
@@ -34,7 +33,6 @@ from credentials.models import Credential, CredentialType
 from devices.models import (
     CollectionGroup,
     Device,
-    DeviceBackupResult,
     DeviceGroup,
     DeviceGroupPermission,
     DeviceGroupRole,
@@ -45,7 +43,7 @@ from devices.models import (
 )
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
 from locations.models import BackupLocation
-from policies.models import BackupSchedule, RetentionPolicy
+from policies.models import BackupSchedule, RetentionPolicy, validate_cron
 
 
 def drivers(context: dict) -> dict:
@@ -123,14 +121,32 @@ class RetentionPolicySerializer(serializers.ModelSerializer):
 
 
 class BackupScheduleSerializer(serializers.ModelSerializer):
-    """
-    Serializes BackupSchedule model for API responses
-    Used by Celery Beat to configure automated backup scheduling
-    """
+    """A backup schedule, with when it last ran and next runs."""
+
+    next_run = serializers.SerializerMethodField()
 
     class Meta:
         model = BackupSchedule
         fields = '__all__'
+        read_only_fields = ('last_run_at',)
+
+    def get_next_run(self, obj):
+        return obj.next_run()
+
+    def validate(self, attrs):
+        schedule = BackupSchedule(**{**self._current(), **attrs})
+        try:
+            validate_cron(schedule.cron())
+        except ValueError as exc:
+            field = 'cron_expression' if schedule.schedule_type == 'custom_cron' else 'non_field_errors'
+            raise serializers.ValidationError({field: f'Invalid schedule: {exc}'}) from exc
+        return attrs
+
+    def _current(self) -> dict:
+        if self.instance is None:
+            return {}
+        names = ('schedule_type', 'hour', 'minute', 'day_of_week', 'day_of_month', 'cron_expression')
+        return {name: getattr(self.instance, name) for name in names}
 
 
 class AdminOnlyFieldsMixin:
@@ -192,8 +208,6 @@ class DeviceSerializer(serializers.ModelSerializer):
     user_permissions = serializers.SerializerMethodField()
     device_group_name = serializers.CharField(source='device_group.name', read_only=True)
     backup_method_display = serializers.SerializerMethodField()
-    last_backup_time = serializers.SerializerMethodField()
-    last_backup_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Device
@@ -205,16 +219,17 @@ class DeviceSerializer(serializers.ModelSerializer):
             'device_type',
             'manufacturer',
             'backup_method',
+            'driver_params',
             'backup_method_display',
             'device_group',
             'device_group_name',
             'collection_group',
             'enabled',
-            'encrypt_backups',
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
             'backup_location',
+            'schedule',
             'credential',
             'user_permissions',
         ]
@@ -231,76 +246,6 @@ class DeviceSerializer(serializers.ModelSerializer):
     def get_backup_method_display(self, obj):
         driver = drivers(self.context).get(obj.backup_method)
         return driver['name'] if driver else obj.backup_method
-
-    def get_last_backup_time(self, obj):
-        return getattr(obj, 'last_success_time', None) or obj.last_backup_time
-
-    def get_last_backup_status(self, obj):
-        return getattr(obj, 'last_success_status', None) or obj.last_backup_status
-
-
-class BackupSerializer(serializers.ModelSerializer):
-    """Serializes Backup model for API responses"""
-
-    class Meta:
-        model = Backup
-        fields = '__all__'
-
-
-class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
-    """Serializes backup results with optional storage linkage."""
-
-    backup_status = serializers.CharField(source='status', read_only=True)
-    status = serializers.SerializerMethodField()
-    storage_status = serializers.CharField(read_only=True)
-    storage_backend = serializers.CharField(read_only=True)
-    storage_ref = serializers.CharField(read_only=True)
-    storage_timestamp = serializers.DateTimeField(read_only=True)
-    is_text = serializers.SerializerMethodField()
-    is_encrypted = serializers.SerializerMethodField()
-    enc_kid = serializers.CharField(read_only=True)
-
-    class Meta:
-        model = DeviceBackupResult
-        fields = [
-            'id',
-            'device',
-            'timestamp',
-            'task_identifier',
-            'backup_status',
-            'storage_status',
-            'storage_backend',
-            'storage_ref',
-            'storage_timestamp',
-            'status',
-            'is_text',
-            'is_encrypted',
-            'enc_kid',
-        ]
-
-    def get_status(self, obj):
-        backup_status = getattr(obj, 'status', '') or ''
-        storage_status = getattr(obj, 'storage_status', None)
-        if backup_status != 'success':
-            return 'failure'
-        if storage_status and storage_status != 'success':
-            return 'failure'
-        return 'success'
-
-    def get_is_text(self, obj):
-        """Text unless the device's backup method is a binary driver (unknown drivers count as text)."""
-        driver = drivers(self.context).get(obj.device.backup_method) if obj.device else None
-        return not (driver and driver['is_binary'])
-
-    def get_is_encrypted(self, obj):
-        """Return True if the stored backup is encrypted."""
-        enc_version = getattr(obj, 'enc_version', None)
-        if enc_version is not None:
-            try:
-                return int(enc_version) > 0
-            except ValueError, TypeError:
-                pass
-        return False
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -689,8 +634,6 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     collection_group = CollectionGroupSerializer(read_only=True)
     user_permissions = serializers.SerializerMethodField()
     backup_method_display = serializers.SerializerMethodField()
-    last_backup_time = serializers.SerializerMethodField()
-    last_backup_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Device
@@ -702,15 +645,16 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
             'device_type',
             'manufacturer',
             'backup_method',
+            'driver_params',
             'backup_method_display',
             'device_group',
             'collection_group',
             'enabled',
-            'encrypt_backups',
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
             'backup_location',
+            'schedule',
             'credential',
             'user_permissions',
         ]
@@ -727,12 +671,6 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
     def get_backup_method_display(self, obj):
         driver = drivers(self.context).get(obj.backup_method)
         return driver['name'] if driver else obj.backup_method
-
-    def get_last_backup_time(self, obj):
-        return getattr(obj, 'last_success_time', None) or obj.last_backup_time
-
-    def get_last_backup_status(self, obj):
-        return getattr(obj, 'last_success_status', None) or obj.last_backup_status
 
 
 class DeviceWriteSerializer(serializers.ModelSerializer):
@@ -751,12 +689,13 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             'device_type',
             'manufacturer',
             'backup_method',
+            'driver_params',
             'device_group',
             'collection_group',
             'enabled',
-            'encrypt_backups',
             'retention_policy',
             'backup_location',
+            'schedule',
             'credential',
         ]
         extra_kwargs = {'device_group': {'required': True, 'allow_null': False}}

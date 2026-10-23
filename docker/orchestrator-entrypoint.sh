@@ -21,18 +21,17 @@ case "$role" in
     api-dev)
         exec python manage.py runserver 0.0.0.0:8000 "$@"
         ;;
-    collect-results)
-        exec python manage.py consume_device_results "$@"
-        ;;
-    store-results)
-        exec python manage.py consume_storage_results "$@"
+    scheduler)
+        # Runs due backup schedules and expires stuck jobs. Safe to run on
+        # every node: only the holder of a Redis lease acts.
+        exec python manage.py run_scheduler "$@"
         ;;
     events)
-        # Worker registration and heartbeats (queue dv.orchestrator).
+        # Worker registration, heartbeats and job events (queue dv.orchestrator).
         exec celery -A devicevault.celery worker \
             --queues=dv.orchestrator \
             --hostname="events@%h" \
-            --concurrency="${DV_EVENTS_CONCURRENCY:-2}" \
+            --concurrency="${DV_EVENTS_CONCURRENCY:-4}" \
             --loglevel="${DV_LOG_LEVEL:-INFO}" \
             "$@"
         ;;

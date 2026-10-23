@@ -1,7 +1,7 @@
 """
 Backup Policy Models
 Defines backup retention policies and scheduling for automated backup operations.
-Integrates with Celery Beat for distributed task scheduling.
+Schedules are run by the orchestrator scheduler process (backups.scheduler).
 """
 
 # DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
@@ -20,6 +20,11 @@ Integrates with Celery Beat for distributed task scheduling.
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+from cronsim import CronSim, CronSimError
+from django.conf import settings
 from django.db import models
 
 
@@ -56,7 +61,7 @@ class RetentionPolicy(models.Model):
 
 class BackupSchedule(models.Model):
     """
-    BackupSchedule Model: Defines when backups should be executed using Celery Beat
+    BackupSchedule Model: when devices using it are backed up (run by the scheduler process)
 
     Fields:
         - name (CharField): Descriptive schedule name (e.g., "Nightly 2 AM")
@@ -73,7 +78,8 @@ class BackupSchedule(models.Model):
 
     Methods:
         - __str__(): Returns the schedule name
-        - get_celery_schedule(): Generates Celery Beat compatible schedule configuration
+        - cron(): The schedule as a cron expression
+        - next_run(): When the schedule next fires
 
     Schedule Types:
         - daily: Runs every day at specified hour:minute
@@ -82,9 +88,8 @@ class BackupSchedule(models.Model):
         - custom_cron: Uses raw cron expression for complex schedules
 
     Usage:
-        Schedules are configured through the admin interface and Celery Beat
-        reads them from the database to queue backup tasks at the specified times.
-        Only enabled schedules will trigger backups.
+        Devices reference a schedule; the scheduler queues a backup job for each
+        enabled device when the schedule is due. Times are in the display timezone.
     """
 
     SCHEDULE_CHOICES = [
@@ -113,6 +118,7 @@ class BackupSchedule(models.Model):
     enabled = models.BooleanField(default=True, help_text='Enable/disable this schedule')
     created_at = models.DateTimeField(auto_now_add=True, help_text='When this schedule was created')
     updated_at = models.DateTimeField(auto_now=True, help_text='When this schedule was last modified')
+    last_run_at = models.DateTimeField(null=True, blank=True, help_text='When the scheduler last ran this schedule')
 
     class Meta:
         ordering = ['-enabled', 'name']
@@ -121,25 +127,35 @@ class BackupSchedule(models.Model):
         """Return the schedule name for admin display"""
         return self.name
 
-    def get_celery_schedule(self):
-        """
-        Generate Celery Beat schedule configuration
+    def cron(self) -> str:
+        """The schedule as a five-field cron expression (in the display timezone)."""
+        time = f'{self.minute} {self.hour}'
+        if self.schedule_type == 'weekly':
+            return f'{time} * * {self.day_of_week}'
+        if self.schedule_type == 'monthly':
+            # Day 31 means the last day of every month, not "months with 31 days".
+            day = 'L' if self.day_of_month >= 31 else self.day_of_month
+            return f'{time} {day} * *'
+        if self.schedule_type == 'custom_cron':
+            return self.cron_expression.strip()
+        return f'{time} * * *'
 
-        Returns:
-            dict: Celery Beat compatible schedule dictionary with timing parameters
+    def next_run_after(self, moment: datetime) -> datetime:
+        """The first time strictly after ``moment`` this schedule fires (aware, UTC)."""
+        tz = ZoneInfo(settings.DEVICEVAULT_DISPLAY_TIMEZONE)
+        local = moment.astimezone(tz).replace(second=0, microsecond=0)
+        return next(CronSim(self.cron(), local)).astimezone(UTC)
 
-        Examples:
-            - Daily at 2:00 AM: {'minute': 0, 'hour': 2}
-            - Weekly Friday at 3:30 AM: {'minute': 30, 'hour': 3, 'day_of_week': 5}
-            - Monthly 1st at 4:00 AM: {'minute': 0, 'hour': 4, 'day_of_month': 1}
-        """
-        if self.schedule_type == 'daily':
-            return {'minute': self.minute, 'hour': self.hour}
-        elif self.schedule_type == 'weekly':
-            return {'minute': self.minute, 'hour': self.hour, 'day_of_week': self.day_of_week}
-        elif self.schedule_type == 'monthly':
-            return {'minute': self.minute, 'hour': self.hour, 'day_of_month': self.day_of_month}
-        elif self.schedule_type == 'custom_cron':
-            return {'crontab': self.cron_expression}
-        # Default to daily if type not recognized
-        return {'minute': self.minute, 'hour': self.hour}
+    def next_run(self) -> datetime | None:
+        """When this schedule next fires, or None if it is disabled."""
+        if not self.enabled:
+            return None
+        return self.next_run_after(self.last_run_at or self.created_at)
+
+
+def validate_cron(expression: str) -> None:
+    """Raise ValueError if ``expression`` is not a valid five-field cron expression."""
+    try:
+        next(CronSim(expression.strip(), datetime.now(UTC)))
+    except (CronSimError, StopIteration) as exc:
+        raise ValueError(str(exc) or 'invalid cron expression') from exc

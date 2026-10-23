@@ -6,6 +6,7 @@ requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
     "celery[redis]>=5.6.3,<5.7",
+    "cronsim>=2.6",
     "devicevault-protocol",
     "django>=6.1.2,<6.2",
     "djangorestframework>=3.18.3,<3.19",

@@ -1,0 +1,240 @@
+"""Creating, dispatching and tracking backup jobs. See devicevault_protocol.jobs."""
+
+import logging
+import re
+import uuid
+from datetime import timedelta
+from typing import Any
+
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from backups.models import BackupJob
+from core.models import Worker
+from core.signing import sign_task
+from core.workers import driver_catalogue
+from devicevault.celery import app as celery_app
+from devicevault_protocol import signing
+from devicevault_protocol.jobs import (
+    EVENT_COLLECTED,
+    EVENT_FAILED,
+    EVENT_RETRYING,
+    EVENT_STARTED,
+    EVENT_STORED,
+    STAGE_STORE,
+)
+from devicevault_protocol.names import COLLECT_TASK, collection_queue_name, storage_backend_for, storage_queue_name
+from devicevault_protocol.registration import STATUS_APPROVED
+
+logger = logging.getLogger('devicevault.jobs')
+
+# Events can wait in the queue while the orchestrator is down.
+EVENT_MAX_AGE = timedelta(days=1)
+MAX_LOG_ENTRIES = 500
+
+
+class JobError(Exception):
+    """A device cannot be backed up as configured."""
+
+
+# --- creating and dispatching -------------------------------------------------------
+
+
+def create_job(device, *, trigger=BackupJob.TRIGGER_MANUAL, user=None, schedule=None) -> tuple[BackupJob, bool]:
+    """Queue a backup of ``device``. Returns ``(job, created)``.
+
+    If the device already has an active job, that job is returned instead, so
+    repeated "backup now" clicks and overlapping schedules do not pile up.
+    """
+    if not device.collection_group:
+        raise JobError('the device has no collection group, so no collector can back it up')
+    location = device.backup_location
+    if not location:
+        raise JobError('the device has no backup location')
+    backend = storage_backend_for(location.location_type)
+    if not backend:
+        raise JobError(f'backup location "{location.name}" has an unsupported type "{location.location_type}"')
+
+    with transaction.atomic():
+        active = (
+            BackupJob.objects.select_for_update()
+            .filter(device=device, state__in=BackupJob.ACTIVE_STATES)
+            .order_by('-created_at')
+            .first()
+        )
+        if active:
+            return active, False
+        driver = driver_catalogue().get(device.backup_method)
+        job = BackupJob.objects.create(
+            device=device,
+            trigger=trigger,
+            requested_by=user if user and user.is_authenticated else None,
+            schedule=schedule,
+            driver=device.backup_method,
+            # Provisional (it picks the file extension); the collector's report is authoritative.
+            is_binary=bool(driver and driver['is_binary']),
+            location=location,
+            storage_backend=backend,
+        )
+    transaction.on_commit(lambda: dispatch(job))
+    return job, True
+
+
+def _device_key(device) -> str:
+    slug = re.sub(r'[^a-z0-9]+', '-', device.name.lower()).strip('-')[:64] or 'device'
+    return f'{device.pk}-{slug}'
+
+
+def collect_payload(job: BackupJob) -> dict[str, Any]:
+    device = job.device
+    store = {
+        'job_id': str(job.id),
+        'backend': job.storage_backend,
+        'config': job.location.config if job.location else {},
+        'name': {
+            'device_key': _device_key(device),
+            'job_id': str(job.id),
+            'timestamp': job.created_at.strftime('%Y%m%dT%H%M%SZ'),
+            'extension': '.bin' if job.is_binary else '.cfg',
+        },
+    }
+    return {
+        'job_id': str(job.id),
+        'device': {'id': device.pk, 'name': device.name, 'address': device.ip_address},
+        'driver': job.driver,
+        'driver_params': device.driver_params or {},
+        'credentials': device.credential.data if device.credential else {},
+        'timeout': settings.DEVICEVAULT_COLLECT_TIMEOUT_SEC,
+        'store': {'queue': storage_queue_name(job.storage_backend), 'envelope': sign_task(store)},
+    }
+
+
+def dispatch(job: BackupJob) -> None:
+    queue = collection_queue_name(job.device.collection_group.rabbitmq_queue_id)
+    celery_app.send_task(COLLECT_TASK, args=[sign_task(collect_payload(job))], queue=queue)
+
+
+# --- events ------------------------------------------------------------------------------
+
+
+class EventRejected(Exception):
+    pass
+
+
+def _verified_event(envelope: Any) -> tuple[dict[str, Any], Worker]:
+    try:
+        claimed = signing.peek(envelope)
+        worker_id = str(uuid.UUID(str(claimed.get('worker_id'))))
+        if envelope.get('signer') != worker_id:
+            raise EventRejected('signer does not match worker_id')
+        worker = Worker.objects.filter(pk=worker_id, status=STATUS_APPROVED).first()
+        if worker is None:
+            raise EventRejected('job events are only accepted from approved workers')
+        payload = signing.verify(envelope, signing.public_key_from_b64(worker.signing_key), max_age=EVENT_MAX_AGE)
+        uuid.UUID(str(payload.get('job_id')))
+    except (EventRejected, signing.SignatureError, ValueError, TypeError, AttributeError) as exc:
+        logger.warning('job_event_rejected', extra={'reason': str(exc)})
+        raise EventRejected(str(exc)) from exc
+    return payload, worker
+
+
+def handle_job_event(envelope: Any) -> BackupJob | None:
+    payload, worker = _verified_event(envelope)
+    with transaction.atomic():
+        job = BackupJob.objects.select_for_update().select_related('device').filter(pk=payload['job_id']).first()
+        if job is None:
+            logger.warning('job_event_for_unknown_job', extra={'job_id': payload['job_id']})
+            return None
+        _apply(job, payload, worker)
+        job.save()
+        if job.state in BackupJob.TERMINAL_STATES:
+            _record_on_device(job)
+    return job
+
+
+def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
+    event = payload.get('event')
+    now = timezone.now()
+    stage = payload.get('stage')
+    entries = [e for e in payload.get('log') or [] if isinstance(e, dict)]
+    job.log = (job.log + entries)[-MAX_LOG_ENTRIES:]
+
+    if job.state in (BackupJob.STORED, BackupJob.FAILED):
+        return  # late or duplicate event for a finished job; keep its log only
+
+    if event == EVENT_STARTED:
+        if stage == STAGE_STORE:
+            job.storage_worker = worker.name
+            if job.state != BackupJob.STORED:
+                job.state = BackupJob.STORING
+        else:
+            job.collector = worker.name
+            job.attempts = max(job.attempts, int(payload.get('attempt') or 1))
+            job.error = ''  # a new attempt; the previous one's error is in the log
+            job.started_at = job.started_at or now
+            if job.state == BackupJob.QUEUED:
+                job.state = BackupJob.COLLECTING
+    elif event == EVENT_RETRYING:
+        job.error = str(payload.get('error') or '')
+    elif event == EVENT_COLLECTED:
+        job.collected_sha256 = str(payload.get('sha256') or '')
+        job.size_bytes = int(payload.get('size') or 0)
+        job.is_binary = bool(payload.get('is_binary'))
+        job.encrypted = bool(payload.get('encrypted'))
+        job.collect_duration_ms = int(payload.get('duration_ms') or 0)
+        job.collected_at = now
+        job.error = ''
+        if job.state in (BackupJob.QUEUED, BackupJob.COLLECTING, BackupJob.TIMED_OUT):
+            job.state = BackupJob.COLLECTED
+        _finish_if_complete(job, now)
+    elif event == EVENT_STORED:
+        job.stored_sha256 = str(payload.get('sha256') or '')
+        job.storage_ref = str(payload.get('storage_ref') or '')
+        job.store_duration_ms = int(payload.get('duration_ms') or 0)
+        job.storage_worker = worker.name
+        _finish_if_complete(job, now)
+    elif event == EVENT_FAILED:
+        job.state = BackupJob.FAILED
+        job.error = str(payload.get('error') or 'failed')
+        job.finished_at = now
+
+
+def _finish_if_complete(job: BackupJob, now) -> None:
+    """A job is stored once both sides agree on the content hash, in either order."""
+    if not (job.collected_sha256 and job.stored_sha256):
+        if job.stored_sha256:
+            job.state = BackupJob.STORING  # stored, waiting for the collector's report
+        return
+    if job.collected_sha256 == job.stored_sha256:
+        job.state = BackupJob.STORED
+        job.error = ''
+    else:
+        job.state = BackupJob.FAILED
+        job.error = 'the stored backup does not match what the collector collected'
+    job.finished_at = now
+
+
+def _record_on_device(job: BackupJob) -> None:
+    from devices.models import Device
+
+    Device.objects.filter(pk=job.device_id).update(
+        last_backup_time=job.finished_at, last_backup_status='success' if job.succeeded else 'failure'
+    )
+
+
+# --- timeouts ----------------------------------------------------------------------------
+
+
+def expire_stale_jobs(now=None) -> int:
+    """Mark jobs that have been active for too long as timed out."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(minutes=settings.DEVICEVAULT_JOB_TIMEOUT_MIN)
+    stale = list(BackupJob.objects.filter(state__in=BackupJob.ACTIVE_STATES, created_at__lt=cutoff))
+    for job in stale:
+        job.state = BackupJob.TIMED_OUT
+        job.error = f'no result within {settings.DEVICEVAULT_JOB_TIMEOUT_MIN} minutes'
+        job.finished_at = now
+        job.save(update_fields=['state', 'error', 'finished_at'])
+        _record_on_device(job)
+    return len(stale)

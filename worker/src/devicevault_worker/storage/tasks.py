@@ -1,448 +1,127 @@
-"""
-Celery tasks for storage backends (Git, filesystem).
-These tasks are intentionally standalone and avoid Django imports.
-"""
+"""Storage tasks: ``job.store`` writes a staged backup, ``storage.read`` reads one back."""
 
-import json
-import re
 import time
-from datetime import UTC, datetime
+import uuid
 
 from celery.exceptions import SoftTimeLimitExceeded
 
-from devicevault_protocol.names import READ_TASK, STORE_RESULTS_STREAM, STORE_TASK, storage_backend_for
-from devicevault_worker.app import app, get_logger, redis_client
-from devicevault_worker.storage import fs as fs_storage
-from devicevault_worker.storage import git as git_storage
+from devicevault_protocol.jobs import (
+    EVENT_FAILED,
+    EVENT_RETRYING,
+    EVENT_STARTED,
+    EVENT_STORED,
+    READ_BLOB_TTL_SECONDS,
+    STAGE_STORE,
+    read_blob_key,
+)
+from devicevault_protocol.names import READ_TASK, STORE_TASK
+from devicevault_worker import blobs, events
+from devicevault_worker.app import app, get_logger
+from devicevault_worker.drivers.base import CollectionLog
+from devicevault_worker.storage.backends import BACKENDS, BackupName, StorageError
 from devicevault_worker.trust import SignatureError, verified_payload
 
-logger = get_logger('devicevault.storage.worker')
+logger = get_logger('devicevault.worker.storage')
 
-STORAGE_BACKENDS = {
-    'git': {
-        'store': git_storage.store_backup,
-        'read': git_storage.read_backup,
-    },
-    'fs': {
-        'store': fs_storage.store_backup,
-        'read': fs_storage.read_backup,
-    },
-}
-
-# ---------------------------------------------------------------------------
-# Lazy-initialised encryption layer (standalone, no Django needed)
-# ---------------------------------------------------------------------------
-_crypto_storage = None
-_crypto_checked = False
+STORAGE_BACKENDS = frozenset(BACKENDS)
+MAX_RETRIES = 5
 
 
-def _get_crypto_storage():
-    """Return a CryptoStorage wrapper if a master key is configured, else None.
-
-    Lazy-initialised on first call.  The storage worker process runs
-    outside Django so we read config directly from env / YAML.
-
-    With per-device encryption, the crypto subsystem must be available
-    whenever keys are configured — regardless of the global ``enabled``
-    flag.  The per-device ``encrypt_backup`` field in the payload
-    controls whether encryption is actually applied to each backup.
-    """
-    global _crypto_storage, _crypto_checked
-    if _crypto_checked:
-        return _crypto_storage
-
-    _crypto_checked = True
-    try:
-        from devicevault_protocol.crypto.config import get_chunk_size, get_key_provider
-        from devicevault_protocol.crypto.wrapper import CryptoStorage
-
-        kp = get_key_provider(force=True)
-        if kp is None:
-            logger.info('No encryption key provider available — per-device encryption will be unavailable')
-            return None
-
-        chunk_size = get_chunk_size()
-        _crypto_storage = CryptoStorage(kp, chunk_size=chunk_size, encryption_enabled=True)
-        logger.info(
-            'Crypto subsystem ready: cipher=AES-256-GCM, chunk_size=%d, default_kid=%s',
-            chunk_size,
-            kp.get_default_key_id(),
-        )
-    except Exception as exc:
-        # If crypto init fails, per-device encryption won't work.
-        logger.error('Failed to initialise crypto storage: %s', exc)
-        _crypto_storage = None
-
-    return _crypto_storage
-
-
-def _iso_now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _sanitize_rel_path(device_id: int | None, task_identifier: str) -> str:
-    safe_identifier = re.sub(r'[^A-Za-z0-9_.-]', '-', task_identifier or 'job')
-    prefix = str(device_id) if device_id is not None else 'unknown'
-    return f'{prefix}/{safe_identifier}.txt'
-
-
-def _publish_result(result: dict) -> None:
-    try:
-        payload = {
-            'task_id': result.get('task_id', '') or '',
-            'task_identifier': result.get('task_identifier', '') or '',
-            'device_id': str(result.get('device_id') or ''),
-            'status': result.get('status', '') or '',
-            'log': json.dumps(result.get('log', [])),
-            'storage_backend': result.get('storage_backend', '') or '',
-            'storage_ref': result.get('storage_ref', '') or '',
-            'operation': result.get('operation', '') or 'store',
-            'storage_duration_ms': str(result.get('storage_duration_ms', '') or ''),
-            # Encryption metadata (empty strings for unencrypted backups)
-            'enc_version': str(result.get('enc_version', '') or ''),
-            'enc_cipher': result.get('enc_cipher', '') or '',
-            'enc_kid': result.get('enc_kid', '') or '',
-            'enc_edk': result.get('enc_edk', '') or '',
-        }
-        redis_client.xadd(STORE_RESULTS_STREAM, payload)
-    except Exception:
-        logger.exception('storage_result_publish_failed')
+class _Retryable(Exception):
+    pass
 
 
 @app.task(
     bind=True,
     name=STORE_TASK,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=MAX_RETRIES,
     soft_time_limit=300,
     time_limit=360,
-    acks_late=True,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={'max_retries': 3},
 )
-def storage_store_task(self, envelope: dict) -> dict:
-    """Store backup content using the configured storage backend.
+def store(self, envelope: dict, blob: dict) -> None:
+    """Write the backup staged at ``blob["key"]``.
 
-    ``envelope`` is orchestrator-signed; its payload keys:
-        - storage_backend: git | fs
-        - storage_config: dict
-        - device_config: str (raw backup content)
-        - task_identifier: logical job id
-        - device_id: int
-        - storage_rel_path: optional relative path override
+    ``envelope`` (orchestrator-signed) carries job_id, backend, config and
+    name; ``blob`` comes from the collector and is checked against the hash
+    the collector reported, both here and by the orchestrator.
     """
-    log_lines: list[str] = []
-
     try:
-        payload = verified_payload(envelope)
+        spec = verified_payload(envelope)
     except SignatureError as exc:
         logger.error('task_rejected', extra={'task': STORE_TASK, 'reason': str(exc)})
-        return {'status': 'failure', 'operation': 'store', 'log': [f'task_rejected: {exc}']}
+        return
 
-    requested_backend = payload.get('storage_backend')
-    storage_backend = storage_backend_for(requested_backend) or requested_backend
-    storage_config = payload.get('storage_config') or {}
-    device_config = payload.get('device_config')
-    task_identifier = payload.get('task_identifier') or f'storage:{_iso_now()}'
-    device_id = payload.get('device_id')
-    rel_path = payload.get('storage_rel_path')
-    operation = 'store'
-
-    tid = getattr(getattr(self, 'request', None), 'id', None)
-
-    if not storage_backend or storage_backend not in STORAGE_BACKENDS:
-        msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'device_id': device_id,
-            'storage_backend': storage_backend or '',
-            'storage_ref': '',
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'operation': operation,
-        }
-        _publish_result(result)
-        return result
-
-    if not device_config:
-        msg = 'device_config missing; nothing to store'
-        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'device_id': device_id,
-            'storage_backend': storage_backend,
-            'storage_ref': '',
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'operation': operation,
-        }
-        _publish_result(result)
-        return result
-
-    rel_path = rel_path or _sanitize_rel_path(device_id, task_identifier)
-
+    job_id = spec['job_id']
+    attempt = self.request.retries + 1
+    log = CollectionLog(source='storage')
     try:
-        logger.info(
-            'storage_store_start',
-            extra={
-                'storage_backend': storage_backend,
-                'device_id': device_id,
-                'task_identifier': task_identifier,
-                'queue': getattr(getattr(self, 'request', None), 'delivery_info', {}).get('routing_key'),
-            },
+        events.send(job_id, EVENT_STARTED, attempt=attempt, stage=STAGE_STORE)
+        backend = BACKENDS.get(spec['backend'])
+        if backend is None:
+            raise StorageError(f'this storage worker has no "{spec["backend"]}" backend')
+        data = blobs.get(blob['key'])
+        if data is None:
+            raise StorageError('the collected backup expired before it could be stored')
+        if blobs.sha256(data) != blob['sha256']:
+            raise StorageError('the staged backup does not match the collected hash')
+
+        started = time.monotonic()
+        try:
+            ref = backend.store(data, BackupName(**spec['name']), spec.get('config') or {})
+        except OSError as exc:  # disk full, NFS hiccup, git lock...
+            raise _Retryable(str(exc)) from exc
+        blobs.delete(blob['key'])
+        log.info(f'stored {len(data)} bytes as {spec["backend"]}:{ref}')
+        events.send(
+            job_id,
+            EVENT_STORED,
+            attempt=attempt,
+            storage_ref=ref,
+            sha256=blob['sha256'],
+            size=len(data),
+            duration_ms=int((time.monotonic() - started) * 1000),
+            log=log.entries,
         )
-
-        # Capture start time for storage duration
-        storage_start_ms = int(time.time() * 1000)
-
-        storage_fn = STORAGE_BACKENDS[storage_backend]['store']
-        is_binary = payload.get('is_binary', False)
-
-        # Per-device encryption: the payload carries an 'encrypt_backup' flag
-        # set by the device configuration. Only encrypt when the device opts in
-        # AND the crypto subsystem is available (keys configured).
-        encrypt_requested = payload.get('encrypt_backup', False)
-        crypto = _get_crypto_storage() if encrypt_requested else None
-        enc_meta = None
-        if encrypt_requested and crypto is None:
-            log_lines.append(
-                {
-                    'source': 'encryption',
-                    'timestamp': _iso_now(),
-                    'severity': 'WARNING',
-                    'message': 'Encryption requested but no master key is configured — backup stored as plaintext',
-                }
-            )
-            logger.warning(
-                'encryption_requested_but_unavailable',
-                extra={'device_id': device_id, 'task_identifier': task_identifier},
-            )
-        if crypto is not None:
-            aad_fields = {
-                'device_id': device_id,
-                'task_identifier': task_identifier,
-                'storage_backend': storage_backend,
-            }
-            storage_ref, enc_meta = crypto.store(
-                str(device_config) if not is_binary else device_config,
-                rel_path,
-                storage_config,
-                is_binary=is_binary,
-                store_fn=storage_fn,
-                aad_fields=aad_fields,
-            )
-        else:
-            storage_ref = storage_fn(str(device_config), rel_path, storage_config)
-
-        # Capture end time and calculate duration
-        storage_end_ms = int(time.time() * 1000)
-        storage_duration_ms = storage_end_ms - storage_start_ms
-
-        enc_msg = ''
-        if enc_meta:
-            enc_msg = f' [encrypted v{enc_meta["enc_version"]}, kid={enc_meta["kid"]}]'
-            log_lines.append(
-                {
-                    'source': 'encryption',
-                    'timestamp': _iso_now(),
-                    'severity': 'INFO',
-                    'message': f'Backup encrypted at rest (AES-256-GCM, key={enc_meta["kid"]})',
-                }
-            )
-
-        log_lines.append(
-            {
-                'source': 'storage_worker',
-                'timestamp': _iso_now(),
-                'severity': 'INFO',
-                'message': f'Stored to {storage_backend}:{storage_ref}{enc_msg} in {storage_duration_ms}ms',
-            }
-        )
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'device_id': device_id,
-            'storage_backend': storage_backend,
-            'storage_ref': storage_ref,
-            'status': 'success',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'operation': operation,
-            'storage_duration_ms': storage_duration_ms,
-        }
-        # Attach encryption metadata to the result for persistence
-        if enc_meta:
-            result['enc_version'] = enc_meta.get('enc_version')
-            result['enc_cipher'] = enc_meta.get('cipher')
-            result['enc_kid'] = enc_meta.get('kid')
-            result['enc_edk'] = enc_meta.get('edk')  # base64
-        logger.info(
-            'storage_store_complete',
-            extra={
-                'storage_backend': storage_backend,
-                'device_id': device_id,
-                'task_identifier': task_identifier,
-                'storage_duration_ms': storage_duration_ms,
-            },
-        )
-        _publish_result(result)
-        return result
+    except _Retryable as exc:
+        if self.request.retries < self.max_retries:
+            countdown = min(300, 10 * 2**self.request.retries)
+            log.warning(f'attempt {attempt} failed, retrying in {countdown}s: {exc}')
+            events.send(job_id, EVENT_RETRYING, attempt=attempt, stage=STAGE_STORE, error=str(exc), log=log.entries)
+            raise self.retry(exc=exc, countdown=countdown) from exc
+        _fail(job_id, attempt, f'{exc} (gave up after {attempt} attempts)', log)
     except SoftTimeLimitExceeded:
-        msg = 'storage_task_soft_time_limit_exceeded'
-        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'device_id': device_id,
-            'storage_backend': storage_backend,
-            'storage_ref': '',
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'operation': operation,
-        }
-        _publish_result(result)
-        return result
+        _fail(job_id, attempt, 'storing exceeded its time limit', log)
     except Exception as exc:
-        logger.exception('storage_store_failure')
-        log_lines.append(
-            {
-                'source': 'storage_worker',
-                'timestamp': _iso_now(),
-                'severity': 'ERROR',
-                'message': f'Unhandled exception: {repr(exc)}',
-            }
-        )
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'device_id': device_id,
-            'storage_backend': storage_backend,
-            'storage_ref': '',
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'operation': operation,
-        }
-        _publish_result(result)
-        return result
+        if not isinstance(exc, StorageError):
+            logger.exception('store_failed', extra={'job_id': job_id})
+        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log)
 
 
-@app.task(
-    bind=True,
-    name=READ_TASK,
-    soft_time_limit=120,
-    time_limit=150,
-    acks_late=True,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={'max_retries': 2},
-)
-def storage_read_task(self, envelope: dict) -> dict:
-    """Retrieve backup content synchronously via the storage backend.
+def _fail(job_id: str, attempt: int, error: str, log: CollectionLog) -> None:
+    log.error(error)
+    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_STORE, error=error, log=log.entries)
 
-    ``envelope`` is orchestrator-signed; its payload keys: storage_backend,
-    storage_ref, storage_config, task_identifier (optional), is_binary.
+
+@app.task(bind=True, name=READ_TASK, soft_time_limit=120, time_limit=150)
+def read(self, envelope: dict) -> dict:
+    """Read a stored backup into Redis for the orchestrator.
+
+    Returns ``{"status": "success", "key", "sha256", "size"}`` or
+    ``{"status": "failure", "error"}``. The bytes are staged in Redis rather
+    than returned, because backups can be tens of MB.
     """
     try:
-        payload = verified_payload(envelope)
+        spec = verified_payload(envelope)
     except SignatureError as exc:
         logger.error('task_rejected', extra={'task': READ_TASK, 'reason': str(exc)})
-        return {'status': 'failure', 'operation': 'read', 'content': None, 'log': [f'task_rejected: {exc}']}
-
-    storage_backend = payload.get('storage_backend', '')
-    storage_ref = payload.get('storage_ref', '')
-    storage_config = payload.get('storage_config') or {}
-    task_identifier = payload.get('task_identifier')
-    is_binary = bool(payload.get('is_binary', False))
-    log_lines: list[str] = []
-    tid = getattr(getattr(self, 'request', None), 'id', None)
-    task_identifier = task_identifier or f'read:{storage_ref}'
-    operation = 'read'
-    storage_backend = storage_backend_for(storage_backend) or storage_backend
-
-    if not storage_backend or storage_backend not in STORAGE_BACKENDS:
-        msg = f'unsupported storage backend: {storage_backend}'
-        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'storage_backend': storage_backend or '',
-            'storage_ref': storage_ref,
-            'operation': operation,
-            'content': None,
-        }
-        _publish_result(result)
-        return result
-
+        return {'status': 'failure', 'error': f'task rejected: {exc}'}
     try:
-        logger.info(
-            'storage_read_start',
-            extra={'storage_backend': storage_backend, 'storage_ref': storage_ref},
-        )
-        read_fn = STORAGE_BACKENDS[storage_backend]['read']
-
-        # Decryption: route through CryptoStorage if available (handles v0 plaintext transparently)
-        crypto = _get_crypto_storage()
-        if crypto is not None:
-            content = crypto.read(storage_ref, storage_config, is_binary, read_fn=read_fn)
-        else:
-            content = read_fn(storage_ref, storage_config, is_binary=is_binary)
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'status': 'success',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'storage_backend': storage_backend,
-            'storage_ref': storage_ref,
-            'operation': operation,
-            'content': content,
-        }
-        return result
-    except SoftTimeLimitExceeded:
-        msg = 'storage_read_soft_time_limit_exceeded'
-        log_lines.append({'source': 'storage_worker', 'timestamp': _iso_now(), 'severity': 'ERROR', 'message': msg})
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'storage_backend': storage_backend,
-            'storage_ref': storage_ref,
-            'operation': operation,
-            'content': None,
-        }
-        _publish_result(result)
-        return result
-    except Exception as exc:
-        logger.exception('storage_read_failure')
-        log_lines.append(
-            {
-                'source': 'storage_worker',
-                'timestamp': _iso_now(),
-                'severity': 'ERROR',
-                'message': f'Unhandled exception: {repr(exc)}',
-            }
-        )
-        result = {
-            'task_id': tid,
-            'task_identifier': task_identifier,
-            'status': 'failure',
-            'timestamp': _iso_now(),
-            'log': log_lines,
-            'storage_backend': storage_backend,
-            'storage_ref': storage_ref,
-            'operation': operation,
-            'content': None,
-        }
-        _publish_result(result)
-        return result
+        backend = BACKENDS.get(spec['backend'])
+        if backend is None:
+            raise StorageError(f'this storage worker has no "{spec["backend"]}" backend')
+        data = backend.read(spec['storage_ref'], spec.get('config') or {})
+    except (StorageError, OSError) as exc:
+        return {'status': 'failure', 'error': str(exc)}
+    return {'status': 'success', **blobs.put(read_blob_key(uuid.uuid4().hex), data, READ_BLOB_TTL_SECONDS)}

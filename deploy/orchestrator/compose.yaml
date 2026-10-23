@@ -39,13 +39,9 @@ services:
       timeout: 5s
       retries: 5
 
-  collect-results:
+  scheduler:
     <<: [*orchestrator, *after-migrate]
-    command: [collect-results]
-
-  store-results:
-    <<: [*orchestrator, *after-migrate]
-    command: [store-results]
+    command: [scheduler]
 
   events:
     <<: [*orchestrator, *after-migrate]

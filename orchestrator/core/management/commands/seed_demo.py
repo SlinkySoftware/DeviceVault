@@ -63,9 +63,9 @@ def create_sample_data():
 
     # Backup Locations
     locations = [
-        ('Primary Git', 'git', {'url': 'https://github.com/company/backups.git', 'branch': 'main'}),
-        ('Local Storage', 'filesystem', {'path': '/var/backups/devicevault'}),
-        ('S3 Bucket', 's3', {'bucket': 'devicevault-backups', 'region': 'us-east-1'}),
+        # Paths are on the storage worker (the dev stack mounts a volume at /srv/devicevault).
+        ('Local Storage', 'fs', {'path': '/srv/devicevault/fs', 'compress': False}),
+        ('Local Git', 'git', {'path': '/srv/devicevault/git', 'branch': 'main'}),
     ]
     for name, loc_type, config in locations:
         BackupLocation.objects.get_or_create(name=name, defaults={'location_type': loc_type, 'config': config})
@@ -89,6 +89,17 @@ def create_sample_data():
         ('Daily 2 AM', 'Daily backup at 2:00 AM', 'daily', 2, 0, None, None, None, True),
         ('Weekly Friday', 'Weekly backup every Friday at 3:30 AM', 'weekly', 3, 30, '5', None, None, True),
         ('Monthly 1st', 'Monthly backup on the 1st at 4:00 AM', 'monthly', 4, 0, None, 1, None, True),
+        (
+            'Every 10 minutes',
+            'Frequent demo schedule for the lab devices',
+            'custom_cron',
+            0,
+            0,
+            None,
+            None,
+            '*/10 * * * *',
+            True,
+        ),
     ]
     for name, desc, schedule_type, hour, minute, day_of_week, day_of_month, cron_expr, enabled in schedules:
         BackupSchedule.objects.get_or_create(
@@ -148,7 +159,8 @@ def create_sample_data():
                     'dns_name': dns,
                     'device_type': dtype,
                     'manufacturer': mfg,
-                    'backup_method': 'noop',
+                    'backup_method': 'demo_config',
+                    'driver_params': {'hostname': name.lower()},
                     'credential': default_cred,
                     'backup_location': default_location,
                     'retention_policy': default_policy,
@@ -189,6 +201,8 @@ def create_sample_data():
         created_groups['Access Layer'].device_set.set(access_devices)
 
     print('✓ Assigned devices to groups')
+
+    lab_devices.update(schedule=BackupSchedule.objects.get(name='Every 10 minutes'))
 
     # --- Collection Groups (for task distribution to workers) ---
     # Create two collection groups and assign existing devices randomly

@@ -10,7 +10,9 @@ import type {
   AuthGroupWrite,
   BackupLocation,
   BackupLocationWrite,
+  BackupJob,
   BackupMethod,
+  BackupNowResponse,
   BackupSchedule,
   CollectionGroup,
   Credential,
@@ -24,14 +26,12 @@ import type {
   DeviceGroupRole,
   DeviceType,
   DeviceWrite,
-  DispatchResponse,
   DjangoPermission,
   Id,
   LogEntry,
   LoginResponse,
   Manufacturer,
   RetentionPolicy,
-  StoredBackup,
   ThemeColors,
   User,
   UserCreate,
@@ -39,6 +39,7 @@ import type {
   UserPreferences,
   UserRoleAssignment,
   OrchestratorIdentity,
+  Page,
   Worker,
   WorkerAssignment,
 } from './types'
@@ -79,7 +80,7 @@ export const collectionGroupsApi = resource<
 export const retentionPoliciesApi = resource<RetentionPolicy>('/retention-policies/')
 export const backupSchedulesApi = resource<
   BackupSchedule,
-  Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at'>
+  Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at' | 'last_run_at' | 'next_run'>
 >('/backup-schedules/')
 export const backupLocationsApi = resource<BackupLocation, BackupLocationWrite>('/backup-locations/')
 export const credentialsApi = resource<Credential, CredentialWrite>('/credentials/')
@@ -100,18 +101,24 @@ export const devicesApi = {
   get: async (id: Id) => (await http.get<DeviceDetail>(`/devices/${id}/`)).data,
   create: async (body: DeviceWrite) => (await http.post<DeviceDetail>('/devices/', body)).data,
   update: async (id: Id, body: DeviceWrite) => (await http.put<DeviceDetail>(`/devices/${id}/`, body)).data,
-  backupNow: async (id: Id) => (await http.post<DispatchResponse>(`/devices/${id}/backup_now/`)).data,
+  backupNow: async (id: Id) => (await http.post<BackupNowResponse>(`/devices/${id}/backup_now/`)).data,
 }
 
-export const storedBackupsApi = {
-  listForDevice: async (deviceId: Id) =>
-    (await http.get<StoredBackup[]>('/stored-backups/', { params: { device: deviceId } })).data,
-  get: async (id: Id) => (await http.get<StoredBackup>(`/stored-backups/${id}/`)).data,
-  downloadText: async (id: Id) =>
-    (await http.get<string>(`/stored-backups/${id}/download/`, { responseType: 'text' })).data,
-  downloadBlob: async (id: Id) =>
-    (await http.get<Blob>(`/stored-backups/${id}/download/`, { responseType: 'blob' })).data,
-  logs: async (id: Id) => (await http.get<{ logs: LogEntry[] }>(`/stored-backups/${id}/logs/`)).data.logs,
+export interface JobQuery {
+  device?: Id
+  state?: string
+  page?: number
+  page_size?: number
+}
+
+export const backupJobsApi = {
+  list: async (query: JobQuery) => (await http.get<Page<BackupJob>>('/backups/', { params: query })).data,
+  get: async (id: string) => (await http.get<BackupJob>(`/backups/${id}/`)).data,
+  contentText: async (id: string) =>
+    (await http.get<string>(`/backups/${id}/content/`, { responseType: 'text' })).data,
+  contentBlob: async (id: string) =>
+    (await http.get<Blob>(`/backups/${id}/content/`, { responseType: 'blob' })).data,
+  logs: async (id: string) => (await http.get<{ logs: LogEntry[] }>(`/backups/${id}/logs/`)).data.logs,
 }
 
 // --- Users and access ------------------------------------------------------------

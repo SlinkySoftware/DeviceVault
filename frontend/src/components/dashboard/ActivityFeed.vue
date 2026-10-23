@@ -14,24 +14,20 @@
     class="activity-table"
     no-data-label="No recent backup activity"
   >
-    <template #body-cell-timestamp="props">
+    <template #body-cell-created_at="props">
       <q-td :props="props">
-        <span :title="formatDateTime(props.row.timestamp)">{{ formatRelativeTime(props.row.timestamp) }}</span>
+        <span :title="formatDateTime(props.row.created_at)">{{ formatRelativeTime(props.row.created_at) }}</span>
       </q-td>
     </template>
-    <template #body-cell-status="props">
+    <template #body-cell-state="props">
       <q-td :props="props">
-        <StatusLabel :status="props.row.status" :label="props.row.status_display" />
-      </q-td>
-    </template>
-    <template #body-cell-storage_status="props">
-      <q-td :props="props">
-        <StatusLabel :status="props.row.storage_status" :label="props.row.storage_status_display" />
+        <StatusLabel :status="props.row.state" />
+        <q-tooltip v-if="props.row.error">{{ props.row.error }}</q-tooltip>
       </q-td>
     </template>
     <template #body-cell-log="props">
       <q-td :props="props">
-        <q-btn v-if="props.row.log" flat dense no-caps color="primary" label="View log" @click="emit('view-logs', props.row)" />
+        <q-btn v-if="props.row.has_log" flat dense no-caps color="primary" label="View log" @click="emit('view-logs', props.row)" />
       </q-td>
     </template>
   </q-table>
@@ -46,22 +42,22 @@ import type { ActivityItem, ActivityWindow } from '@/api/types'
 import StatusLabel from '@/components/StatusLabel.vue'
 import { usePolling } from '@/composables/usePolling'
 import { formatDateTime, formatRelativeTime } from '@/utils/datetime'
+import { capitalise, formatDuration, isActiveJob } from '@/utils/format'
 
 const props = defineProps<{ window: ActivityWindow }>()
 const emit = defineEmits<{ 'view-logs': [item: ActivityItem] }>()
 
 const items = ref<ActivityItem[]>([])
 const loading = ref(false)
-const inFlight = computed(() =>
-  items.value.some((item) => ['pending', 'in_progress'].includes(item.status) || item.storage_status === 'pending'),
-)
+const inFlight = computed(() => items.value.some((item) => isActiveJob(item.state)))
 const interval = computed(() => (inFlight.value ? 5_000 : 30_000))
 
 const columns: QTableColumn<ActivityItem>[] = [
-  { name: 'timestamp', label: 'When', field: 'timestamp', align: 'left' },
+  { name: 'created_at', label: 'When', field: 'created_at', align: 'left' },
   { name: 'device_name', label: 'Device', field: 'device_name', align: 'left' },
-  { name: 'status', label: 'Backup', field: 'status', align: 'left' },
-  { name: 'storage_status', label: 'Storage', field: 'storage_status', align: 'left' },
+  { name: 'state', label: 'Backup', field: 'state', align: 'left' },
+  { name: 'trigger', label: 'Trigger', field: 'trigger', format: capitalise, align: 'left' },
+  { name: 'duration', label: 'Took', field: 'duration_ms', format: formatDuration, align: 'right' },
   { name: 'log', label: '', field: 'id', align: 'right' },
 ]
 

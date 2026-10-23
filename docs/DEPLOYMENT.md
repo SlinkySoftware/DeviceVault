@@ -7,7 +7,7 @@ out to RabbitMQ and Redis in the infra stack, and that is all.
 | Stack | Path | Runs |
 |---|---|---|
 | Infra | `deploy/infra` | RabbitMQ, Redis, PostgreSQL (optional) |
-| Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, worker events, result consumers, Flower (optional) |
+| Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, events, scheduler, Flower (optional) |
 | Worker | `deploy/worker` | one collector or storage worker per Compose project |
 
 > **Status:** pre-release. Storage workers still need encryption keys configured
@@ -126,7 +126,10 @@ secrets). The file takes precedence.
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
 | `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_signing_key`) |
 | `DV_WORKER_ONLINE_TIMEOUT_SEC` | `90` | A worker is offline after this long without a heartbeat |
-| `DV_EVENTS_CONCURRENCY` | `2` | Worker-event processes in the `events` service |
+| `DV_EVENTS_CONCURRENCY` | `4` | Processes in the `events` service (worker and job events) |
+| `DV_COLLECT_TIMEOUT_SEC` | `120` | Time a collector driver gets to reach and read a device, per attempt |
+| `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
+| `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules |
 | `DV_ENCRYPTION_ENABLED` / `DV_ENCRYPTION_KEYS` / `DV_ENCRYPTION_DEFAULT_KID` | `false` / none / none | Interim stored-backup encryption |
 
 ### Worker

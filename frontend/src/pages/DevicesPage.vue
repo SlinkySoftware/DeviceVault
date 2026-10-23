@@ -73,48 +73,62 @@
           <q-badge color="info" outline>{{ props.row.device_group_name || 'Unassigned' }}</q-badge>
         </q-td>
       </template>
-      <template #body-cell-status="props">
+      <template #body-cell-last_backup_time="props">
         <q-td :props="props">
-          <q-badge v-if="props.row.last_backup_status" :color="statusColor(props.row.last_backup_status)">
-            {{ props.row.last_backup_status }}
-          </q-badge>
+          <template v-if="props.row.last_backup_time">
+            <q-badge :color="statusColor(props.row.last_backup_status)" class="q-mr-sm">
+              {{ props.row.last_backup_status }}
+            </q-badge>
+            <span :title="formatDateTime(props.row.last_backup_time)">{{ formatDateTimeShort(props.row.last_backup_time) }}</span>
+          </template>
           <span v-else class="text-grey">Never</span>
         </q-td>
       </template>
-      <template #body-cell-enabled="props">
+      <template #body-cell-name="props">
         <q-td :props="props">
-          <q-badge :color="props.row.enabled ? 'positive' : 'grey'">
-            {{ props.row.enabled ? 'Enabled' : 'Disabled' }}
-          </q-badge>
+          {{ props.row.name }}
+          <q-badge v-if="!props.row.enabled" color="grey" class="q-ml-xs">Disabled</q-badge>
         </q-td>
       </template>
       <template #body-cell-actions="props">
-        <q-td :props="props" class="q-gutter-xs">
+        <q-td :props="props" class="no-wrap">
           <q-btn
             v-if="can(props.row, 'view') || can(props.row, 'modify')"
             dense
+            round
+            flat
             color="primary"
             icon="settings"
-            :label="can(props.row, 'modify') ? 'Configure' : 'View'"
+            :aria-label="can(props.row, 'modify') ? 'Configure' : 'View'"
             :to="{ name: 'device-edit', params: { id: props.row.id } }"
-          />
+          >
+            <q-tooltip>{{ can(props.row, 'modify') ? 'Configure' : 'View' }}</q-tooltip>
+          </q-btn>
           <q-btn
             v-if="can(props.row, 'view_backups')"
             dense
+            round
+            flat
             color="primary"
             icon="history"
-            label="Backups"
+            aria-label="Backups"
             :to="{ name: 'device-backups', params: { id: props.row.id } }"
-          />
+          >
+            <q-tooltip>Backups</q-tooltip>
+          </q-btn>
           <q-btn
             v-if="can(props.row, 'backup_now')"
             dense
-            color="primary"
+            round
+            flat
+            color="positive"
             icon="play_arrow"
-            label="Backup Now"
+            aria-label="Backup now"
             :loading="dispatching.has(props.row.id)"
             @click="backupNow(props.row)"
-          />
+          >
+            <q-tooltip>Backup now</q-tooltip>
+          </q-btn>
         </q-td>
       </template>
     </q-table>
@@ -130,7 +144,7 @@ import type { Device, DeviceGroup, DevicePermission, DeviceType, Id } from '@/ap
 import PageCard from '@/components/PageCard.vue'
 import { useNotify } from '@/composables/useNotify'
 import { useAuthStore } from '@/stores/auth'
-import { formatDateTime } from '@/utils/datetime'
+import { formatDateTime, formatDateTimeShort } from '@/utils/datetime'
 import { statusColor } from '@/utils/format'
 
 const STATUS_OPTIONS = [
@@ -156,20 +170,17 @@ const filters = reactive<{ name: string | null; type: Id | null; group: Id | nul
 
 const columns: QTableColumn<Device>[] = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
-  { name: 'group', label: 'Device Group', field: (row) => row.device_group_name ?? '', align: 'left', sortable: true },
+  { name: 'group', label: 'Group', field: (row) => row.device_group_name ?? '', align: 'left', sortable: true },
   { name: 'ip_address', label: 'IP', field: 'ip_address', align: 'left', sortable: true },
   { name: 'type', label: 'Type', field: (row) => row.device_type?.name ?? '', align: 'left', sortable: true },
-  { name: 'backup_method', label: 'Backup Method', field: 'backup_method_display', align: 'left', sortable: true },
+  { name: 'backup_method', label: 'Method', field: 'backup_method_display', align: 'left', sortable: true },
   {
     name: 'last_backup_time',
     label: 'Last Backup',
     field: 'last_backup_time',
-    format: (value: string | null) => (value ? formatDateTime(value) : 'Never'),
     align: 'left',
     sortable: true,
   },
-  { name: 'status', label: 'Status', field: 'last_backup_status', align: 'center', sortable: true },
-  { name: 'enabled', label: 'Enabled', field: 'enabled', align: 'center', sortable: true },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]
 
@@ -191,8 +202,8 @@ const filteredDevices = computed(() => {
 async function backupNow(device: Device): Promise<void> {
   dispatching.add(device.id)
   try {
-    const { queued_on } = await devicesApi.backupNow(device.id)
-    notify.success(`Backup of ${device.name} queued on ${queued_on}`)
+    const { created } = await devicesApi.backupNow(device.id)
+    notify.success(created ? `Backup of ${device.name} queued` : `A backup of ${device.name} is already in progress`)
   } catch (error) {
     notify.error(error, `Failed to start backup of ${device.name}`)
   } finally {

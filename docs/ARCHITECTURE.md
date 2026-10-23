@@ -46,7 +46,7 @@ No component talks to another directly. Everything goes over AMQP or Redis.
 | `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`, `read.result`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
 | `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
-The `events` process (phase 4) handles worker registration and heartbeats. Until phase 5 the orchestrator also runs the interim `collect-results` and `store-results` Redis-stream consumers, which `events` and `scheduler` then replace. The no-op celery beat process was dropped in phase 2.
+Both are in place since phase 5: `events` handles worker registration, heartbeats and the signed job events (`orchestrator.job_event`: started, retrying, collected, stored, failed); `scheduler` holds the Redis lease `dv:scheduler:leader` (60 s, renewed every tick) and creates `BackupJob`s for due schedules. Backup content travels collector → Redis (`dv:blob:job:<id>`, 24 h TTL) → storage worker; a job is `stored` only when the collector and storage worker report the same SHA-256.
 
 ### Worker runtime (pure Celery + kombu, **no Django**)
 

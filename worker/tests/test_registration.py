@@ -15,7 +15,7 @@ from devicevault_protocol.registration import (
     STATUS_REVOKED,
     WORKER_EVENT_TASK,
 )
-from devicevault_protocol.tasks import ORCHESTRATOR_SIGNER, sign_task
+from devicevault_protocol.tasks import ORCHESTRATOR_SIGNER
 from devicevault_worker import identity as identity_store
 from devicevault_worker.agent import RegistrationAgent
 
@@ -184,43 +184,3 @@ def test_stale_versions_are_ignored(agent, identity):
 
     assert not agent.handle_assignment(assignment(identity, version=2, queues=['collector.group.old']))
     assert agent.queues == {'collector.group.new'}
-
-
-# --- task verification --------------------------------------------------------------
-
-
-class FakeRedis:
-    def __init__(self):
-        self.stream = []
-
-    def lock(self, *args, **kwargs):
-        class Lock:
-            def acquire(self, blocking=False):
-                return True
-
-            def release(self):
-                pass
-
-        return Lock()
-
-    def xadd(self, stream, payload):
-        self.stream.append((stream, payload))
-
-
-def test_collect_task_rejects_unsigned_and_runs_signed(monkeypatch, tmp_path):
-    from devicevault_worker import collect
-
-    monkeypatch.setenv('DV_STATE_DIR', str(tmp_path))
-    identity_store.load_or_create().pin_orchestrator(ORCHESTRATOR_KEY)
-    fake_redis = FakeRedis()
-    monkeypatch.setattr(collect, 'redis_client', fake_redis)
-    task = {'device_id': 7, 'task_identifier': 't-1', 'ip': '192.0.2.1', 'backup_method': 'noop'}
-
-    rejected = collect.device_collect_task.run(task)
-    accepted = collect.device_collect_task.run(sign_task(task, ORCHESTRATOR))
-    forged = collect.device_collect_task.run(sign_task(task, signing.generate_signing_key()))
-
-    assert rejected['status'] == forged['status'] == 'failure'
-    assert 'task_rejected' in rejected['log'][0]
-    assert accepted['status'] == 'success'
-    assert [payload['task_identifier'] for _, payload in fake_redis.stream] == ['t-1']

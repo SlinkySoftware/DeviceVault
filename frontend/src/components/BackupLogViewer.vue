@@ -50,13 +50,13 @@
 import { ref } from 'vue'
 
 import { apiErrorMessage } from '@/api/client'
-import { storedBackupsApi } from '@/api/endpoints'
-import type { Id, LogEntry } from '@/api/types'
+import { backupJobsApi } from '@/api/endpoints'
+import type { LogEntry } from '@/api/types'
 import { formatDateTime } from '@/utils/datetime'
 
 import type { BackupLogInfo } from './types'
 
-const props = defineProps<{ backupId: Id | null; info?: BackupLogInfo | null }>()
+const props = defineProps<{ backupId: string | null; info?: BackupLogInfo | null }>()
 const open = defineModel<boolean>({ required: true })
 
 const logs = ref<LogEntry[]>([])
@@ -72,7 +72,7 @@ async function load(): Promise<void> {
   }
   loading.value = true
   try {
-    logs.value = await storedBackupsApi.logs(props.backupId)
+    logs.value = await backupJobsApi.logs(props.backupId)
   } catch (exc) {
     error.value = apiErrorMessage(exc, 'Failed to load backup logs')
   } finally {

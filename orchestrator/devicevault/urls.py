@@ -22,6 +22,7 @@ from django.urls import include, path
 from rest_framework import routers
 
 from api import views
+from backups import api as backup_api
 
 router = routers.DefaultRouter()
 router.register(r'device-types', views.DeviceTypeViewSet)
@@ -29,8 +30,7 @@ router.register(r'manufacturers', views.ManufacturerViewSet)
 router.register(r'collection-groups', views.CollectionGroupViewSet)
 router.register(r'backup-methods', views.BackupMethodViewSet, basename='backup-methods')
 router.register(r'devices', views.DeviceViewSet)
-router.register(r'backups', views.BackupViewSet)
-router.register(r'stored-backups', views.StoredBackupViewSet)
+router.register(r'backups', backup_api.BackupJobViewSet, basename='backups')
 router.register(r'retention-policies', views.RetentionPolicyViewSet)
 router.register(r'backup-schedules', views.BackupScheduleViewSet)
 router.register(r'backup-locations', views.BackupLocationViewSet)
@@ -51,11 +51,10 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/health/', views.health),
     path('api/onboarding/', views.onboarding),
-    path('api/dashboard-stats/', views.dashboard_stats),
-    path('api/recent-backup-activity/', views.recent_backup_activity),
+    path('api/dashboard-stats/', backup_api.dashboard_stats),
+    path('api/recent-backup-activity/', backup_api.recent_backup_activity),
     path('api/timezone/', views.timezone_config),
     path('api/auth/config/', views.AuthConfigView.as_view()),
-    path('api/backups/compare/', views.compare_backups),
     path('api/auth/login/', views.LoginView.as_view()),
     path('api/auth/logout/', views.LogoutView.as_view()),
     path('api/auth/user/', views.UserInfoView.as_view()),

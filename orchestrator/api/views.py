@@ -16,15 +16,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import difflib
-import json
-import os
-from datetime import timedelta
-
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission, User
-from django.db.models import Avg, Count, OuterRef, Subquery
-from django.utils import timezone
 from rest_framework import decorators, mixins, response, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import PermissionDenied
@@ -33,16 +26,14 @@ from rest_framework.views import APIView
 
 from api.permissions import IsAdmin, IsAdminOrReadOnly
 from audit.models import AuditLog
-from backups.models import Backup, StoredBackup
+from backups.api import device_backup_now
 from core import workers as worker_registry
 from core.models import DashboardLayout, Worker
 from core.workers import driver_catalogue
 from credentials.models import Credential, CredentialType
-from devices.dispatch import DispatchError, dispatch_collection
 from devices.models import (
     CollectionGroup,
     Device,
-    DeviceBackupResult,
     DeviceGroup,
     DeviceGroupRole,
     DeviceType,
@@ -59,13 +50,11 @@ from .serializers import (
     AuditLogSerializer,
     BackupLocationSerializer,
     BackupScheduleSerializer,
-    BackupSerializer,
     ChangePasswordSerializer,
     CollectionGroupSerializer,
     CredentialSerializer,
     CredentialTypeSerializer,
     DashboardLayoutSerializer,
-    DeviceBackupResultWithStorageSerializer,
     DeviceDetailedSerializer,
     DeviceGroupRoleSerializer,
     DeviceGroupSerializer,
@@ -192,24 +181,14 @@ class DeviceViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def get_queryset(self):
-        """Filter devices based on user's Django permissions for device groups and annotate last successful backup."""
+        """Devices in groups the user can access."""
         from devices.permissions import user_get_accessible_device_groups
 
-        latest_success = DeviceBackupResult.objects.filter(device=OuterRef('pk'), status='success').order_by(
-            '-timestamp'
-        )
-
-        annotated = Device.objects.annotate(
-            last_success_time=Subquery(latest_success.values('timestamp')[:1]),
-            last_success_status=Subquery(latest_success.values('status')[:1]),
-        )
-
         user = self.request.user
+        devices = Device.objects.select_related('device_type', 'manufacturer', 'collection_group', 'device_group')
         if user.is_staff or user.is_superuser:
-            return annotated
-
-        accessible_groups = user_get_accessible_device_groups(user)
-        return annotated.filter(device_group__in=accessible_groups)
+            return devices
+        return devices.filter(device_group__in=user_get_accessible_device_groups(user))
 
     def perform_destroy(self, instance):
         """Check delete permission before deleting"""
@@ -224,366 +203,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=True, methods=['post'])
     def backup_now(self, request, pk=None):
-        """Trigger an immediate backup for a device if user has the group's Django 'backup_now' permission"""
-        device = self.get_object()
-        if not device.device_group:
-            return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
-        from devices.permissions import user_has_device_group_django_permission
-
-        if not user_has_device_group_django_permission(request.user, device.device_group, 'backup_now'):
-            return response.Response(
-                {'error': 'Not authorized for Backup Now on this device group'}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        return self._dispatch(device, 'backup_now')
-
-    @decorators.action(detail=True, methods=['post'])
-    def collect(self, request, pk=None):
-        """Enqueue a collection task for this device.
-
-        The task is queued to the device's collection group queue
-        (collector.group.<rabbitmq_queue_id>).
-        """
-        device = self.get_object()
-        # Permission check - reuse existing RBAC for 'backup_now'
-        from devices.permissions import user_has_device_group_django_permission
-
-        if (
-            device.device_group
-            and not user_has_device_group_django_permission(request.user, device.device_group, 'backup_now')
-            and not request.user.is_superuser
-        ):
-            return response.Response(
-                {'error': 'Not authorized to start backup for this device'}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        return self._dispatch(device, 'collect')
-
-    def _dispatch(self, device, trigger):
-        try:
-            task_id, queue = dispatch_collection(device, trigger)
-        except DispatchError as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return response.Response({'task_id': task_id, 'queued_on': queue}, status=status.HTTP_202_ACCEPTED)
-
-
-class BackupViewSet(viewsets.ModelViewSet):
-    queryset = Backup.objects.all()
-    permission_classes = [IsAdmin]
-    serializer_class = BackupSerializer
-
-    def get_queryset(self):
-        """Filter backups to only those from accessible devices"""
-        from devices.permissions import user_get_accessible_device_groups
-
-        accessible_groups = user_get_accessible_device_groups(self.request.user)
-        return Backup.objects.filter(device__device_group__in=accessible_groups)
-
-
-class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only ViewSet for backup results with optional storage linkage."""
-
-    serializer_class = DeviceBackupResultWithStorageSerializer
-    permission_classes = [IsAuthenticated]
-    queryset = DeviceBackupResult.objects.none()
-
-    def get_queryset(self):
-        from devices.permissions import user_get_accessible_device_groups
-
-        accessible_groups = user_get_accessible_device_groups(self.request.user)
-
-        storage_qs = StoredBackup.objects.filter(
-            task_identifier=OuterRef('task_identifier'),
-            device_id=OuterRef('device_id'),
-        ).order_by('-timestamp')
-
-        qs = DeviceBackupResult.objects.filter(device__device_group__in=accessible_groups)
-
-        device_id_param = self.request.query_params.get('device') or self.request.query_params.get('device_id')
-        if device_id_param is not None:
-            try:
-                device_id = int(device_id_param)
-            except TypeError, ValueError:
-                return qs.none()
-            qs = qs.filter(device_id=device_id)
-
-        qs = qs.annotate(
-            storage_status=Subquery(storage_qs.values('status')[:1]),
-            storage_backend=Subquery(storage_qs.values('storage_backend')[:1]),
-            storage_ref=Subquery(storage_qs.values('storage_ref')[:1]),
-            storage_timestamp=Subquery(storage_qs.values('timestamp')[:1]),
-            enc_version=Subquery(storage_qs.values('enc_version')[:1]),
-            enc_kid=Subquery(storage_qs.values('enc_kid')[:1]),
-        ).select_related('device')
-
-        return qs
-
-    @decorators.action(detail=True, methods=['get'])
-    def download(self, request, pk=None):
-        """Synchronously retrieve backup content via storage worker (text or binary)."""
-        backup_result = self.get_object()
-
-        if not backup_result.device.device_group:
-            return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
-
-        from devices.permissions import user_has_device_group_django_permission
-
-        if not user_has_device_group_django_permission(request.user, backup_result.device.device_group, 'view_backups'):
-            return response.Response(
-                {'error': 'Not authorized to view backups for this device group'}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        storage_record = (
-            StoredBackup.objects.filter(
-                device=backup_result.device,
-                task_identifier=backup_result.task_identifier,
-            )
-            .order_by('-timestamp')
-            .first()
-        )
-
-        if not storage_record:
-            return response.Response(
-                {'error': 'No stored backup found for this task'}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        if storage_record.status != 'success':
-            return response.Response({'error': 'Storage not successful'}, status=status.HTTP_400_BAD_REQUEST)
-
-        location = backup_result.device.backup_location
-        if not location:
-            return response.Response({'error': 'No backup location configured'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            import base64
-            import io
-
-            from django.http import FileResponse
-
-            from backups.storage_client import read_backup_via_worker
-
-            driver = driver_catalogue().get(backup_result.device.backup_method) if backup_result.device else None
-            is_binary = bool(driver and driver['is_binary'])
-
-            result = read_backup_via_worker(
-                storage_backend=storage_record.storage_backend,
-                storage_ref=storage_record.storage_ref,
-                storage_config=location.config or {},
-                task_identifier=f'read:{storage_record.task_identifier}',
-                is_binary=is_binary,
-                timeout=60,
-            )
-            if result.get('status') != 'success':
-                return response.Response(
-                    {'error': 'Failed to read backup', 'log': result.get('log', [])},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            content = result.get('content') or ''
-
-            if is_binary:
-                # Binary backup: return file download
-                # Content may be base64-encoded string; decode if necessary
-                if isinstance(content, str):
-                    try:
-                        binary_data = base64.b64decode(content)
-                    except Exception:
-                        # If decode fails, encode string to bytes
-                        binary_data = content.encode('latin-1')
-                else:
-                    binary_data = content
-
-                timestamp_str = backup_result.timestamp.isoformat().replace(':', '-').replace('.', '_')
-                filename = f'{backup_result.device.name}_{timestamp_str}.bin'
-
-                return FileResponse(io.BytesIO(binary_data), filename=filename, content_type='application/octet-stream')
-            else:
-                # Text backup: return as text file download
-                from django.http import HttpResponse
-
-                resp = HttpResponse(content, content_type='text/plain')
-                resp['Content-Disposition'] = f'attachment; filename="{backup_result.device.name}.cfg"'
-                return resp
-        except Exception as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @decorators.action(detail=True, methods=['get'])
-    def logs(self, request, pk=None):
-        """Retrieve structured logs for a backup."""
-        backup_result = self.get_object()
-
-        if not backup_result.device.device_group:
-            return response.Response({'error': 'Device has no device group'}, status=status.HTTP_400_BAD_REQUEST)
-
-        from devices.permissions import user_has_device_group_django_permission
-
-        if not user_has_device_group_django_permission(request.user, backup_result.device.device_group, 'view_backups'):
-            return response.Response(
-                {'error': 'Not authorized to view backups for this device group'}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        # Parse the log field (JSON array of log entries) from collection
-
-        try:
-            log_data = json.loads(backup_result.log) if backup_result.log else []
-        except json.JSONDecodeError, TypeError:
-            log_data = []
-
-        # Normalize log entries: support both string (legacy) and structured formats
-        normalized_logs = []
-        plugin_key = backup_result.device.backup_method if backup_result.device else 'unknown'
-        driver = driver_catalogue().get(plugin_key)
-        source_default = driver['name'] if driver else plugin_key
-
-        for entry in log_data:
-            if isinstance(entry, dict):
-                # Already structured
-                normalized_logs.append(
-                    {
-                        'source': entry.get('source', source_default),
-                        'timestamp': entry.get('timestamp', backup_result.timestamp.isoformat() + 'Z'),
-                        'severity': entry.get('severity', 'INFO'),
-                        'message': entry.get('message', ''),
-                    }
-                )
-            elif isinstance(entry, str):
-                # Legacy string format - convert to structured
-                normalized_logs.append(
-                    {
-                        'source': source_default,
-                        'timestamp': backup_result.timestamp.isoformat() + 'Z',
-                        'severity': 'INFO',
-                        'message': entry,
-                    }
-                )
-
-        # Also include storage logs if available
-        storage_record = (
-            StoredBackup.objects.filter(
-                device=backup_result.device,
-                task_identifier=backup_result.task_identifier,
-            )
-            .order_by('-timestamp')
-            .first()
-        )
-
-        if storage_record and storage_record.log:
-            try:
-                storage_log_data = json.loads(storage_record.log) if storage_record.log else []
-            except json.JSONDecodeError, TypeError:
-                storage_log_data = []
-
-            for entry in storage_log_data:
-                if isinstance(entry, dict):
-                    # Already structured
-                    normalized_logs.append(
-                        {
-                            'source': entry.get('source', 'storage_worker'),
-                            'timestamp': entry.get('timestamp', storage_record.timestamp.isoformat() + 'Z'),
-                            'severity': entry.get('severity', 'INFO'),
-                            'message': entry.get('message', ''),
-                        }
-                    )
-                elif isinstance(entry, str):
-                    # Legacy string format - convert to structured
-                    normalized_logs.append(
-                        {
-                            'source': 'storage_worker',
-                            'timestamp': storage_record.timestamp.isoformat() + 'Z',
-                            'severity': 'INFO',
-                            'message': entry,
-                        }
-                    )
-
-        # Sort logs by timestamp to show chronological order
-        normalized_logs.sort(key=lambda x: x['timestamp'])
-
-        return response.Response({'logs': normalized_logs}, status=status.HTTP_200_OK)
-
-
-@decorators.api_view(['GET'])
-@decorators.permission_classes([IsAuthenticated])
-def recent_backup_activity(request):
-    """Get recent backup activity for devices user has access to"""
-    from datetime import timedelta
-
-    from devices.permissions import user_get_accessible_device_groups
-
-    accessible_groups = user_get_accessible_device_groups(request.user)
-    user_devices = Device.objects.filter(device_group__in=accessible_groups)
-
-    # Get time filter from query parameter (default: 1 hour)
-    time_filter = request.GET.get('time_filter', '1h')
-
-    # Calculate time threshold based on filter
-    now = timezone.now()
-    if time_filter == '1h':
-        time_threshold = now - timedelta(hours=1)
-        limit = int(request.GET.get('limit', 50))
-    elif time_filter == '24h':
-        time_threshold = now - timedelta(hours=24)
-        limit = int(request.GET.get('limit', 100))
-    elif time_filter == '7d':
-        time_threshold = now - timedelta(days=7)
-        limit = int(request.GET.get('limit', 200))
-    else:
-        # Default to 1 hour if invalid filter
-        time_threshold = now - timedelta(hours=1)
-        limit = int(request.GET.get('limit', 50))
-
-    # Get recent backups from DeviceBackupResult (authoritative backup collection results)
-    recent_backups = (
-        DeviceBackupResult.objects.filter(device__in=user_devices, timestamp__gte=time_threshold)
-        .select_related('device', 'device__device_type')
-        .order_by('-timestamp')[:limit]
-    )
-
-    activity = []
-    for backup in recent_backups:
-        # Determine storage status based on backup result and storage result
-        storage_status = 'n/a'
-        storage_status_display = 'N/A'
-
-        if backup.status == 'success':
-            # Backup was successful, check for storage result
-            try:
-                storage_result = StoredBackup.objects.filter(task_identifier=backup.task_identifier).first()
-                if storage_result:
-                    storage_status = storage_result.status
-                    storage_status_display = storage_result.status.capitalize()
-                else:
-                    # No storage result yet, still pending
-                    storage_status = 'pending'
-                    storage_status_display = 'Pending'
-            except Exception:
-                storage_status = 'pending'
-                storage_status_display = 'Pending'
-        # If backup failed, storage_status stays as 'n/a'
-
-        # Determine duration in seconds with 1 decimal place
-        duration = None
-        if backup.overall_duration_ms:
-            duration = round(backup.overall_duration_ms / 1000, 1)
-
-        activity.append(
-            {
-                'id': backup.id,
-                'task_identifier': backup.task_identifier,
-                'device_name': backup.device.name,
-                'device_type': backup.device.device_type.name if backup.device.device_type else 'Unknown',
-                'timestamp': backup.timestamp.isoformat() if backup.timestamp else None,  # ISO format with UTC timezone
-                'status': backup.status,
-                'status_display': backup.status.capitalize(),
-                'storage_status': storage_status,
-                'storage_status_display': storage_status_display,
-                'duration': duration,
-                'log': backup.log,
-            }
-        )
-
-    return response.Response(activity)
+        return device_backup_now(request, self.get_object())
 
 
 @decorators.api_view(['GET'])
@@ -824,130 +444,6 @@ def onboarding(request):
     return response.Response({'configured': True})
 
 
-@decorators.api_view(['GET'])
-def dashboard_stats(request):
-    from django.db.models import OuterRef, Subquery
-
-    from core.timezone_utils import get_day_bounds_local, get_time_bounds_24h, get_timezone_name, local_now
-    from devices.permissions import user_get_accessible_device_groups
-
-    # Get number of days for chart from query parameter (default 7)
-    days = int(request.GET.get('days', 7))
-    days = min(max(days, 1), 90)  # Limit between 1 and 90 days
-
-    # Get time bounds in UTC for "last 24 hours" in local timezone
-    yesterday_utc, now_utc = get_time_bounds_24h()
-
-    # Filter devices by user's accessible device groups
-    accessible_groups = user_get_accessible_device_groups(request.user)
-    user_devices = Device.objects.filter(device_group__in=accessible_groups)
-
-    device_count = user_devices.values('device_type__name', 'device_type__icon').annotate(count=Count('id'))
-
-    # Backups in last 24h - count all DeviceBackupResult records
-    # Success: those that have successful collection
-    backup_results_24h = DeviceBackupResult.objects.filter(device__in=user_devices, timestamp__gte=yesterday_utc)
-
-    # Successful backups (collection succeeded)
-    success_24h = backup_results_24h.filter(status='success').count()
-
-    # Failed backups: collection failures + storage failures
-    # Collection failures - backups that failed during collection (status can be 'failed' or 'failure')
-    collection_failures = backup_results_24h.filter(status__in=['failed', 'failure']).count()
-
-    # Storage failures - successful collections that failed to store
-    # Get task_identifiers of successful backups
-    successful_task_ids = list(backup_results_24h.filter(status='success').values_list('task_identifier', flat=True))
-    storage_failures = (
-        StoredBackup.objects.filter(
-            task_identifier__in=successful_task_ids, timestamp__gte=yesterday_utc, status__in=['failed', 'failure']
-        ).count()
-        if successful_task_ids
-        else 0
-    )
-
-    failed_24h = collection_failures + storage_failures
-
-    # In Progress: successful backups without storage result yet
-    stored_task_ids = (
-        list(
-            StoredBackup.objects.filter(
-                task_identifier__in=successful_task_ids, timestamp__gte=yesterday_utc
-            ).values_list('task_identifier', flat=True)
-        )
-        if successful_task_ids
-        else []
-    )
-    in_progress_24h = len(set(successful_task_ids) - set(stored_task_ids))
-
-    # Average overall backup time - calculate from DeviceBackupResult for last 24h
-    # overall_duration_ms is the total time from initiation to completion (step 1 to 5 or 9)
-    avg_result = DeviceBackupResult.objects.filter(
-        device__in=user_devices, timestamp__gte=yesterday_utc, overall_duration_ms__isnull=False
-    ).aggregate(avg_ms=Avg('overall_duration_ms'))
-
-    # Convert from milliseconds to seconds with 1 decimal place
-    avg_duration_ms = avg_result.get('avg_ms') or 0
-    avg_duration = round(avg_duration_ms / 1000, 1) if avg_duration_ms else 0.0
-
-    # Success rate - based on most recent backup per device
-    total_devices = user_devices.count()
-
-    # Get the most recent backup per device using StoredBackup
-    latest_backups = StoredBackup.objects.filter(device=OuterRef('pk')).order_by('-timestamp')
-
-    devices_with_latest = user_devices.annotate(
-        latest_backup_id=Subquery(latest_backups.values('id')[:1]),
-        latest_backup_status=Subquery(latest_backups.values('status')[:1]),
-    )
-
-    successful_devices = devices_with_latest.filter(latest_backup_status='success').count()
-    success_rate_percent = (successful_devices / total_devices * 100) if total_devices > 0 else 0
-
-    # Get daily backup stats for chart using local timezone day boundaries
-    daily_stats = []
-    local_today = local_now().date()
-    for i in range(days):
-        day_offset = days - 1 - i
-        target_date = local_today - timedelta(days=day_offset)
-        day_start_utc, day_end_utc = get_day_bounds_local(target_date)
-
-        success = StoredBackup.objects.filter(
-            device__in=user_devices, timestamp__gte=day_start_utc, timestamp__lt=day_end_utc, status='success'
-        ).count()
-        failed = StoredBackup.objects.filter(
-            device__in=user_devices,
-            timestamp__gte=day_start_utc,
-            timestamp__lt=day_end_utc,
-            status__in=['failed', 'failure'],
-        ).count()
-        total = success + failed
-        daily_stats.append(
-            {
-                'date': target_date.strftime('%Y-%m-%d'),
-                'success': success,
-                'failed': failed,
-                'rate': (success / total * 100) if total > 0 else 0,
-            }
-        )
-
-    return response.Response(
-        {
-            'devicesByType': dict(
-                (item['device_type__name'], {'count': item['count'], 'icon': item['device_type__icon']})
-                for item in device_count
-            ),
-            'success24h': success_24h,
-            'failed24h': failed_24h,
-            'inProgress24h': in_progress_24h,
-            'avgDuration': avg_duration,
-            'successRate': round(success_rate_percent, 1),
-            'dailyStats': daily_stats,
-            'timezone': get_timezone_name(),  # Include timezone info for frontend
-        }
-    )
-
-
 class AuthConfigView(APIView):
     permission_classes = [AllowAny]
 
@@ -1100,19 +596,6 @@ class UserPreferencesView(APIView):
             serializer.save()
             return response.Response(serializer.data, status=status.HTTP_200_OK)
         return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-@decorators.api_view(['POST'])
-def compare_backups(request):
-    a = request.data.get('a_path')
-    b = request.data.get('b_path')
-    if not (a and b and os.path.exists(a) and os.path.exists(b)):
-        return response.Response({'error': 'invalid paths'}, status=status.HTTP_400_BAD_REQUEST)
-    with open(a) as fa, open(b) as fb:
-        a_text = fa.read().splitlines()
-        b_text = fb.read().splitlines()
-    diff = difflib.unified_diff(a_text, b_text, fromfile=a, tofile=b, lineterm='')
-    return response.Response({'diff': ''.join(list(diff))})
 
 
 # ===== Device Group RBAC ViewSets =====

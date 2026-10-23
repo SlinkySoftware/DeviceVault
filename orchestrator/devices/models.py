@@ -123,35 +123,17 @@ class Manufacturer(models.Model):
 
 
 class Device(models.Model):
-    """
-    Device Model: Represents a network device to be managed and backed up
+    """A network device to back up.
 
-    Fields:
-        - name (CharField): Unique identifier/hostname of the device
-        - ip_address (GenericIPAddressField): IPv4 address for SSH/telnet connection
-        - dns_name (CharField): FQDN for device resolution (optional)
-        - device_type (ForeignKey): Type of device (Router, Switch, Firewall, etc.)
-        - manufacturer (ForeignKey): Hardware manufacturer (optional)
-        - backup_method (CharField): Backup plugin key to use (e.g. mikrotik_ssh_export, noop, etc.)
-        - device_group (ForeignKey): Device group for RBAC access control
-        - enabled (BooleanField): Whether device is active for backups (default: True)
-        - encrypt_backups (BooleanField): Whether to encrypt backups at rest (default: False)
-        - last_backup_time (DateTimeField): Timestamp of most recent successful backup
-        - last_backup_status (CharField): Status of last backup attempt (success/failed/pending)
-        - retention_policy (ForeignKey): Backup retention rules to apply to this device
-        - backup_location (ForeignKey): Where backups are stored (Git repo, S3, filesystem, etc.)
-        - credential (ForeignKey): Authentication details for device access
-
-    Methods:
-        - __str__(): Returns the device name for admin display
-
-    Usage:
-        Devices are created through the Django admin or API, linked to a device group for RBAC.
-        Access to devices is controlled via device group roles and permissions.
+    ``backup_method`` names a collector driver offered by approved collectors;
+    ``driver_params`` holds that driver's per-device settings (validated against
+    the schema it advertises). Backups run on ``schedule`` or on demand, on the
+    collectors of ``collection_group``, and are written to ``backup_location``.
+    ``last_backup_time``/``last_backup_status`` reflect the latest finished job.
     """
 
     name = models.CharField(max_length=128, help_text='Device hostname or identifier')
-    ip_address = models.GenericIPAddressField(protocol='IPv4', help_text='IPv4 address for SSH/Telnet connection')
+    ip_address = models.GenericIPAddressField(help_text='IPv4 or IPv6 address the collector connects to')
     dns_name = models.CharField(max_length=128, blank=True, help_text='FQDN for DNS resolution (optional)')
     device_type = models.ForeignKey(
         DeviceType, on_delete=models.PROTECT, help_text='Type of device (Router, Switch, etc.)'
@@ -159,9 +141,8 @@ class Device(models.Model):
     manufacturer = models.ForeignKey(
         Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)'
     )
-    backup_method = models.CharField(
-        max_length=128, default='noop', help_text='Backup plugin key to use for this device'
-    )
+    backup_method = models.CharField(max_length=128, default='noop', help_text='Collector driver key')
+    driver_params = models.JSONField(default=dict, blank=True, help_text='Per-device settings for the driver')
     device_group = models.ForeignKey(
         'DeviceGroup', on_delete=models.PROTECT, null=True, blank=True, help_text='Device group for RBAC access control'
     )
@@ -173,14 +154,17 @@ class Device(models.Model):
         related_name='devices',
         help_text='Collection group for task distribution',
     )
+    schedule = models.ForeignKey(
+        'policies.BackupSchedule',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='devices',
+        help_text='When to back up automatically (none: on demand only)',
+    )
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
-    encrypt_backups = models.BooleanField(
-        default=False, help_text='Encrypt backup data at rest using AES-256-GCM envelope encryption'
-    )
-    last_backup_time = models.DateTimeField(null=True, blank=True, help_text='Timestamp of last successful backup')
-    last_backup_status = models.CharField(
-        max_length=32, blank=True, help_text='Status of last backup: success, failed, pending, etc.'
-    )
+    last_backup_time = models.DateTimeField(null=True, blank=True, help_text='When the latest backup job finished')
+    last_backup_status = models.CharField(max_length=32, blank=True, help_text='success or failure')
     retention_policy = models.ForeignKey(
         'policies.RetentionPolicy',
         on_delete=models.SET_NULL,
@@ -200,43 +184,7 @@ class Device(models.Model):
     )
 
     def __str__(self):
-        """Return device name for admin display"""
         return self.name
-
-
-class DeviceBackupResult(models.Model):
-    """
-    Stores the result metadata for a device backup collection task.
-
-    Note: The raw device configuration is NOT stored here; this model stores
-    references / tracing information. The `task_identifier` is intended to be
-    a logical identifier for the backup job so storage backends can retrieve
-    the actual device_config artifact if necessary.
-    """
-
-    task_id = models.CharField(max_length=64, db_index=True)
-    task_identifier = models.CharField(max_length=128, db_index=True)
-    device = models.ForeignKey('Device', on_delete=models.CASCADE, db_index=True)
-    status = models.CharField(max_length=16)
-    timestamp = models.DateTimeField()
-    log = models.TextField(help_text='JSON serialized list of log messages')
-
-    # Timing metrics (in milliseconds)
-    initiated_at = models.DateTimeField(
-        null=True, blank=True, help_text='UTC timestamp when backup was initiated (step 1)'
-    )
-    collection_duration_ms = models.IntegerField(
-        null=True, blank=True, help_text='Collection execution time in milliseconds (step 3)'
-    )
-    overall_duration_ms = models.IntegerField(
-        null=True, blank=True, help_text='Overall processing time from initiation to completion in milliseconds'
-    )
-
-    class Meta:
-        ordering = ['-timestamp']
-
-    def __str__(self):
-        return f'{self.task_identifier} @ {self.device.name} -> {self.status}'
 
 
 # ===== Device Group RBAC Models =====

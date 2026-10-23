@@ -9,7 +9,7 @@ import routes from './routes'
 
 export default defineRouter(({ store }) => {
   const router = createRouter({
-    history: createWebHistory(process.env.VUE_ROUTER_BASE),
+    history: createWebHistory(import.meta.env.BASE_URL),
     routes,
     scrollBehavior: () => ({ left: 0, top: 0 }),
   })

@@ -99,7 +99,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { dashboardApi } from '@/api/endpoints'
-import type { ActivityItem, ActivityWindow, DailyStat, DashboardStats, Id } from '@/api/types'
+import type { ActivityItem, ActivityWindow, DailyStat, DashboardStats } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
 import ActivityFeed from '@/components/dashboard/ActivityFeed.vue'
 import DashboardCard from '@/components/dashboard/DashboardCard.vue'
@@ -108,6 +108,7 @@ import SuccessChart from '@/components/dashboard/SuccessChart.vue'
 import type { BackupLogInfo } from '@/components/types'
 import { useNotify } from '@/composables/useNotify'
 import { formatDateTime } from '@/utils/datetime'
+import { statusLabel } from '@/utils/format'
 
 const DAY_OPTIONS = [
   { label: 'Last 7 days', value: 7 },
@@ -138,12 +139,12 @@ const activityWindow = ref<ActivityWindow>('1h')
 const totalDevices = computed(() => Object.values(stats.value.devicesByType).reduce((sum, e) => sum + e.count, 0))
 
 const logsOpen = ref(false)
-const logsBackupId = ref<Id | null>(null)
+const logsBackupId = ref<string | null>(null)
 const logsInfo = ref<BackupLogInfo | null>(null)
 
 function openLogs(item: ActivityItem): void {
   logsBackupId.value = item.id
-  logsInfo.value = { deviceName: item.device_name, timestamp: formatDateTime(item.timestamp), status: item.status }
+  logsInfo.value = { deviceName: item.device_name, timestamp: formatDateTime(item.created_at), status: statusLabel(item.state) }
   logsOpen.value = true
 }
 

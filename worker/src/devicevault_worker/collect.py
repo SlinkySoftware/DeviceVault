@@ -1,201 +1,158 @@
-"""
-DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
-Copyright (C) 2026, Slinky Software
+"""The ``job.collect`` task: collect a device's configuration and hand it to storage."""
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
-import json
 import time
-from datetime import UTC, datetime
+from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 
-from devicevault_protocol.names import COLLECT_RESULTS_STREAM, COLLECT_TASK, device_lock_key
+from devicevault_protocol.jobs import (
+    BLOB_TTL_SECONDS,
+    EVENT_COLLECTED,
+    EVENT_FAILED,
+    EVENT_RETRYING,
+    EVENT_STARTED,
+    STAGE_COLLECT,
+    blob_key,
+)
+from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, device_lock_key
+from devicevault_worker import blobs, events
 from devicevault_worker.app import app, get_logger, redis_client
-from devicevault_worker.plugins import get_plugin
+from devicevault_worker.drivers import get_driver
+from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
+from devicevault_worker.payload import prepare
 from devicevault_worker.trust import SignatureError, verified_payload
 
-logger = get_logger('devicevault.worker')
+logger = get_logger('devicevault.worker.collect')
+
+MAX_RETRIES = 3
+SOFT_TIME_LIMIT = 600
+
+
+class DeviceBusy(TransientError):
+    """Another job is collecting this device right now."""
+
+
+# Delete the lock only if this job still holds it.
+_RELEASE = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+class DeviceLock:
+    """One collection per device at a time, held in Redis under the job id.
+
+    If a worker dies mid-collection, the broker redelivers the job; the
+    redelivered copy reclaims its own lock instead of waiting for it to expire.
+    """
+
+    def __init__(self, redis, device_id: int, job_id: str, ttl: int):
+        self.redis = redis
+        self.key = device_lock_key(device_id)
+        self.job_id = job_id
+        self.ttl = ttl
+        self.held = False
+
+    def acquire(self) -> bool:
+        if self.redis.set(self.key, self.job_id, nx=True, ex=self.ttl):
+            self.held = True
+        else:
+            holder = self.redis.get(self.key)
+            if holder is not None and holder.decode() == self.job_id:
+                self.redis.expire(self.key, self.ttl)
+                self.held = True
+        return self.held
+
+    def release(self) -> None:
+        if self.held:
+            self.redis.eval(_RELEASE, 1, self.key, self.job_id)
+            self.held = False
+
+
+def _backoff(retries: int) -> int:
+    return min(300, 15 * 2**retries)
 
 
 @app.task(
     bind=True,
     name=COLLECT_TASK,
-    soft_time_limit=300,
-    time_limit=350,
     acks_late=True,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={'max_retries': 3},
+    reject_on_worker_lost=True,
+    max_retries=MAX_RETRIES,
+    soft_time_limit=SOFT_TIME_LIMIT,
+    time_limit=SOFT_TIME_LIMIT + 60,
 )
-def device_collect_task(self, envelope: dict) -> dict:
-    """Collect device configuration using the configured backup plugin.
-
-    Args:
-        envelope: orchestrator-signed envelope whose payload contains at minimum:
-            - device_id: optional device PK (integer)
-            - task_identifier: logical identifier for this job
-            - ip: device IP
-            - credentials: dict
-            - backup_method: plugin key
-            - timeout: optional task timeout seconds
-
-    Returns:
-        dict matching collector result schema. This function also persists a DeviceBackupResult row.
-    """
+def collect(self, envelope: dict) -> None:
     try:
-        cfg = verified_payload(envelope)
+        job = verified_payload(envelope)
     except SignatureError as exc:
+        # Unverifiable, so its job id cannot be trusted either: log and drop it.
         logger.error('task_rejected', extra={'task': COLLECT_TASK, 'reason': str(exc)})
-        return {
-            'task_id': None,
-            'status': 'failure',
-            'timestamp': datetime.now(UTC).isoformat(),
-            'log': [f'task_rejected: {exc}'],
-            'device_config': None,
-        }
+        return
 
-    device_id = cfg.get('device_id')
-    task_identifier = cfg.get('task_identifier') or f'collect:{device_id}:{datetime.now(UTC).isoformat()}'
-    timeout = cfg.get('timeout', 240)
+    job_id = job['job_id']
+    attempt = self.request.retries + 1
+    log = CollectionLog(source=job.get('driver', 'collector'))
+    lock = DeviceLock(redis_client, job['device']['id'], job_id, ttl=SOFT_TIME_LIMIT + 120)
 
-    lock_key = device_lock_key(device_id) if device_id else None
-    lock = None
-    lock_acquired = False
-
-    if lock_key:
-        lock = redis_client.lock(lock_key, timeout=timeout + 60, blocking=False)
-        try:
-            lock_acquired = lock.acquire(blocking=False)
-        except Exception:
-            logger.exception('redis_lock_acquire_error')
-            lock_acquired = False
-
-    if lock_key and not lock_acquired:
-        msg = f'device {device_id} is currently being collected by another worker'
-        logger.info(msg, extra={'device_id': device_id})
-        return {
-            'task_id': self.request.id if hasattr(self, 'request') else None,
-            'status': 'failure',
-            'timestamp': datetime.now(UTC).isoformat(),
-            'log': [msg],
-            'device_config': None,
-        }
-
-    # Execute plugin
     try:
-        plugin_key = cfg.get('backup_method')
-        plugin = get_plugin(plugin_key)
-        if not plugin:
-            raise RuntimeError(f'unknown backup method: {plugin_key}')
-
-        # Ensure config contains ip and credentials
-        plugin_cfg = {'ip': cfg.get('ip'), 'credentials': cfg.get('credentials', {}), **cfg.get('plugin_params', {})}
-
-        logger.info(
-            'starting_collection',
-            extra={
-                'device_id': device_id,
-                'plugin': plugin_key,
-                'queue': self.request.delivery_info.get('routing_key')
-                if hasattr(self, 'request') and getattr(self.request, 'delivery_info', None)
-                else None,
-            },
+        if not lock.acquire():
+            raise DeviceBusy('another backup job is collecting this device')
+        events.send(job_id, EVENT_STARTED, attempt=attempt)
+        started = time.monotonic()
+        content, is_binary = _collect(job, log)
+        data, encrypted = prepare(content, job)
+        blob = blobs.put(blob_key(job_id), data, BLOB_TTL_SECONDS)
+        # Report first: the orchestrator records the hash the store step must match.
+        events.send(
+            job_id,
+            EVENT_COLLECTED,
+            attempt=attempt,
+            sha256=blob['sha256'],
+            size=blob['size'],
+            is_binary=is_binary,
+            encrypted=encrypted,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            log=log.entries,
         )
-
-        # Capture start time for execution duration
-        collection_start_ms = int(time.time() * 1000)
-
-        result = plugin.run(plugin_cfg, timeout=timeout)
-
-        # Capture end time and calculate duration
-        collection_end_ms = int(time.time() * 1000)
-        collection_duration_ms = collection_end_ms - collection_start_ms
-
-        # Ensure result is a dict
-        if not isinstance(result, dict):
-            result = {
-                'task_id': None,
-                'status': 'failure',
-                'timestamp': datetime.now(UTC).isoformat(),
-                'log': ['invalid_plugin_result'],
-                'device_config': None,
-            }
-
-        # Populate task_id and timing
-        tid = getattr(self.request, 'id', None)
-        result['task_id'] = tid
-        result['collection_duration_ms'] = collection_duration_ms
-
-        # Worker does NOT persist results or touch the DB — orchestrator is responsible.
-        # Log a structured summary for observability and publish the result to a Redis Stream
-        logger.info(
-            'collection_result',
-            extra={
-                'task_id': tid,
-                'task_identifier': task_identifier,
-                'device_id': device_id,
-                'status': result.get('status'),
-                'collection_duration_ms': collection_duration_ms,
-                'is_binary': plugin.is_binary,
-            },
-        )
-
-        # Publish to Redis Stream for orchestrator consumption. Keep payload small and JSON-serializable.
-        try:
-            payload = {
-                'task_id': tid or '',
-                'task_identifier': task_identifier or '',
-                'device_id': str(device_id) if device_id is not None else '',
-                'status': result.get('status', ''),
-                'log': json.dumps(result.get('log', [])),
-                'device_config': result.get('device_config') or '',
-                'collection_duration_ms': str(collection_duration_ms),
-                'initiated_at': cfg.get('initiated_at', ''),
-                'is_binary': str(plugin.is_binary),  # NEW: propagate binary flag
-            }
-            # redis-py requires mapping values to be bytes/str
-            redis_client.xadd(COLLECT_RESULTS_STREAM, payload)
-        except Exception:
-            logger.exception('failed_to_publish_result')
-
-        return result
-
+        store = job['store']
+        app.send_task(STORE_TASK, args=[store['envelope'], blob], queue=store['queue'])
+    except TransientError as exc:
+        if self.request.retries < self.max_retries:
+            countdown = _backoff(self.request.retries)
+            log.warning(f'attempt {attempt} failed, retrying in {countdown}s: {exc}')
+            events.send(job_id, EVENT_RETRYING, attempt=attempt, stage=STAGE_COLLECT, error=str(exc), log=log.entries)
+            raise self.retry(exc=exc, countdown=countdown) from exc
+        _fail(job_id, attempt, f'{exc} (gave up after {attempt} attempts)', log)
     except SoftTimeLimitExceeded:
-        msg = 'task_soft_time_limit_exceeded'
-        logger.exception(msg)
-        return {
-            'task_id': getattr(self.request, 'id', None),
-            'status': 'failure',
-            'timestamp': datetime.now(UTC).isoformat(),
-            'log': [msg],
-            'device_config': None,
-        }
-    except Exception as exc:
-        logger.exception('unhandled_collection_exception')
-        # Celery autoretry_for will handle retrying according to decorator
-        return {
-            'task_id': getattr(self.request, 'id', None),
-            'status': 'failure',
-            'timestamp': datetime.now(UTC).isoformat(),
-            'log': [f'unhandled: {repr(exc)}'],
-            'device_config': None,
-        }
+        _fail(job_id, attempt, f'collection exceeded {SOFT_TIME_LIMIT}s', log)
+    except Exception as exc:  # PermanentError and anything unexpected
+        if not isinstance(exc, PermanentError):
+            logger.exception('collect_failed', extra={'job_id': job_id})
+        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log)
     finally:
-        if lock and lock_acquired:
-            try:
-                lock.release()
-            except Exception:
-                logger.exception('failed_to_release_lock')
+        lock.release()
+
+
+def _collect(job: dict[str, Any], log: CollectionLog) -> tuple[bytes, bool]:
+    driver_cls = get_driver(job['driver'])
+    if driver_cls is None:
+        raise PermanentError(f'this collector has no "{job["driver"]}" driver')
+    try:
+        params = driver_cls.Params.model_validate(job.get('driver_params') or {})
+    except ValueError as exc:
+        raise PermanentError(f'invalid driver parameters: {exc}') from exc
+    device = job['device']
+    target = Target(address=device['address'], name=device.get('name', ''))
+    credentials = job.get('credentials') or {}
+    content = driver_cls().collect(target, credentials, params, timeout=int(job.get('timeout', 120)), log=log)
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    return content, driver_cls.is_binary
+
+
+def _fail(job_id: str, attempt: int, error: str, log: CollectionLog) -> None:
+    log.error(error)
+    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_COLLECT, error=error, log=log.entries)

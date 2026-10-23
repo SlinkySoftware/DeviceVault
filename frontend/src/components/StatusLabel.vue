@@ -2,17 +2,17 @@
 <template>
   <span class="row inline items-center no-wrap">
     <q-icon :name="statusIcon(status)" :color="statusColor(status)" size="sm" :class="{ pulse: pending }" />
-    <span class="q-ml-xs">{{ label || capitalise(status) }}</span>
+    <span class="q-ml-xs">{{ label || statusLabel(status) }}</span>
   </span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import { capitalise, statusColor, statusIcon } from '@/utils/format'
+import { isActiveJob, statusColor, statusIcon, statusLabel } from '@/utils/format'
 
 const props = defineProps<{ status: string | null; label?: string }>()
-const pending = computed(() => props.status === 'pending' || props.status === 'in_progress')
+const pending = computed(() => isActiveJob(props.status))
 </script>
 
 <style scoped>

@@ -20,10 +20,10 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 ## Layout
 
 - `protocol/` (`devicevault_protocol`): env helpers (`DV_*`, `<NAME>_FILE` secrets),
-  task/queue/stream names, the Celery app factory, presence constants, `crypto`.
+  task and queue names, the job protocol (`jobs`), the Celery app factory, presence constants, `crypto`.
   Shared by both sides; must not import Django.
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
-  storage tasks, `plugins/` (collector plugins), `storage/` (backends), `identity`
+  storage tasks, `drivers/` (collector drivers), `storage/` (backends), `identity`
   (persistent worker id and keys), `agent` (registration and assignments), `trust`
   (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
@@ -66,10 +66,13 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   configuration only through their assignment.
 - Backup methods shown or accepted by the API come from `core.workers.driver_catalogue()`
   (what approved collectors advertise), not from worker code.
-- Collector plugins expose `PLUGIN = BackupPlugin(...)` in
-  `worker/src/devicevault_worker/plugins/<name>.py`. Storage backends are registered in
-  `worker/src/devicevault_worker/storage/tasks.py`. Both become entry-point driver
-  registries in later phases.
+- Collector drivers subclass `CollectorDriver` (`worker/src/devicevault_worker/drivers/base.py`)
+  with a pydantic `Params` model, and raise `TransientError` (retried) or `PermanentError`.
+  Built-ins are listed in `drivers/__init__.py`; third-party drivers register under the
+  `devicevault.collectors` entry point. Storage backends live in `storage/backends.py`.
+- Backups are `backups.models.BackupJob`s: create them with `backups.jobs.create_job`, and let
+  worker events drive their state (`backups.jobs.handle_job_event`). Never trust a worker's
+  claim without checking its signature and approval.
 - Configuration is `DV_*` environment variables read through `devicevault_protocol.env`;
   never add config files. Document new variables in `docs/DEPLOYMENT.md` and the
   relevant `*.env.example`.

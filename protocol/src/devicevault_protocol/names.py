@@ -1,14 +1,8 @@
-"""Task, queue and stream names shared by the orchestrator and workers."""
+"""Task, queue and key names shared by the orchestrator and workers."""
 
-COLLECT_TASK = 'device.collect'
-STORE_TASK = 'storage.store'
+COLLECT_TASK = 'job.collect'
+STORE_TASK = 'job.store'
 READ_TASK = 'storage.read'
-
-# Redis streams the workers publish results to; the orchestrator consumes them.
-COLLECT_RESULTS_STREAM = 'device:results'
-COLLECT_RESULTS_GROUP = 'devicevault'
-STORE_RESULTS_STREAM = 'storage:results'
-STORE_RESULTS_GROUP = 'devicevault-storage'
 
 # Backup location types (as configured in the orchestrator) mapped to the
 # storage backend key a storage worker serves.
@@ -34,4 +28,4 @@ def storage_queue_name(storage_backend: str) -> str:
 
 
 def device_lock_key(device_id) -> str:
-    return f'lock:device:{device_id}'
+    return f'dv:lock:device:{device_id}'

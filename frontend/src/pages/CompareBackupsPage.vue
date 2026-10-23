@@ -13,8 +13,8 @@
       v-else-if="older && newer"
       :left="older.content"
       :right="newer.content"
-      :left-title="`A · ${formatDateTime(older.meta.timestamp)}`"
-      :right-title="`B · ${formatDateTime(newer.meta.timestamp)}`"
+      :left-title="`A · ${formatDateTime(older.meta.created_at)}`"
+      :right-title="`B · ${formatDateTime(newer.meta.created_at)}`"
     />
   </PageCard>
 </template>
@@ -24,14 +24,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { apiErrorMessage } from '@/api/client'
-import { storedBackupsApi } from '@/api/endpoints'
-import type { Id, StoredBackup } from '@/api/types'
+import { backupJobsApi } from '@/api/endpoints'
+import type { BackupJob } from '@/api/types'
 import DiffView from '@/components/DiffView.vue'
 import PageCard from '@/components/PageCard.vue'
 import { formatDateTime } from '@/utils/datetime'
 
 interface Side {
-  meta: StoredBackup
+  meta: BackupJob
   content: string
 }
 
@@ -43,22 +43,22 @@ const newer = ref<Side | null>(null)
 const loading = ref(true)
 const error = ref('')
 
-async function loadSide(id: Id): Promise<Side> {
-  const [meta, content] = await Promise.all([storedBackupsApi.get(id), storedBackupsApi.downloadText(id)])
+async function loadSide(id: string): Promise<Side> {
+  const [meta, content] = await Promise.all([backupJobsApi.get(id), backupJobsApi.contentText(id)])
   return { meta, content }
 }
 
 onMounted(async () => {
-  const a = Number(route.query.a)
-  const b = Number(route.query.b)
-  if (!Number.isInteger(a) || !Number.isInteger(b)) {
+  const a = typeof route.query.a === 'string' ? route.query.a : ''
+  const b = typeof route.query.b === 'string' ? route.query.b : ''
+  if (!a || !b) {
     error.value = 'Choose two backups to compare.'
     loading.value = false
     return
   }
   try {
     const sides = await Promise.all([loadSide(a), loadSide(b)])
-    sides.sort((x, y) => new Date(x.meta.timestamp).getTime() - new Date(y.meta.timestamp).getTime())
+    sides.sort((x, y) => new Date(x.meta.created_at).getTime() - new Date(y.meta.created_at).getTime())
     ;[older.value, newer.value] = sides
   } catch (exc) {
     error.value = apiErrorMessage(exc, 'Failed to load backups for comparison')

@@ -14,8 +14,10 @@ other only through RabbitMQ and Redis.
 - Device inventory with device types, manufacturers, device groups and collection groups
 - Device-group RBAC (per-group roles for users and auth groups), enforced by the API;
   configuration and user management are administrator-only
-- On-demand ("backup now") collection through Celery collectors, routed by collection group
-- Backup methods as plugins (`noop`, `binary_dummy`, `mikrotik_ssh_export`)
+- Backup jobs, on demand ("backup now") or on schedules (daily, weekly, monthly, cron) in the
+  display timezone, tracked from request to storage with retries, timeouts and per-job logs
+- Collector drivers (`demo_config`, `noop`, `binary_dummy`, `mikrotik_ssh_export`), with
+  per-device driver parameters; more can be installed as `devicevault.collectors` entry points
 - Storage to local filesystem or git through Celery storage workers
 - Optional envelope encryption of stored backups (AES-256-GCM)
 - Backup viewing, download and side-by-side comparison
@@ -83,7 +85,7 @@ Three independent stacks (infra, orchestrator, workers). See
 
 ```
 protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
-worker/         Collection and storage worker: Celery tasks, plugins, storage backends (no Django)
+worker/         Collection and storage worker: Celery tasks, collector drivers, storage backends (no Django)
 orchestrator/   Django project: API, worker events, result consumers
 frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints
