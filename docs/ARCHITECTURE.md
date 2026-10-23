@@ -1,0 +1,190 @@
+# DeviceVault — Target Architecture & Delivery Plan
+
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11.
+
+## 1. Goals
+
+1. Hard separation between the **infra layer** (DB, RabbitMQ, Redis), the **orchestrator**, and **workers**. Each deploys independently.
+2. Workers hold **no configuration** beyond the RabbitMQ and Redis endpoints (plus TLS CA). They register, wait for admin approval, and receive their role, queues, and config from the orchestrator.
+3. Storage is configured **per storage target**, assigned to specific workers, not per storage type.
+4. The UI stores Flower endpoints and gives admins direct access to them.
+5. Collector drivers and storage drivers are pluggable. New device platforms and storage backends (including an arbitrary database) are additive, not invasive.
+6. Current stacks: Python 3.14 (verified: Django 6.1.2, Celery 5.6.3, psycopg 3, djangosaml2/xmlsec, python-ldap, netmiko, scrapli, flower all install and run), Node 24, Quasar 2.35 / Vue 3.5 / vue-router 5 / Pinia 4. Docker is the only deployment target.
+
+Sizing assumptions: 6–8 collectors, 2–4 storage workers, backups from hundreds of KB up to tens of MB.
+
+## 2. Components
+
+```
+                     ┌──────────── infra (deploy/infra) ────────────┐
+                     │  PostgreSQL | SQLite(vol)   RabbitMQ   Redis │
+                     └───────▲───────────────▲──────────▲───────────┘
+                             │               │          │
+  ┌─ orchestrator node(s) (deploy/orchestrator) ─┐      │
+  │ web       nginx + SPA + /flower proxy        │      │
+  │ api       Django/DRF (gunicorn)              │      │
+  │ events    Celery worker, queue dv.orchestrator (Django)
+  │ scheduler leader-elected loop (Django)       │      │
+  │ flower    optional                           │      │
+  └──────────────────────────────────────────────┘      │
+                             │ AMQP + Redis only        │
+  ┌─ worker (deploy/worker) — one image, no Django ─────┴──┐
+  │ role=collector: consumes collector.group.<id>          │
+  │ role=storage:   consumes storage.target.<uuid>         │
+  │ always:         dv.worker.<worker_id> (control/direct) │
+  └────────────────────────────────────────────────────────┘
+```
+
+No component talks to another directly. Everything goes over AMQP or Redis.
+
+### Orchestrator processes (same image, different commands)
+
+| Process | Scaling | Responsibility |
+|---|---|---|
+| `api` | active/active | REST API, auth, RBAC |
+| `web` | active/active | nginx serving the built SPA, `/api` → api, `/flower/<id>/` → Flower (via `auth_request`) |
+| `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`, `read.result`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
+| `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
+
+### Worker runtime (pure Celery + kombu, **no Django**)
+
+The worker has a bootstrap, registration, and control layer, plus driver registries: `collectors/` and `storage/`.
+
+## 3. Repository layout
+
+```
+protocol/        shared package: queue/exchange names, message schemas (pydantic), envelope crypto
+orchestrator/    Django project + apps (pyproject, depends on protocol)
+worker/          Celery worker runtime + drivers (pyproject, depends on protocol)
+frontend/        Quasar/Vue SPA (TypeScript)
+docker/          Dockerfile.orchestrator, Dockerfile.worker, Dockerfile.web
+deploy/
+  infra/         compose: postgres, rabbitmq, redis (+ example HA notes)
+  orchestrator/  compose: web, api, events, scheduler, flower(profile)
+  worker/        compose: worker (env: DV_BROKER_URL, DV_REDIS_URL, DV_TLS_CA?, DV_WORKER_NAME?)
+  dev/           compose overlay: everything on one host, bind-mounted source, hot reload
+docs/            ARCHITECTURE.md, DEPLOYMENT.md, OPERATIONS.md, DRIVERS.md, SECURITY.md
+CLAUDE.md
+```
+
+Tooling: a `uv` workspace (one lockfile), `ruff`, `pytest`; `npm` with a lockfile, `engines.node >= 24`, ESLint, Vitest. Everything is pinned. A top-level `Makefile` (`make lint`, `make test`, `make images`) is the single entry point and stays CI-agnostic, so a future GitLab or Gitea pipeline can just call it. No GitHub Actions.
+
+**Removed:** `devicevault.sh`, `devicevault-docker-dev.sh`, `start-*.sh`, `setup/`, `scripts/`, `docker-build/`, `dev-env/`, `var/`, `original_prompt.txt`, `PRODUCTION_DEPLOYMENT_SUMMARY.md`, `backend/dv_*` empty apps, the one-off migrate/show scripts, the committed sample backup, the current `docs/*` (replaced by the set above), all existing migrations (squashed to a fresh `0001`), and MySQL support.
+
+## 4. Identity, trust and crypto
+
+### 4.1 Worker identity
+
+- On first start the worker generates `worker_id` (UUIDv4) and an **Ed25519 signing key plus an X25519 encryption key**. It persists them in the `/var/lib/devicevault` state volume. This is self-generated state, not configuration.
+- The public key fingerprint is printed in the worker log so an admin can verify it out-of-band during approval.
+
+### 4.2 Registration → approval → assignment
+
+1. Worker starts consuming only `dv.worker.<id>`, then sends `worker.register`: `{worker_id, name, version, host facts, public keys, capabilities: {collector_drivers:[{key,version,schema}], storage_drivers:[{key,version,schema,shareable}]}}`. The message is signed with the worker's key.
+2. The orchestrator upserts `Worker(status=pending)`. Nothing is sent back until an admin approves.
+3. The admin approves in the UI after checking the fingerprint, and assigns a **role** plus either **collection group(s)** or **storage target(s)**.
+4. The orchestrator sends a signed `worker.assignment` (with a version number) to `dv.worker.<id>`: role, queues, concurrency, the orchestrator's public keys, and secrets *encrypted to that worker's key* (collection-group key or storage-target config).
+5. The worker verifies the message, applies it with `add_consumer`/`cancel_consumer` on itself, and acks with the applied version. Heartbeats carry the applied version, and the orchestrator re-pushes on mismatch. After a reconnect the worker re-registers and the orchestrator re-sends the current assignment. **No local cache.** With no assignment, the worker waits and retries.
+6. Admin can **revoke** a worker: it gets a cancel-all assignment, and its keys are dropped from group key distribution, with key rotation.
+
+The orchestrator signing key is **pinned TOFU** in the worker state volume when the first signed assignment arrives. From then on the worker rejects unsigned or foreign-signed control messages and tasks. Recovery from an orchestrator key change is a deliberate worker state reset.
+
+Limitation: broker credentials are shared per role, so revocation is enforced cryptographically (signatures and keys), not at the broker. Per-worker broker users can be added later.
+
+### 4.3 What is encrypted
+
+| Data | Protection |
+|---|---|
+| All transports | TLS (`amqps://`, `rediss://`) required outside dev |
+| Every orchestrator→worker message/task | Ed25519 signed |
+| Device credentials at rest | AES-256-GCM with the orchestrator master key |
+| Device credentials in a collect task | (when payload encryption is on) Encrypted to the **collection-group key**: an X25519 keypair per group, private half delivered to each approved member, encrypted to that worker's key. Any group member can decrypt, nobody else can. |
+| Storage-target config (paths, git/S3/DB creds) | Encrypted to the assigned worker's key inside the assignment |
+| Backup content | (when payload encryption is on) Encrypted **on the collector** to the orchestrator **vault public key**: per-backup DEK, AES-256-GCM chunked (existing `DVLT` format), DEK wrapped via X25519/HKDF. Storage workers, Redis, and RabbitMQ only ever see ciphertext. The orchestrator decrypts for view/diff. Vault keys form a key ring (kid) for rotation. |
+
+**Payload encryption is a global orchestrator setting** (`DV_PAYLOAD_ENCRYPTION`, off by default for development, on for deployments). It covers backup content and device credentials in transit. Collectors learn it from their assignment. When it is off, payloads go in plaintext (`enc_version=0`) so developers can inspect queues and Redis. Reads handle both versions. The per-device `encrypt_backups` toggle is removed. Message signing and credential encryption at rest are **always on** whatever this setting says. The orchestrator logs a startup warning when payload encryption is off with `DEBUG=false`.
+
+Orchestrator secrets (Django secret, master key, vault private keys, signing key) come from env or Docker secrets. There is no `config.yaml`.
+
+## 5. Backup data path
+
+Large payloads don't go through RabbitMQ: RabbitMQ 4 defaults to a 16 MiB message cap, and backups can be tens of MB. Instead, **blobs are staged in Redis** (ciphertext when payload encryption is on) (`dv:blob:<uuid>`, TTL 24h). Messages carry only `{blob_ref, sha256, size}`. Redis streams are dropped: all events go over RabbitMQ (durable quorum queue `dv.orchestrator`), so retries and acks are uniform.
+
+```
+scheduler/api ── BackupJob(queued) ──► collect task → collector.group.<g>
+collector:  lock dv:lock:device:<id> → driver.collect() → encrypt (if enabled) → stage blob
+            → store task → storage.target.<t>   (target queue was in the job)
+            → job.collected event → dv.orchestrator
+storage:    fetch blob, verify sha256 → driver.store() → delete blob
+            → job.stored {storage_ref, size, enc meta} → dv.orchestrator
+events:     BackupJob state machine: queued→collecting→collected→stored | failed | timed_out
+read (UI):  api → read task → storage.target.<t> → blob → read.result → api decrypts
+```
+
+Retries: drivers raise typed errors. Transient errors (timeout, connection refused, lock held) trigger a Celery retry with backoff. Permanent errors (auth failure, unknown driver) fail the job. Each job is handled exactly once, keyed on `job_id`. Binary/text is carried as job metadata end to end, which fixes the dropped `is_binary` flag.
+
+## 6. Data model (main changes)
+
+- `Worker` (replaces `WorkerRegistration`): id, name, status (pending/approved/revoked), role, public keys, capabilities, assignment version applied/desired, last_seen.
+- `CollectionGroup`: queue `collector.group.<uuid>`, group keypair, M2M workers. The UI warns when a device's driver isn't supported by every approved member.
+- `StorageTarget` (replaces `BackupLocation`): name, driver key, config (validated against the driver schema, secret fields encrypted), M2M workers, queue `storage.target.<uuid>`. Assigning a non-`shareable` driver (local fs, local git) to more than one worker is blocked.
+- `Device`: `driver` + `driver_params` (validated against the driver schema), collection_group, storage_target, credential, schedule (FK; currently missing, which is why schedules never fire), retention_policy.
+- `BackupJob` (replaces `DeviceBackupResult` + `StoredBackup`): one row per attempt with state, timings, logs, storage_ref, enc metadata, size, sha256.
+- `FlowerEndpoint`: name, url, proxied (bool). Admin-only.
+
+## 7. Driver framework
+
+**Collector driver** (`worker/collectors/`):
+```python
+class CollectorDriver(Protocol):
+    key: str; version: str; mode: Literal["pull"]   # "push" reserved
+    Params: type[BaseModel]                           # → JSON Schema → UI form
+    def collect(self, target: Target, creds: Creds, params: Params, timeout: int) -> Collected: ...
+```
+Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a command list plus a cleanup regex). The first drivers are ported from today's: Mikrotik, plus `noop` and `binary_dummy` for tests. Cisco IOS/ASA etc. come later from your specs.
+
+Push mode (future): a driver may declare `mode="push"` with a listener (TFTP/SCP/SFTP). The orchestrator assigns listeners to collectors, and the collector maps the inbound source IP to a device via the assignment. The interface is reserved now and not built.
+
+**Storage driver** (`worker/storage/`): `store(key, stream, meta) → ref`, `read(ref) → stream`, `delete(ref)`, `list(prefix)`, `healthcheck()`, plus `Params`, `shareable`. Drivers: filesystem, git, S3, and later **database** (SQLAlchemy URL in the target config, so any SQLAlchemy dialect works, with dialect libraries as image extras).
+
+Drivers are discovered through Python entry points, so a new driver can ship as a separate package without editing core.
+
+## 8. HA
+
+- Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lock leader acts, and the standby takes over when the lock expires (around 30s).
+- The front-end VIP/load balancer (keepalived, or an existing LB) sits outside the stacks. A keepalived example is documented.
+- HA needs PostgreSQL. **SQLite = single orchestrator node only**, enforced at startup. SQLite runs in WAL mode with immediate transactions, which is fine at this scale.
+- Infra HA (Postgres replication, a 3-node RabbitMQ quorum cluster, Redis Sentinel) is out of the compose stacks. The orchestrator and workers accept multi-host URLs.
+
+## 9. Frontend
+
+Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vitest. Device and storage-target forms are rendered from driver JSON Schemas. New admin pages: Workers (pending approvals, fingerprint, role/assignment, liveness), Storage Targets, Flower.
+
+## 10. Phases (one branch and PR each)
+
+| # | Branch | Content | Master stays working? |
+|---|---|---|---|
+| 0 | `plan/architecture` | This document and `CLAUDE.md` | yes |
+| 1 | `chore/foundation` | New layout, uv workspace, Py 3.14, Django 6.1, pinned deps, ruff/pytest, `Makefile`, cruft and docs removal, squashed migrations, MySQL removed, unused external-auth deps removed | yes (behaviour unchanged) |
+| 2 | `feat/deploy-layout` | Dockerfiles, `deploy/{infra,orchestrator,worker,dev}`, worker de-Djangoed (still old routing) | yes |
+| 3 | `feat/frontend-rewrite` | Straight port of existing pages to the new stack | yes |
+| 4 | `feat/registration` | protocol package, keys, signing, register/approve/assign, liveness, Workers UI | yes |
+| 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, credential encryption, retry semantics, collector driver framework (Netmiko/Scrapli bases), schema-driven device form | yes |
+| 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |
+| 7 | `feat/flower-ha` | FlowerEndpoint and nginx proxy, scheduler leader election verified with 2 nodes, HA docs | yes |
+| later | — | Retention enforcement, DB storage driver, push collection, new vendor drivers, external auth | — |
+
+Each backend phase ships its own UI changes, so master never has a broken frontend.
+
+## 11. Decisions log
+
+| # | Decision |
+|---|---|
+| 1 | Orchestrator signing key is TOFU-pinned by workers at first assignment; recovery is a worker state reset. |
+| 2 | Payload encryption is a **global orchestrator option**: off for development, on per deployment (see 4.3). |
+| 3 | Redis streams dropped. Events go over RabbitMQ, and payloads are staged in Redis as blobs. |
+| 4 | Infra HA and the front-end VIP/LB are documented, not shipped in compose. |
+| 5 | Config comes from env and Docker secrets only; no `config.yaml`. SQLite→Postgres migration is a `manage.py` command. |
+| 6 | External auth (LDAP/SAML/Entra) deps removed; external auth becomes a later phase. |
+| 7 | No CI for now (no GitHub Actions minutes). A CI-agnostic `Makefile` is ready for a future GitLab or Gitea pipeline. |
+| — | Retention enforcement: in scope, designed in a later phase. |
