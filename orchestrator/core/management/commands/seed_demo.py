@@ -19,6 +19,7 @@ from django.core.management.base import BaseCommand
 
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
+from monitoring.models import FlowerEndpoint
 from policies.models import BackupSchedule, RetentionPolicy
 from storage.models import StorageTarget
 
@@ -70,6 +71,12 @@ def create_sample_data():
     for name, driver, config in targets:
         StorageTarget.objects.get_or_create(name=name, defaults={'driver': driver, 'config': config})
     print(f'✓ Created {len(targets)} storage targets')
+
+    # The dev stack has no nginx to proxy Flower, so the UI links straight to its published port.
+    FlowerEndpoint.objects.get_or_create(
+        slug='local', defaults={'name': 'Local Flower', 'url': 'http://localhost:5555', 'proxied': False}
+    )
+    print('✓ Created Flower endpoint')
 
     # Retention Policies
     policies = [
@@ -242,6 +249,7 @@ def create_sample_data():
     print('  - Configure device types at http://localhost:9000/vaultadmin/device-types')
     print('  - Set up credentials at http://localhost:9000/vaultadmin/credentials')
     print('  - Configure storage targets at http://localhost:9000/vaultadmin/storage-targets')
+    print('  - Open Flower from http://localhost:9000/vaultadmin/flower')
 
 
 class Command(BaseCommand):

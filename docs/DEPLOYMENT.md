@@ -157,8 +157,8 @@ endpoint, scoped to its path and valid for 8 hours or until you sign out. When i
 lapses, the proxy sends you back to the page to open Flower again.
 
 A proxied Flower is served from the UI's origin, so treat it as trusted code and
-proxy only Flower instances you run. The development stack has no nginx: add its
-Flower as a direct endpoint, `http://localhost:5555`.
+proxy only Flower instances you run. The development stack has no nginx, so its
+Flower is a direct endpoint, `http://localhost:5555`; `make dev-seed` adds it.
 
 ## 6. High availability
 
