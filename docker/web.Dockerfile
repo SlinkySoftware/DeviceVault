@@ -10,7 +10,8 @@ COPY frontend ./
 RUN npx quasar build
 
 FROM nginx:1.30-alpine
-ENV DV_API_UPSTREAM=api:8000
+ENV DV_API_UPSTREAM=api:8000 \
+    DV_RESOLVER=127.0.0.11
 COPY docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /frontend/dist/spa /usr/share/nginx/html
 EXPOSE 8080

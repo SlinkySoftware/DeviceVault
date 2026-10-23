@@ -1,19 +1,21 @@
 # Rendered by the nginx image's envsubst step; only defined variables
-# (DV_API_UPSTREAM) are substituted, so nginx's own $variables are preserved.
-
-upstream devicevault_api {
-    server ${DV_API_UPSTREAM};
-}
+# (DV_API_UPSTREAM, DV_RESOLVER) are substituted, so nginx's own $variables
+# are preserved.
 
 server {
     listen 8080;
     server_name _;
     root /usr/share/nginx/html;
 
+    # Resolve the API at request time (Docker's DNS by default), so a recreated
+    # api container with a new address is picked up without restarting nginx.
+    resolver ${DV_RESOLVER} valid=10s ipv6=off;
+    set $devicevault_api http://${DV_API_UPSTREAM};
+
     client_max_body_size 64m;
 
     location ~ ^/(api|admin|static)/ {
-        proxy_pass http://devicevault_api;
+        proxy_pass $devicevault_api;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
