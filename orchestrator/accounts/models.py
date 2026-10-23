@@ -133,7 +133,8 @@ class AuthProvider(models.Model):
     """An identity provider users can sign in with. ``config`` is validated against the kind's settings model."""
 
     LDAP = 'ldap'
-    KIND_CHOICES = [(LDAP, 'LDAP / Active Directory')]
+    OIDC = 'oidc'
+    KIND_CHOICES = [(LDAP, 'LDAP / Active Directory'), (OIDC, 'OpenID Connect')]
 
     slug = models.SlugField(max_length=50, unique=True, help_text='Fixed once created; tags memberships and URLs')
     name = models.CharField(max_length=128)

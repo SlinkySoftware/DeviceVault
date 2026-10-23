@@ -81,6 +81,15 @@ describe('auth store', () => {
     expect(auth.user).toBeNull()
   })
 
+  it("returns the identity provider's sign-out URL when the API names one", async () => {
+    const auth = useAuthStore()
+    await auth.login('alice', 'pw', false)
+    vi.mocked(authApi.logout).mockResolvedValue({ redirect: 'https://idp.example.com/logout?x=1' })
+
+    expect(await auth.logout()).toBe('https://idp.example.com/logout?x=1')
+    expect(auth.isAuthenticated).toBe(false)
+  })
+
   it('keeps nothing about the session in browser storage', async () => {
     await useAuthStore().login('alice', 'pw', false)
 

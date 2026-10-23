@@ -18,7 +18,7 @@ from accounts import access, sessions
 from accounts.access import IsGlobalAdmin
 from accounts.login import is_break_glass, password_sign_in
 from accounts.models import FLAGS, REQUIRES, AuthProvider, DeviceGroupGrant, UserGroup, UserGroupMembership
-from accounts.providers import KINDS
+from accounts.providers import KINDS, ProviderError
 from accounts.throttle import LOGIN, locked_out
 from audit.log import client_ip, record
 from audit.models import AuditLog
@@ -137,12 +137,32 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
+    """Ends the session. For an OIDC session whose provider ends IdP sessions too,
+    answers ``{redirect}``: the IdP's end-session URL to send the browser to."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        redirect = end_session_redirect(request)
         record(request, 'auth.logout')
         logout(request._request)
+        if redirect:
+            return response.Response({'redirect': redirect})
         return response.Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def end_session_redirect(request) -> str | None:
+    slug = request.session.get(sessions.PROVIDER)
+    id_token = request.session.get('dv_id_token')
+    provider = AuthProvider.objects.filter(slug=slug, enabled=True).first() if slug and id_token else None
+    kind = KINDS.get(provider.kind) if provider else None
+    if kind is None or not hasattr(kind, 'end_session_url'):
+        return None
+    try:
+        config = kind.config(provider.config)
+    except ProviderError:
+        return None
+    return kind.end_session_url(config, id_token, request.build_absolute_uri('/login'))
 
 
 class AuthConfigView(APIView):

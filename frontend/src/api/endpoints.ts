@@ -191,6 +191,10 @@ export const auditLogApi = {
   list: async (query: AuditQuery) => (await http.get<Page<AuditEntry>>('/audit-logs/', { params: query })).data,
 }
 
+/** Where the browser goes to sign in with a redirect provider (OIDC); it comes back to `next`. */
+export const oidcLoginUrl = (slug: string, next: string) =>
+  `/api/auth/oidc/${encodeURIComponent(slug)}/login/?${new URLSearchParams({ next }).toString()}`
+
 export const authApi = {
   /** Sets the CSRF cookie that unsafe requests echo. */
   csrf: async () => {
@@ -198,9 +202,8 @@ export const authApi = {
   },
   login: async (username: string, password: string) =>
     (await http.post<LoginResponse>('/auth/login/', { username, password })).data,
-  logout: async () => {
-    await http.post('/auth/logout/')
-  },
+  /** Ends the session; an OIDC session may name the IdP's end-session URL to visit next. */
+  logout: async () => (await http.post<{ redirect?: string } | ''>('/auth/logout/')).data || {},
   currentUser: async () => (await http.get<CurrentUser>('/auth/user/')).data,
   updateCurrentUser: async (body: UserDetails) => (await http.patch<CurrentUser>('/auth/user/', body)).data,
   changePassword: async (currentPassword: string, newPassword: string) => {

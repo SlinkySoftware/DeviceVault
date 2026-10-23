@@ -46,16 +46,41 @@
         </q-input>
         <q-checkbox v-model="remember" label="Remember my username" />
         <q-btn type="submit" color="primary" label="Log in" size="lg" class="full-width" :loading="loading" />
+        <div v-if="directories.length" class="text-caption text-muted text-center">
+          Local and {{ directories.map((p) => p.name).join(', ') }} accounts
+        </div>
       </q-form>
+
+      <template v-if="redirectProviders.length">
+        <div class="row items-center q-my-md">
+          <q-separator class="col" />
+          <span class="q-px-sm text-muted">or</span>
+          <q-separator class="col" />
+        </div>
+        <div class="column q-gutter-sm">
+          <q-btn
+            v-for="provider in redirectProviders"
+            :key="provider.slug"
+            outline
+            color="primary"
+            icon="login"
+            :label="`Sign in with ${provider.name}`"
+            :href="oidcLoginUrl(provider.slug, safeRedirect(route.query.redirect))"
+            type="a"
+          />
+        </div>
+      </template>
     </q-card>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { apiErrorMessage } from '@/api/client'
+import { authApi, oidcLoginUrl } from '@/api/endpoints'
+import type { LoginProvider } from '@/api/types'
 import { safeRedirect } from '@/router/guard'
 import { useAuthStore } from '@/stores/auth'
 
@@ -68,7 +93,28 @@ const remember = ref(!!auth.rememberedUsername)
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
-const error = ref('')
+const providers = ref<LoginProvider[]>([])
+const directories = computed(() => providers.value.filter((p) => p.password_login))
+const redirectProviders = computed(() => providers.value.filter((p) => !p.password_login))
+
+// Set by the API when a sign-in through an identity provider fails (see accounts/oidc_views.py).
+const PROVIDER_ERRORS: Record<string, string> = {
+  denied: 'The identity provider did not sign you in.',
+  state: 'That sign-in attempt expired or did not start here. Please try again.',
+  failed: 'The identity provider\'s answer could not be verified. Please try again or ask an administrator.',
+  refused: 'You may not sign in to DeviceVault. Ask an administrator for access.',
+  unavailable: 'The identity provider is unavailable. Please try again later.',
+}
+const queryError = typeof route.query.error === 'string' ? route.query.error : ''
+const error = ref(queryError ? (PROVIDER_ERRORS[queryError] ?? 'Sign-in failed.') : '')
+
+onMounted(async () => {
+  try {
+    providers.value = (await authApi.config()).providers
+  } catch {
+    // Without the list, the form still signs in local and directory accounts.
+  }
+})
 
 async function submit(): Promise<void> {
   error.value = ''

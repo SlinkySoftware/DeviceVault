@@ -31,6 +31,7 @@ class AuthProviderSerializer(serializers.ModelSerializer):
     secrets_set = serializers.SerializerMethodField()
     kind_name = serializers.SerializerMethodField()
     user_count = serializers.IntegerField(source='identities.count', read_only=True)
+    redirect_uri = serializers.SerializerMethodField()
 
     class Meta:
         model = AuthProvider
@@ -49,6 +50,7 @@ class AuthProviderSerializer(serializers.ModelSerializer):
             'login_group',
             'mapping_rules',
             'user_count',
+            'redirect_uri',
             'created_at',
             'updated_at',
         ]
@@ -58,6 +60,13 @@ class AuthProviderSerializer(serializers.ModelSerializer):
 
     def get_secrets_set(self, obj) -> list[str]:
         return sorted(name for name in self._secrets(obj.kind) if (obj.config or {}).get(name))
+
+    def get_redirect_uri(self, obj) -> str | None:
+        """Where a redirect provider (OIDC) sends users back: register it at the IdP."""
+        request = self.context.get('request')
+        if request is None or obj.kind not in KINDS or KINDS[obj.kind].password_login:
+            return None
+        return request.build_absolute_uri(f'/api/auth/oidc/{obj.slug}/callback/')
 
     def get_kind_name(self, obj) -> str:
         return KINDS[obj.kind].name if obj.kind in KINDS else obj.kind
