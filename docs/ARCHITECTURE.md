@@ -103,12 +103,12 @@ Message formats are in `protocol/src/devicevault_protocol/registration.py`.
 |---|---|
 | All transports | TLS (`amqps://`, `rediss://`) required outside dev |
 | Every orchestrator→worker message/task | Ed25519 signed |
-| Device credentials at rest | AES-256-GCM with the orchestrator master key |
-| Device credentials in a collect task | (when payload encryption is on) Encrypted to the **collection-group key**: an X25519 keypair per group, private half delivered to each approved member, encrypted to that worker's key. Any group member can decrypt, nobody else can. |
-| Storage-target config (paths, git/S3/DB creds) | Encrypted to the assigned worker's key inside the assignment |
+| Device credentials and location config at rest | AES-256-GCM with the data key ring (`DV_DATA_KEYS`), bound to their table and column |
+| Device credentials in a collect task | (when payload encryption is on) **Sealed per recipient**: one copy per approved collector of the device's collection group, each encrypted to that worker's X25519 key (ECIES: ephemeral X25519, HKDF-SHA256, AES-256-GCM). Any approved group member can open its copy, nobody else can. With 6-8 collectors this is cheaper and simpler than distributing group keys, and needs no re-keying when membership changes; a collector approved after a job was queued cannot open that job's credentials, and the job fails clearly. |
+| Storage config (paths, git/S3/DB creds) | (when payload encryption is on) Sealed per recipient in each store/read task, to every approved storage worker serving the backend. Moves into the per-worker assignment with storage targets (phase 6). |
 | Backup content | (when payload encryption is on) Encrypted **on the collector** to the orchestrator **vault public key**: per-backup DEK, AES-256-GCM chunked (existing `DVLT` format), DEK wrapped via X25519/HKDF. Storage workers, Redis, and RabbitMQ only ever see ciphertext. The orchestrator decrypts for view/diff. Vault keys form a key ring (kid) for rotation. |
 
-**Payload encryption is a global orchestrator setting** (`DV_PAYLOAD_ENCRYPTION`, off by default for development, on for deployments). It covers backup content and device credentials in transit. Collectors learn it from their assignment. When it is off, payloads go in plaintext (`enc_version=0`) so developers can inspect queues and Redis. Reads handle both versions. The per-device `encrypt_backups` toggle is removed. Message signing and credential encryption at rest are **always on** whatever this setting says. The orchestrator logs a startup warning when payload encryption is off with `DEBUG=false`.
+**Payload encryption is a global orchestrator setting** (`DV_PAYLOAD_ENCRYPTION`, off by default for development, on for deployments). It covers backup content and secrets in transit. Every collect task carries the current vault public key (or none), signed like the rest of the task, so collectors need no state for it. When it is off, payloads go in plaintext (`enc_version=0`) so developers can inspect queues and Redis. Reads handle both versions. The per-device `encrypt_backups` toggle is removed. Message signing and credential encryption at rest are **always on** whatever this setting says. The orchestrator logs a startup warning when payload encryption is off with `DEBUG=false`.
 
 Orchestrator secrets (Django secret, master key, vault private keys, signing key) come from env or Docker secrets. There is no `config.yaml`.
 
@@ -132,7 +132,7 @@ Retries: drivers raise typed errors. Transient errors (timeout, connection refus
 ## 6. Data model (main changes)
 
 - `Worker` (replaces `WorkerRegistration`): id, name, status (pending/approved/revoked), role, public keys, capabilities, assignment version applied/desired, last_seen.
-- `CollectionGroup`: queue `collector.group.<uuid>`, group keypair, M2M workers. The UI warns when a device's driver isn't supported by every approved member.
+- `CollectionGroup`: queue `collector.group.<uuid>`, M2M workers. The UI warns when a device's driver isn't supported by every approved member.
 - `StorageTarget` (replaces `BackupLocation`): name, driver key, config (validated against the driver schema, secret fields encrypted), M2M workers, queue `storage.target.<uuid>`. Assigning a non-`shareable` driver (local fs, local git) to more than one worker is blocked.
 - `Device`: `driver` + `driver_params` (validated against the driver schema), collection_group, storage_target, credential, schedule (FK; currently missing, which is why schedules never fire), retention_policy.
 - `BackupJob` (replaces `DeviceBackupResult` + `StoredBackup`): one row per attempt with state, timings, logs, storage_ref, enc metadata, size, sha256.

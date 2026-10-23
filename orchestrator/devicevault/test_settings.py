@@ -8,8 +8,10 @@ os.environ.update(
         'DV_SECRET_KEY': 'test-only-secret-key',
         'DV_DB_ENGINE': 'sqlite',
         'DV_DB_NAME': ':memory:',
-        # Test-only signing key (32 zero-padded bytes); never use outside tests.
+        # Test-only keys; never use outside tests. Payload encryption stays off unless a test turns it on.
         'DV_SIGNING_KEY': 'dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyLWJ5dGVzISE=',
+        'DV_DATA_KEYS': 'test=dGVzdC1vbmx5LWRhdGEta2V5LTMyLWJ5dGVzISEhISE=',
+        'DV_VAULT_KEYS': 'test=dGVzdC1vbmx5LXZhdWx0LWtleS0zMi1ieXRlcyEhISE=',
     }
 )
 

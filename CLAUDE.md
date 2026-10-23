@@ -70,6 +70,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   with a pydantic `Params` model, and raise `TransientError` (retried) or `PermanentError`.
   Built-ins are listed in `drivers/__init__.py`; third-party drivers register under the
   `devicevault.collectors` entry point. Storage backends live in `storage/backends.py`.
+- Secrets sent to workers go through `core.keys.add_secret` (sealed per worker when payload
+  encryption is on) and come out through `devicevault_worker.payload.secret`. Secret model
+  fields use `core.fields.EncryptedJSONField`.
 - Backups are `backups.models.BackupJob`s: create them with `backups.jobs.create_job`, and let
   worker events drive their state (`backups.jobs.handle_job_event`). Never trust a worker's
   claim without checking its signature and approval.

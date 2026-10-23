@@ -44,6 +44,7 @@ from devicevault_protocol.crypto.exceptions import (
     ChunkLimitExceededError,
     DecryptionError,
     EncryptionError,
+    KeyProviderError,
     TamperDetectedError,
 )
 from devicevault_protocol.crypto.header import EncryptionHeader, is_encrypted
@@ -171,7 +172,7 @@ def encrypt_backup(
             'edk': base64.b64encode(edk).decode('ascii'),
         }
 
-        logger.info(
+        logger.debug(
             'Encrypted backup: %d bytes -> %d bytes (%d chunks, kid=%s)',
             len(plaintext),
             len(blob),
@@ -273,7 +274,7 @@ def decrypt_backup(
                 plaintext_parts.append(pt)
 
             result = b''.join(plaintext_parts)
-            logger.info(
+            logger.debug(
                 'Decrypted backup: %d bytes -> %d bytes (%d chunks, kid=%s)',
                 len(blob),
                 len(result),
@@ -285,7 +286,7 @@ def decrypt_backup(
         finally:
             _zeroize(dek)
 
-    except DecryptionError, TamperDetectedError:
+    except DecryptionError, KeyProviderError:
         raise
     except Exception as exc:
         raise DecryptionError(f'Decryption failed: {exc}') from exc

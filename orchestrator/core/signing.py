@@ -3,7 +3,7 @@
 Every assignment and task sent to workers is signed with it, and workers pin
 its public key when first approved, so all orchestrator nodes must share the
 same key and it must not change. Generate one with
-``manage.py generate_signing_key``.
+``manage.py generate_keys``.
 """
 
 from functools import cache
@@ -21,7 +21,7 @@ from devicevault_protocol.tasks import sign_task as _sign_task
 def signing_key() -> Ed25519PrivateKey:
     value = settings.DEVICEVAULT_SIGNING_KEY
     if not value:
-        raise ImproperlyConfigured('DV_SIGNING_KEY must be set (generate one with manage.py generate_signing_key)')
+        raise ImproperlyConfigured('DV_SIGNING_KEY must be set (generate one with manage.py generate_keys)')
     try:
         return signing.private_key_from_b64(value)
     except signing.SignatureError as exc:

@@ -22,6 +22,8 @@ Defines where device configuration backups are stored (Git repositories, S3, fil
 
 from django.db import models
 
+from core.fields import EncryptedJSONField
+
 
 class BackupLocation(models.Model):
     """
@@ -54,7 +56,9 @@ class BackupLocation(models.Model):
 
     name = models.CharField(max_length=128, help_text='Display name for this backup location')
     location_type = models.CharField(max_length=64, help_text='Type of location: git, s3, filesystem, tftp, etc.')
-    config = models.JSONField(default=dict, help_text='Location-specific configuration (URL, credentials, path, etc.)')
+    config = EncryptedJSONField(
+        default=dict, help_text='Location-specific configuration (URL, credentials, path, etc.; encrypted at rest)'
+    )
 
     def __str__(self):
         """Return formatted string with location type and name"""

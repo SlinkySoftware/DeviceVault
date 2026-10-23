@@ -22,6 +22,8 @@ and external credential management system integrations (CyberArk, HashiCorp Vaul
 
 from django.db import models
 
+from core.fields import EncryptedJSONField
+
 
 class CredentialType(models.Model):
     """
@@ -68,8 +70,8 @@ class Credential(models.Model):
 
     name = models.CharField(max_length=128, help_text='Display name for this credential set')
     credential_type = models.ForeignKey(CredentialType, on_delete=models.PROTECT, help_text='Source of credentials')
-    data = models.JSONField(
-        default=dict, help_text='Credential data: username/password dict or vault connection params'
+    data = EncryptedJSONField(
+        default=dict, help_text='Credential data: username/password dict or vault connection params (encrypted at rest)'
     )
 
     def __str__(self):

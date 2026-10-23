@@ -19,7 +19,9 @@ other only through RabbitMQ and Redis.
 - Collector drivers (`demo_config`, `noop`, `binary_dummy`, `mikrotik_ssh_export`), with
   per-device driver parameters; more can be installed as `devicevault.collectors` entry points
 - Storage to local filesystem or git through Celery storage workers
-- Optional envelope encryption of stored backups (AES-256-GCM)
+- Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
+  orchestrator's vault key, and credentials are sealed to each collector, so RabbitMQ, Redis
+  and storage workers only see ciphertext; credentials are also encrypted in the database
 - Backup viewing, download and side-by-side comparison
 - Dashboard statistics and audit log
 - Zero-configuration workers: they register themselves, an admin approves them with a

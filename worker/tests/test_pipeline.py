@@ -83,7 +83,7 @@ def pipeline(monkeypatch, tmp_path):
     return redis, sent
 
 
-def collect_job(tmp_path, *, driver='demo_config', params=None, backend='fs'):
+def collect_job(tmp_path, *, driver='demo_config', params=None, backend='fs', vault=None):
     job_id = str(uuid.uuid4())
     store = {
         'job_id': job_id,
@@ -98,6 +98,7 @@ def collect_job(tmp_path, *, driver='demo_config', params=None, backend='fs'):
         'driver_params': params or {},
         'credentials': {},
         'timeout': 5,
+        'encryption': {'kid': vault.current_kid, 'public_key': vault.public_key_b64()} if vault else None,
         'store': {'queue': f'storage.{backend}', 'envelope': sign_task(store, ORCHESTRATOR)},
     }
     return job_id, sign_task(job, ORCHESTRATOR)
@@ -253,3 +254,43 @@ def test_expired_staged_backups_fail(pipeline, tmp_path):
 
     assert events[-1][0] == EVENT_FAILED
     assert 'expired' in events[-1][1]['error']
+
+
+# --- payload encryption --------------------------------------------------------------
+
+
+def test_backups_are_encrypted_to_the_vault_before_staging(pipeline, tmp_path):
+    from devicevault_protocol.crypto import VaultKeyRing, decrypt_backup, is_encrypted
+    from devicevault_protocol.crypto.ecies import generate_private_key
+    from devicevault_worker.collect import collect
+    from devicevault_worker.storage.backends import BACKENDS
+
+    redis, sent = pipeline
+    vault = VaultKeyRing({'v1': generate_private_key()})
+    job_id, envelope = collect_job(tmp_path, params={'hostname': 'edge-01'}, vault=vault)
+
+    collect.run(envelope)
+    staged = redis.get(blob_key(job_id))
+    stored = run_store(sent)[-1][1]
+
+    assert is_encrypted(staged) and b'edge-01' not in staged
+    assert b'edge-01' in decrypt_backup(staged, vault)
+    assert BACKENDS['fs'].read(stored['storage_ref'], {'path': str(tmp_path / 'store')}) == staged
+
+
+def test_secrets_sealed_for_this_worker_are_opened(pipeline):
+    from devicevault_protocol.crypto import seal
+    from devicevault_protocol.crypto.ecies import generate_private_key
+    from devicevault_worker.app import identity
+    from devicevault_worker.drivers.base import PermanentError
+    from devicevault_worker.payload import secret
+
+    mine = seal({'password': 'p'}, identity.encryption_key.public_key())
+    theirs = seal({'password': 'p'}, generate_private_key().public_key())
+
+    assert secret({'credentials': {'password': 'plain'}}, 'credentials') == {'password': 'plain'}
+    assert secret({'credentials_sealed': {identity.worker_id: mine}}, 'credentials') == {'password': 'p'}
+    with pytest.raises(PermanentError, match='not sealed for this worker'):
+        secret({'credentials_sealed': {'someone-else': theirs}}, 'credentials')
+    with pytest.raises(PermanentError, match='could not open'):
+        secret({'credentials_sealed': {identity.worker_id: theirs}}, 'credentials')

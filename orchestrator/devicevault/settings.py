@@ -154,3 +154,9 @@ DEVICEVAULT_JOB_TIMEOUT_MIN = env_int('DV_JOB_TIMEOUT_MIN', 120, minimum=1)
 DEVICEVAULT_SCHEDULER_INTERVAL_SEC = env_int('DV_SCHEDULER_INTERVAL_SEC', 30, minimum=5)
 # Ed25519 key that signs everything sent to workers; see core.signing.
 DEVICEVAULT_SIGNING_KEY = env_str('DV_SIGNING_KEY')
+# Encryption keys; see core.keys. Data keys encrypt secrets at rest (always on).
+DEVICEVAULT_DATA_KEYS = env_str('DV_DATA_KEYS')
+# Payload encryption of backups and secrets sent to workers: off for development
+# (queues and Redis stay readable), on for deployments.
+DEVICEVAULT_PAYLOAD_ENCRYPTION = env_bool('DV_PAYLOAD_ENCRYPTION', False)
+DEVICEVAULT_VAULT_KEYS = env_str('DV_VAULT_KEYS')

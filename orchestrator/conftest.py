@@ -3,6 +3,7 @@ import uuid
 import pytest
 
 from devicevault_protocol import signing
+from devicevault_protocol.crypto import ecies
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,7 @@ class WorkerKeys:
         self.id = str(uuid.uuid4())
         self.name = name
         self.key = signing.generate_signing_key()
+        self.encryption = ecies.generate_private_key()
 
     def event(self, applied_version=0, drivers=('noop', 'binary_dummy'), backends=('fs', 'git'), **overrides):
         payload = {
@@ -31,7 +33,7 @@ class WorkerKeys:
             'pid': 42,
             'version': '0.1.0',
             'signing_key': signing.public_key_to_b64(self.key),
-            'encryption_key': signing.b64encode(b'\x01' * 32),
+            'encryption_key': ecies.public_key_to_b64(self.encryption),
             'capabilities': {
                 'collector_drivers': [
                     {

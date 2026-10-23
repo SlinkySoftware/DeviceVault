@@ -5,6 +5,7 @@ All values here align with ASD-approved algorithms and NIST guidance:
     - AES-256-GCM: NIST SP 800-38D
     - 96-bit nonces: NIST recommended IV length for GCM
     - AES Key Wrap: RFC 3394 / NIST SP 800-38F
+    - X25519 + HKDF-SHA256 for wrapping to public keys (RFC 7748, RFC 5869)
 
 Copyright (C) 2026, Slinky Software
 License: GPLv3+
@@ -32,18 +33,3 @@ DEFAULT_CHUNK_SIZE = 1 * 1024 * 1024  # 1 MiB per chunk (default)
 MIN_CHUNK_SIZE = 64 * 1024  # 64 KiB minimum
 MAX_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MiB maximum
 MAX_CHUNK_COUNT = 2**32  # Safety limit: reject > 2^32 chunks
-
-# ---------------------------------------------------------------------------
-# Key provider identifiers
-# ---------------------------------------------------------------------------
-PROVIDER_LOCAL = 'local'
-PROVIDER_KMS = 'kms'
-
-# ---------------------------------------------------------------------------
-# Environment variables (see devicevault_protocol.crypto.config)
-# ---------------------------------------------------------------------------
-ENV_ENCRYPTION_ENABLED = 'DV_ENCRYPTION_ENABLED'
-ENV_KEYS = 'DV_ENCRYPTION_KEYS'
-ENV_DEFAULT_KID = 'DV_ENCRYPTION_DEFAULT_KID'
-ENV_CHUNK_SIZE = 'DV_ENCRYPTION_CHUNK_SIZE'
-ENV_ALLOW_PLAINTEXT_FALLBACK = 'DV_ENCRYPTION_ALLOW_PLAINTEXT_FALLBACK'

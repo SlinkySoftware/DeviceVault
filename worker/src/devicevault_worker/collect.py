@@ -19,7 +19,7 @@ from devicevault_worker import blobs, events
 from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.drivers import get_driver
 from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
-from devicevault_worker.payload import prepare
+from devicevault_worker.payload import prepare, secret
 from devicevault_worker.trust import SignatureError, verified_payload
 
 logger = get_logger('devicevault.worker.collect')
@@ -146,7 +146,7 @@ def _collect(job: dict[str, Any], log: CollectionLog) -> tuple[bytes, bool]:
         raise PermanentError(f'invalid driver parameters: {exc}') from exc
     device = job['device']
     target = Target(address=device['address'], name=device.get('name', ''))
-    credentials = job.get('credentials') or {}
+    credentials = secret(job, 'credentials') or {}
     content = driver_cls().collect(target, credentials, params, timeout=int(job.get('timeout', 120)), log=log)
     if isinstance(content, str):
         content = content.encode('utf-8')

@@ -10,9 +10,7 @@ out to RabbitMQ and Redis in the infra stack, and that is all.
 | Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, events, scheduler, Flower (optional) |
 | Worker | `deploy/worker` | one collector or storage worker per Compose project |
 
-> **Status:** pre-release. Storage workers still need encryption keys configured
-> locally if per-device encryption is used; that goes away in phase 5. See
-> [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Status:** pre-release. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 1. Build the images
 
@@ -43,8 +41,8 @@ them to the orchestrator and worker hosts.
 ```bash
 cd deploy/orchestrator
 cp orchestrator.env.example orchestrator.env   # see the reference below
-# A signing key for DV_SIGNING_KEY (prints the key; the fingerprint goes to stderr):
-docker run --rm -e DV_DEBUG=true --entrypoint python devicevault-orchestrator manage.py generate_signing_key
+# DV_SIGNING_KEY, DV_DATA_KEYS and DV_VAULT_KEYS as env lines (notes go to stderr):
+docker run --rm -e DV_DEBUG=true --entrypoint python devicevault-orchestrator manage.py generate_keys
 docker compose up -d                           # UI on :8080 (DV_HTTP_PORT)
 docker compose --profile flower up -d          # ... plus Flower on :5555
 ```
@@ -57,9 +55,24 @@ set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
 With `DV_DB_ENGINE=sqlite` the database lives in the stack's `data` volume, which
 limits you to a single orchestrator node.
 
-`DV_SIGNING_KEY` signs every assignment and task sent to workers. Workers pin
-it when first approved, so use the same key on every orchestrator node and
-never change it. A new key means resetting every worker.
+Every orchestrator node needs the same three keys:
+
+- `DV_SIGNING_KEY` signs every assignment and task sent to workers. Workers pin
+  it when first approved, so never change it: a new key means resetting every
+  worker.
+- `DV_DATA_KEYS` encrypts credentials and location config in the database.
+- `DV_VAULT_KEYS` (with `DV_PAYLOAD_ENCRYPTION=true`): collectors encrypt every
+  backup to the current vault public key, and device credentials and location
+  config are sealed to each worker that may handle them. RabbitMQ, Redis and
+  storage workers only see ciphertext; only the orchestrator can decrypt.
+
+Both key rings are `kid=<base64>,...` with the current key first. To rotate,
+put a new key (`generate_keys --only data` or `--only vault`) first and keep
+the old one after it while anything encrypted with it remains. Keep these keys
+backed up: without the vault key, encrypted backups cannot be read.
+
+With `DV_PAYLOAD_ENCRYPTION=false` (the development default) payloads travel in
+plaintext; `migrate` warns about this when `DV_DEBUG` is off.
 
 ## 4. Workers
 
@@ -93,8 +106,6 @@ log line matches. To automate approval: `manage.py approve_worker <name>
   it registers as a new, pending worker.
 - **Revoke** stops a worker consuming. **Forget** removes it; if it is still
   running it registers again as pending.
-- `DV_ENCRYPTION_KEYS` / `DV_ENCRYPTION_DEFAULT_KID`: storage workers only, when
-  per-device encryption is used (interim, until phase 5).
 
 Filesystem and git backup locations must point under `/srv/devicevault`, which
 is the worker's `storage` volume.
@@ -124,13 +135,15 @@ secrets). The file takes precedence.
 | `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin |
 | `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local user accounts |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
-| `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_signing_key`) |
+| `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_keys`) |
+| `DV_DATA_KEYS` | required | AES-256 key ring for secrets at rest (`generate_keys`) |
+| `DV_PAYLOAD_ENCRYPTION` | `false` | Encrypt backups and secrets in transit; turn on for deployments |
+| `DV_VAULT_KEYS` | required with payload encryption | X25519 key ring backups are encrypted to (`generate_keys`) |
 | `DV_WORKER_ONLINE_TIMEOUT_SEC` | `90` | A worker is offline after this long without a heartbeat |
 | `DV_EVENTS_CONCURRENCY` | `4` | Processes in the `events` service (worker and job events) |
 | `DV_COLLECT_TIMEOUT_SEC` | `120` | Time a collector driver gets to reach and read a device, per attempt |
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
 | `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules |
-| `DV_ENCRYPTION_ENABLED` / `DV_ENCRYPTION_KEYS` / `DV_ENCRYPTION_DEFAULT_KID` | `false` / none / none | Interim stored-backup encryption |
 
 ### Worker
 
@@ -143,12 +156,11 @@ secrets). The file takes precedence.
 | `DV_LOG_LEVEL` | `INFO` | |
 | `DV_STATE_DIR` | `/var/lib/devicevault` | Where the worker keeps its identity |
 | `DV_WORKER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat interval |
-| `DV_ENCRYPTION_*` | none (interim) | Storage workers only |
 
 ## Known limitations (pre-release)
 
-- Backups travel inside RabbitMQ messages, and RabbitMQ 4 rejects messages over
-  16 MiB by default. Phase 5 moves payloads to Redis.
 - TLS to RabbitMQ and Redis works through `amqps://` and `rediss://` URLs, but
   the infra stack doesn't configure TLS itself yet.
-- Scheduled backups don't run yet (phase 5). Use "Backup now".
+- Backups are staged whole in Redis between collection and storage (24 hours at
+  most), so size Redis memory for your largest backups times concurrent jobs.
+- Retention policies are stored but not yet applied.

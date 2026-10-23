@@ -17,7 +17,8 @@ from devicevault_protocol.jobs import (
 from devicevault_protocol.names import READ_TASK, STORE_TASK
 from devicevault_worker import blobs, events
 from devicevault_worker.app import app, get_logger
-from devicevault_worker.drivers.base import CollectionLog
+from devicevault_worker.drivers.base import CollectionLog, PermanentError
+from devicevault_worker.payload import secret
 from devicevault_worker.storage.backends import BACKENDS, BackupName, StorageError
 from devicevault_worker.trust import SignatureError, verified_payload
 
@@ -69,7 +70,7 @@ def store(self, envelope: dict, blob: dict) -> None:
 
         started = time.monotonic()
         try:
-            ref = backend.store(data, BackupName(**spec['name']), spec.get('config') or {})
+            ref = backend.store(data, BackupName(**spec['name']), secret(spec, 'config') or {})
         except OSError as exc:  # disk full, NFS hiccup, git lock...
             raise _Retryable(str(exc)) from exc
         blobs.delete(blob['key'])
@@ -94,7 +95,7 @@ def store(self, envelope: dict, blob: dict) -> None:
     except SoftTimeLimitExceeded:
         _fail(job_id, attempt, 'storing exceeded its time limit', log)
     except Exception as exc:
-        if not isinstance(exc, StorageError):
+        if not isinstance(exc, StorageError | PermanentError):
             logger.exception('store_failed', extra={'job_id': job_id})
         _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log)
 
@@ -121,7 +122,7 @@ def read(self, envelope: dict) -> dict:
         backend = BACKENDS.get(spec['backend'])
         if backend is None:
             raise StorageError(f'this storage worker has no "{spec["backend"]}" backend')
-        data = backend.read(spec['storage_ref'], spec.get('config') or {})
-    except (StorageError, OSError) as exc:
+        data = backend.read(spec['storage_ref'], secret(spec, 'config') or {})
+    except (StorageError, PermanentError, OSError) as exc:
         return {'status': 'failure', 'error': str(exc)}
     return {'status': 'success', **blobs.put(read_blob_key(uuid.uuid4().hex), data, READ_BLOB_TTL_SECONDS)}

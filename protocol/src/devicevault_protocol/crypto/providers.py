@@ -1,175 +1,104 @@
-"""
-Key Provider interface and implementations for master key management.
+"""DEK wrapping for backup content: collectors wrap to the vault public key,
+the orchestrator unwraps with the vault private key ring.
 
-Supports a key ring with multiple active KIDs for read operations during
-master key rotation. New writes always use the default KID.
-
-Security notes:
-    - Master keys are loaded once and held in memory for the process lifetime.
-    - Plaintext DEKs are never persisted or logged.
-    - AES Key Wrap (RFC 3394) is used to wrap/unwrap DEKs.
-
-Copyright (C) 2026, Slinky Software
-License: GPLv3+
+An encrypted DEK (``edk``) is ``ephemeral_public (32) || AES-KW(kek, dek)``,
+where ``kek`` comes from X25519 + HKDF (see ``ecies``). The key id (``kid``)
+in the backup header names the vault key, so keys can be rotated: new
+backups use the current key, older ones still decrypt while their key stays
+in the ring.
 """
 
-import base64
-import logging
-import os
 from abc import ABC, abstractmethod
 
-from cryptography.hazmat.primitives.keywrap import (
-    InvalidUnwrap,
-    aes_key_unwrap,
-    aes_key_wrap,
-)
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.keywrap import InvalidUnwrap, aes_key_unwrap, aes_key_wrap
 
-from devicevault_protocol.crypto.constants import AES_KEY_BYTES
-from devicevault_protocol.crypto.exceptions import (
-    KeyProviderError,
-    KeyUnwrapError,
-    MasterKeyNotFoundError,
-)
-
-logger = logging.getLogger('devicevault.crypto.providers')
+from devicevault_protocol.crypto import ecies
+from devicevault_protocol.crypto.exceptions import KeyProviderError, KeyUnwrapError, MasterKeyNotFoundError
 
 
 class KeyProvider(ABC):
-    """Abstract interface for master key management.
-
-    Implementations must support a key ring (multiple KIDs) to enable
-    seamless master key rotation. Reads can use any KID in the ring;
-    writes always use the default KID.
-    """
-
     @abstractmethod
-    def get_default_key_id(self) -> str:
-        """Return the KID used for new encryption operations."""
+    def wrap_key(self, dek: bytes) -> tuple[bytes, str]:
+        """``(edk, kid)`` for a new backup."""
 
-    @abstractmethod
-    def wrap_key(self, plaintext_dek: bytes) -> tuple[bytes, str]:
-        """Wrap a plaintext DEK with the default master key.
-
-        Returns:
-            (encrypted_dek, kid) tuple.
-        """
-
-    @abstractmethod
-    def unwrap_key(self, encrypted_dek: bytes, kid: str) -> bytes:
-        """Unwrap an encrypted DEK using the master key identified by *kid*.
-
-        Raises:
-            MasterKeyNotFoundError: If *kid* is not in the key ring.
-            KeyUnwrapError: If unwrapping fails (wrong key, corrupted EDK).
-        """
-
-    @abstractmethod
-    def list_key_ids(self) -> list[str]:
-        """Return all KIDs currently available in the key ring."""
-
-    @abstractmethod
-    def set_default_key_id(self, kid: str) -> None:
-        """Switch the default KID for future wrap operations.
-
-        Raises:
-            MasterKeyNotFoundError: If *kid* is not in the key ring.
-        """
+    def unwrap_key(self, edk: bytes, kid: str) -> bytes:
+        raise KeyUnwrapError('this key provider cannot decrypt')
 
 
-class LocalKeyProvider(KeyProvider):
-    """Key provider that reads master keys from local configuration.
+def _wrap(public: X25519PublicKey, dek: bytes) -> bytes:
+    epk, kek = ecies.agree(public, ecies.PURPOSE_DEK)
+    return epk + aes_key_wrap(kek, dek)
 
-    Supports multiple named keys in the key ring for rotation scenarios.
-    Keys are base64-encoded 256-bit AES keys.
 
-    Keys are supplied by :func:`devicevault_protocol.crypto.config.get_key_provider`
-    from ``DV_ENCRYPTION_KEYS`` (``kid=<base64>,...``) and ``DV_ENCRYPTION_DEFAULT_KID``.
-    """
+class VaultPublicKey(KeyProvider):
+    """The collector side: can encrypt backups, never decrypt them."""
 
-    def __init__(self, keys: dict[str, str] | None = None, default_kid: str | None = None):
-        """Initialise the local key ring.
-
-        Args:
-            keys: Mapping of KID -> base64-encoded master key material.
-            default_kid: KID to use for new wrap operations.
-        """
-        self._ring: dict[str, bytes] = {}
-        self._default_kid: str | None = None
-
-        # Load from explicit dict
-        if keys:
-            for kid, key_b64 in keys.items():
-                self._add_key(kid, key_b64)
-
-        if not self._ring:
-            raise KeyProviderError('No master keys configured. Set DV_ENCRYPTION_KEYS.')
-
-        # Set default KID
-        if default_kid and default_kid in self._ring:
-            self._default_kid = default_kid
-        elif default_kid and default_kid not in self._ring:
-            raise MasterKeyNotFoundError(f'Default KID "{default_kid}" not in key ring')
-        else:
-            # Use the last key added (or first if only one)
-            self._default_kid = list(self._ring.keys())[-1]
-
-        logger.info(
-            'LocalKeyProvider initialised with %d key(s), default_kid=%s',
-            len(self._ring),
-            self._default_kid,
-        )
-
-    def _add_key(self, kid: str, key_b64: str) -> None:
-        """Decode and validate a base64 master key."""
+    def __init__(self, kid: str, public_key_b64: str):
+        if not kid:
+            raise KeyProviderError('a vault key needs a key id')
+        self.kid = kid
         try:
-            raw = base64.b64decode(key_b64)
-        except Exception as exc:
-            raise KeyProviderError(f'Invalid base64 for KID "{kid}": {exc}') from exc
+            self.public_key = ecies.public_key_from_b64(public_key_b64)
+        except ValueError as exc:
+            raise KeyProviderError(f'invalid vault public key: {exc}') from exc
 
-        if len(raw) != AES_KEY_BYTES:
-            raise KeyProviderError(f'Master key "{kid}" must be {AES_KEY_BYTES} bytes, got {len(raw)}')
-        self._ring[kid] = raw
+    def wrap_key(self, dek: bytes) -> tuple[bytes, str]:
+        return _wrap(self.public_key, dek), self.kid
 
-    # -- KeyProvider interface ------------------------------------------------
 
-    def get_default_key_id(self) -> str:
-        return self._default_kid
+def parse_key_ring(text: str, name: str) -> dict[str, str]:
+    """``kid=value,kid=value`` (the first entry is current) as an ordered dict."""
+    ring = {}
+    for item in filter(None, (part.strip() for part in (text or '').split(','))):
+        kid, sep, value = item.partition('=')
+        if not sep or not kid.strip() or not value.strip():
+            raise KeyProviderError(f'{name}: expected kid=<base64 key>, got "{item[:12]}..."')
+        if kid.strip() in ring:
+            raise KeyProviderError(f'{name}: duplicate key id "{kid.strip()}"')
+        ring[kid.strip()] = value.strip()
+    return ring
 
-    def wrap_key(self, plaintext_dek: bytes) -> tuple[bytes, str]:
-        kid = self._default_kid
-        master_key = self._ring[kid]
-        edk = aes_key_wrap(master_key, plaintext_dek)
-        logger.debug('Wrapped DEK with KID=%s (edk_len=%d)', kid, len(edk))
-        return edk, kid
 
-    def unwrap_key(self, encrypted_dek: bytes, kid: str) -> bytes:
-        master_key = self._ring.get(kid)
-        if master_key is None:
-            raise MasterKeyNotFoundError(
-                f'KID "{kid}" not found in key ring. Available KIDs: {list(self._ring.keys())}'
-            )
+class VaultKeyRing(KeyProvider):
+    """The orchestrator side: every vault private key, the first one current."""
+
+    def __init__(self, keys: dict[str, X25519PrivateKey]):
+        if not keys:
+            raise KeyProviderError('the vault key ring is empty')
+        self._keys = dict(keys)
+        self.current_kid = next(iter(self._keys))
+
+    @classmethod
+    def from_config(cls, text: str) -> VaultKeyRing:
         try:
-            dek = aes_key_unwrap(master_key, encrypted_dek)
-        except InvalidUnwrap as exc:
-            raise KeyUnwrapError(
-                f'Failed to unwrap DEK with KID "{kid}". '
-                'Key material may be corrupted or the wrong master key was used.'
-            ) from exc
-        logger.debug('Unwrapped DEK with KID=%s', kid)
-        return dek
+            keys = {
+                kid: ecies.private_key_from_b64(value) for kid, value in parse_key_ring(text, 'DV_VAULT_KEYS').items()
+            }
+        except ValueError as exc:
+            raise KeyProviderError(f'DV_VAULT_KEYS: {exc}') from exc
+        return cls(keys)
 
-    def list_key_ids(self) -> list[str]:
-        return list(self._ring.keys())
+    def public_key_b64(self, kid: str | None = None) -> str:
+        return ecies.public_key_to_b64(self._key(kid or self.current_kid))
 
-    def set_default_key_id(self, kid: str) -> None:
-        if kid not in self._ring:
-            raise MasterKeyNotFoundError(f'KID "{kid}" not in key ring')
-        old = self._default_kid
-        self._default_kid = kid
-        logger.info('Switched default KID: %s -> %s', old, kid)
+    def public(self) -> VaultPublicKey:
+        """What collectors get: the current key's id and public half."""
+        return VaultPublicKey(self.current_kid, self.public_key_b64())
 
-    @staticmethod
-    def generate_master_key() -> str:
-        """Generate a new random 256-bit master key, returned as base64."""
-        raw = os.urandom(AES_KEY_BYTES)
-        return base64.b64encode(raw).decode('ascii')
+    def _key(self, kid: str) -> X25519PrivateKey:
+        try:
+            return self._keys[kid]
+        except KeyError:
+            raise MasterKeyNotFoundError(f'vault key "{kid}" is not in DV_VAULT_KEYS') from None
+
+    def wrap_key(self, dek: bytes) -> tuple[bytes, str]:
+        return _wrap(self._key(self.current_kid).public_key(), dek), self.current_kid
+
+    def unwrap_key(self, edk: bytes, kid: str) -> bytes:
+        private = self._key(kid)
+        epk, wrapped = edk[: ecies.X25519_KEY_BYTES], edk[ecies.X25519_KEY_BYTES :]
+        try:
+            return aes_key_unwrap(ecies.recover(private, epk, ecies.PURPOSE_DEK), wrapped)
+        except (InvalidUnwrap, ValueError) as exc:
+            raise KeyUnwrapError(f'the backup key could not be unwrapped with vault key "{kid}"') from exc
