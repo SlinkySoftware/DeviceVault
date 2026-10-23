@@ -6,13 +6,14 @@ from functools import cache
 
 from .base import BackupName, StorageDriver, StorageError, StorageParams, StorageUnavailable
 from .local import FilesystemDriver, GitDriver
+from .postgresql import PostgresDriver
 from .s3 import S3Driver
 
 __all__ = ['BackupName', 'StorageDriver', 'StorageError', 'StorageParams', 'StorageUnavailable', 'get_driver']
 
 logger = logging.getLogger(__name__)
 
-BUILTIN_DRIVERS: tuple[type[StorageDriver], ...] = (FilesystemDriver, GitDriver, S3Driver)
+BUILTIN_DRIVERS: tuple[type[StorageDriver], ...] = (FilesystemDriver, GitDriver, PostgresDriver, S3Driver)
 ENTRY_POINT_GROUP = 'devicevault.storage'
 
 

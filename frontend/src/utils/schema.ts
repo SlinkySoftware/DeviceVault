@@ -39,6 +39,8 @@ export interface SchemaField {
   nullable: boolean
   /** Write-only (a password or key): never shown, only replaced. */
   secret: boolean
+  /** Multi-line text, e.g. a PEM certificate (`format: "multiline"`). */
+  multiline: boolean
   options: unknown[]
   min: number | undefined
   max: number | undefined
@@ -109,6 +111,7 @@ export function schemaFields(schema: JsonSchema | null | undefined): { fields: S
       required: (schema.required ?? []).includes(name),
       nullable,
       secret: Boolean(property.writeOnly) || property.format === 'password',
+      multiline: property.format === 'multiline',
       options: property.enum ?? [],
       min: property.minimum ?? (property.exclusiveMinimum !== undefined ? property.exclusiveMinimum + 1 : undefined),
       max: property.maximum ?? (property.exclusiveMaximum !== undefined ? property.exclusiveMaximum - 1 : undefined),

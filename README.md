@@ -21,7 +21,8 @@ other only through RabbitMQ and Redis.
   schema (form in the UI, validated by the API); more drivers can be installed as
   `devicevault.collectors` entry points
 - Storage targets, each served by chosen storage workers: local filesystem, git (one commit
-  per backup), or S3 and S3-compatible buckets (shared by several workers); settings from the
+  per backup), S3 and S3-compatible buckets, or PostgreSQL databases (both shared by several
+  workers); settings from the
   driver's schema, with a Test button. More drivers can be installed as `devicevault.storage`
   entry points
 - Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
@@ -33,8 +34,7 @@ other only through RabbitMQ and Redis.
   role and assignment, and everything sent to them is signed by the orchestrator
 - Local authentication
 
-Not yet implemented (see the plan): scheduled backups, retention enforcement, S3 and
-database storage, push collection, external authentication (LDAP/SAML/Entra ID).
+Not yet implemented (see the plan): scheduled backups, retention enforcement, push collection, external authentication (LDAP/SAML/Entra ID).
 
 ## Technology
 

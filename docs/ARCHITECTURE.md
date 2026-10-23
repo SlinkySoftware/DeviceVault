@@ -156,7 +156,7 @@ Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a com
 
 Push mode (future): a driver may declare `mode="push"` with a listener (TFTP/SCP/SFTP). The orchestrator assigns listeners to collectors, and the collector maps the inbound source IP to a device via the assignment. The interface is reserved now and not built.
 
-**Storage driver** (`worker/storage/drivers/`): `store(data, name, params) → ref`, `read(ref, params) → bytes`, `delete(ref, params)`, `check(params)`, plus `Params`, `shareable`. Drivers (phase 6): filesystem and git (paths relative to the worker's `/srv/devicevault` volume, not shareable) and S3 (shareable); later **database** (SQLAlchemy URL in the target config, so any SQLAlchemy dialect works, with dialect libraries as image extras).
+**Storage driver** (`worker/storage/drivers/`): `store(data, name, params) → ref`, `read(ref, params) → bytes`, `delete(ref, params)`, `check(params)`, plus `Params`, `shareable`. Drivers (phase 6): filesystem and git (paths relative to the worker's `/srv/devicevault` volume, not shareable) and S3 (shareable); PostgreSQL (shareable, psycopg 3, one `bytea` row per backup in `<schema>.devicevault_backups`, with discrete connection and TLS settings). Other databases get drivers of their own rather than a generic SQLAlchemy URL, since TLS and connection settings differ for each.
 
 Drivers are discovered through Python entry points, so a new driver can ship as a separate package without editing core.
 
@@ -184,7 +184,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, per-recipient sealed secrets, credential encryption at rest, retry semantics, collector driver framework (Netmiko base; Cisco IOS and MikroTik drivers), schema-driven device form | yes |
 | 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |
 | 7 | `feat/flower-ha` | FlowerEndpoint and nginx proxy, scheduler leader election verified with 2 nodes, HA docs | yes |
-| later | — | Retention enforcement, DB storage driver, push collection, new vendor drivers, external auth, Redis Sentinel | — |
+| later | — | Retention enforcement, push collection, new vendor drivers, external auth, Redis Sentinel | — |
 
 Each backend phase ships its own UI changes, so master never has a broken frontend.
 
