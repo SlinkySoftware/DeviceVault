@@ -47,3 +47,6 @@ frontend/.vite/
 # OS files
 .DS_Store
 Thumbs.db
+# Python tooling
+.ruff_cache/
+.pytest_cache/

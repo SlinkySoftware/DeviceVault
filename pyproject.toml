@@ -1,0 +1,28 @@
+[tool.uv.workspace]
+members = ["orchestrator"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501", # line length is handled by the formatter
+    "E402", # license blocks follow module docstrings
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Closures are invoked within the same loop iteration; both modules are replaced in phase 4.
+"orchestrator/core/worker_presence.py" = ["B023"]
+"orchestrator/core/management/commands/monitor_worker_registry.py" = ["B023"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "api", "audit", "backups", "celery_app", "core", "credentials", "crypto", "devices",
+    "devicevault", "devicevault_worker", "locations", "policies", "storage",
+]
+
+[tool.ruff.format]
+quote-style = "single"

@@ -70,7 +70,7 @@ services:
       context: ..
       dockerfile: dev-env/Dockerfile.backend-dev
     container_name: devicevault-docker-dev-orchestrator
-    working_dir: /workspace/backend
+    working_dir: /workspace/orchestrator
     environment:
       <<: *backend-env
       DEVICEVAULT_LOG_DIR: /var/devicevault/logs/orchestrator
@@ -91,7 +91,7 @@ services:
       context: ..
       dockerfile: dev-env/Dockerfile.backend-dev
     container_name: devicevault-docker-dev-collector-1
-    working_dir: /workspace/backend
+    working_dir: /workspace/orchestrator
     environment: *backend-env
     command:
       - bash
@@ -117,7 +117,7 @@ services:
       context: ..
       dockerfile: dev-env/Dockerfile.backend-dev
     container_name: devicevault-docker-dev-collector-2
-    working_dir: /workspace/backend
+    working_dir: /workspace/orchestrator
     environment: *backend-env
     command:
       - bash
@@ -143,7 +143,7 @@ services:
       context: ..
       dockerfile: dev-env/Dockerfile.backend-dev
     container_name: devicevault-docker-dev-storage-worker
-    working_dir: /workspace/backend
+    working_dir: /workspace/orchestrator
     environment: *backend-env
     command:
       - bash
@@ -169,7 +169,7 @@ services:
       context: ..
       dockerfile: dev-env/Dockerfile.backend-dev
     container_name: devicevault-docker-dev-flower
-    working_dir: /workspace/backend
+    working_dir: /workspace/orchestrator
     environment: *backend-env
     command:
       - bash

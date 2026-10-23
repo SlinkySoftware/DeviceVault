@@ -13,48 +13,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
 fi
 
 echo "Running migrations..."
-fixed_icon_migration=0
-fixed_device_group_column=0
-
-for _attempt in 1 2 3 4; do
-    MIGRATE_LOG="$(mktemp)"
-    if python manage.py migrate --run-syncdb --noinput >"$MIGRATE_LOG" 2>&1; then
-        cat "$MIGRATE_LOG"
-        rm -f "$MIGRATE_LOG"
-        break
-    fi
-
-    if [ "$fixed_icon_migration" -eq 0 ] && grep -q 'column "icon" of relation "devices_devicetype" already exists' "$MIGRATE_LOG"; then
-        echo "Detected duplicate devices icon migration. Applying fake migration for devices.0002_add_icon_field and retrying."
-        python manage.py migrate devices 0002_add_icon_field --fake --noinput
-        fixed_icon_migration=1
-        rm -f "$MIGRATE_LOG"
-        continue
-    fi
-
-    if [ "$fixed_device_group_column" -eq 0 ] && grep -q 'column "device_group_id" does not exist' "$MIGRATE_LOG"; then
-        echo "Detected missing devices.device_group_id column. Creating column and retrying migrations."
-        python manage.py shell <<'PY'
-from django.db import connection
-
-table = 'devices_device'
-with connection.cursor() as cursor:
-    existing_tables = set(connection.introspection.table_names())
-    if table not in existing_tables:
-        raise SystemExit(0)
-    columns = [col.name for col in connection.introspection.get_table_description(cursor, table)]
-    if 'device_group_id' not in columns:
-        cursor.execute('ALTER TABLE devices_device ADD COLUMN device_group_id integer')
-PY
-        fixed_device_group_column=1
-        rm -f "$MIGRATE_LOG"
-        continue
-    fi
-
-    cat "$MIGRATE_LOG"
-    rm -f "$MIGRATE_LOG"
-    exit 1
-done
+python manage.py migrate --noinput
 
 echo "Ensuring default admin user exists..."
 python manage.py create_admin --username admin --password admin --email admin@example.com
