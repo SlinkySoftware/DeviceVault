@@ -32,6 +32,7 @@ devicevault.sqlite3
 .pids/
 *.pid
 var/
+orchestrator/staticfiles/
 
 # Node / Frontend
 node_modules/
@@ -47,3 +48,10 @@ frontend/.vite/
 # OS files
 .DS_Store
 Thumbs.db
+# Python tooling
+.ruff_cache/
+.pytest_cache/
+
+# Deployment env files (examples are committed as *.env.example)
+deploy/**/*.env
+!deploy/dev/dev.env

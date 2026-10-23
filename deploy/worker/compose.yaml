@@ -1,0 +1,28 @@
+# DeviceVault worker (collection or storage). One worker per compose project:
+#
+#   cp worker.env.example worker.env   # then edit
+#   docker compose -p dv-collector-dmz up -d
+#
+# The worker connects out to RabbitMQ and Redis only, registers with the
+# orchestrator, and waits for an administrator to approve it (Admin Settings >
+# Workers). Its identity lives in the "state" volume; keep it, or the worker
+# registers as a new worker. Filesystem and git storage locations must use
+# paths under /srv/devicevault.
+
+name: devicevault-worker
+
+services:
+  worker:
+    image: ${DV_WORKER_IMAGE:-devicevault-worker:latest}
+    restart: unless-stopped
+    env_file: [worker.env]
+    volumes:
+      - state:/var/lib/devicevault
+      - storage:/srv/devicevault
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 60s
+
+volumes:
+  state:
+  storage:

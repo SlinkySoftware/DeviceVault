@@ -1,0 +1,23 @@
+[tool.uv.workspace]
+members = ["protocol", "worker", "orchestrator"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501", # line length is handled by the formatter
+    "E402", # license blocks follow module docstrings
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "api", "audit", "backups", "core", "credentials", "devices", "devicevault",
+    "devicevault_protocol", "devicevault_worker", "monitoring", "policies", "storage",
+]
+
+[tool.ruff.format]
+quote-style = "single"

@@ -1,0 +1,61 @@
+# DeviceVault infrastructure: message bus, Redis and (optionally) PostgreSQL.
+#
+#   cp infra.env.example infra.env   # then set the passwords
+#   docker compose up -d                       # RabbitMQ + Redis (SQLite orchestrator)
+#   docker compose --profile postgres up -d    # ... plus PostgreSQL
+#
+# Ports are published on the host so orchestrator and worker stacks, on this
+# host or elsewhere, can reach them. Restrict access with a host firewall.
+
+name: devicevault-infra
+
+services:
+  rabbitmq:
+    image: rabbitmq:4.2-management-alpine
+    restart: unless-stopped
+    env_file: [infra.env]
+    ports:
+      - "${DV_RABBITMQ_PORT:-5672}:5672"
+      - "${DV_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    env_file: [infra.env]
+    command: ["sh", "-c", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    ports:
+      - "${DV_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:18-alpine
+    profiles: [postgres]
+    restart: unless-stopped
+    env_file: [infra.env]
+    ports:
+      - "${DV_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rabbitmq:
+  redis:
+  postgres:

@@ -1,657 +1,106 @@
 # DeviceVault
 
-A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
+DeviceVault collects and versions configuration backups from network devices. A central
+orchestrator schedules work, collectors connect to devices (for example over SSH to run
+`show running-config`), and storage workers persist the results. Components talk to each
+other only through RabbitMQ and Redis.
+
+> **Status:** pre-release and under active restructuring. The target design and the
+> phased delivery plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). This README
+> describes what works today.
+
+## What works today
+
+- Device inventory with device types, manufacturers, device groups and collection groups
+- Device-group RBAC (per-group roles for users and auth groups), enforced by the API;
+  configuration and user management are administrator-only
+- Backup jobs, on demand ("backup now") or on schedules (daily, weekly, monthly, cron) in the
+  display timezone, tracked from request to storage with retries, timeouts and per-job logs
+- Collector drivers: `cisco_ios` and `mikrotik_ssh_export` (SSH via Netmiko), plus `demo_config`,
+  `noop` and `binary_dummy` for testing. Per-device driver settings come from each driver's
+  schema (form in the UI, validated by the API); more drivers can be installed as
+  `devicevault.collectors` entry points
+- Storage targets, each served by chosen storage workers: local filesystem, git (one commit
+  per backup), or S3 and S3-compatible buckets (shared by several workers); settings from the
+  driver's schema, with a Test button. More drivers can be installed as `devicevault.storage`
+  entry points
+- Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
+  orchestrator's vault key, and credentials are sealed to each collector, so RabbitMQ, Redis
+  and storage workers only see ciphertext; credentials are also encrypted in the database
+- Backup viewing, download and side-by-side comparison
+- Dashboard statistics and audit log
+- Zero-configuration workers: they register themselves, an admin approves them with a
+  role and assignment, and everything sent to them is signed by the orchestrator
+- Local authentication
+
+Not yet implemented (see the plan): scheduled backups, retention enforcement, S3 and
+database storage, push collection, external authentication (LDAP/SAML/Entra ID).
+
+## Technology
+
+| Layer | Stack |
+|---|---|
+| Orchestrator | Python 3.14, Django 6.1, Django REST Framework |
+| Workers | Celery 5.6 on RabbitMQ, Redis for locks and results |
+| Frontend | Vue 3.5, Quasar 2, TypeScript, Pinia, Vitest, Node 24 |
+| Database | SQLite (single node) or PostgreSQL |
+| Tooling | uv, ruff, pytest, Docker |
+
+## Development
+
+Requirements: Docker (with Compose) and `make`. Everything else runs in containers.
+
+```bash
+make dev-up        # start the dev stack: infra, orchestrator, 2 collectors, 1 storage worker, flower, frontend
+make dev-seed      # load demo data and approve the dev workers
+make dev-ps        # container status
+make dev-logs      # tail all logs (SERVICE=api for one)
+make dev-down      # stop the stack
+make dev-reset     # stop and delete all dev data
+```
+
+| Service | URL |
+|---|---|
+| Web UI (hot reload) | http://localhost:9000 (admin / admin) |
+| API (Django runserver) | http://localhost:8000/api/ |
+| Flower | http://localhost:5555 |
+| RabbitMQ management | http://localhost:15672 (devicevault / devicevault) |
+
+Ports can be moved with `DV_DEV_WEB_PORT`, `DV_DEV_API_PORT`, `DV_DEV_FLOWER_PORT`,
+`DV_RABBITMQ_PORT`, `DV_RABBITMQ_MANAGEMENT_PORT`, `DV_REDIS_PORT` and `DV_POSTGRES_PORT`.
+
+### Quality checks
+
+```bash
+make lint            # ruff lint + format check
+make fmt             # apply ruff fixes and formatting
+make test            # pytest for protocol, worker and orchestrator
+make frontend-lint   # ESLint + vue-tsc type check
+make frontend-test   # Vitest unit tests
+make frontend-build  # production build of the SPA
+make check           # all of the above
+make lock            # refresh uv.lock after editing a pyproject.toml
+make images          # build the orchestrator, worker and web images
+```
+
+## Deployment
+
+Three independent stacks (infra, orchestrator, workers). See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Repository layout
+
+```
+protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
+worker/         Collection and storage worker: Celery tasks, collector and storage drivers (no Django)
+orchestrator/   Django project: API, worker events, result consumers
+frontend/       Quasar/Vue single-page app (TypeScript)
+docker/         Image definitions and entrypoints
+deploy/         Compose stacks: infra, orchestrator, worker, dev
+docs/           Architecture, delivery plan and deployment guide
+Makefile        Single entry point for development and CI
+```
 
 ## License
 
-This project is licensed under the terms of the **GNU General Public License v3.0** (GPLv3) or later version.
-
-You can find the full text of the license in the [LICENSE](LICENSE.md) file or read it online at the [GNU Operating System website](https://www.gnu.org/licenses/gpl-3.0.html).
-
-## Features
-
-- **Plugin-Based Backup Methods**: Extensible architecture for supporting multiple device types
-- **Flexible Connectivity**: SSH, API, and TFTP backup reception
-- **Multiple Storage Backends**: Git (default), Local Filesystem, S3, Azure, GCS
-- **RBAC**: Role-based access control with device group-based visibility
-- **Authentication**: LDAP, SAML, Entra ID, and Local Auth support
-- **Retention Policies**: Configurable backup retention by count, time, or size
-- **Audit Logging**: Complete audit trail of all activities
-- **Dashboard**: Real-time statistics and backup success rate charts
-- **Backup Comparison**: Side-by-side diff view of configuration changes
-- **Distributed Storage Pipeline**: Celery workers offload backup storage to Git or filesystem backends with strict worker routing and synchronous retrieval
-
-## Architecture Documentation
-
-- **[Storage Pipeline](docs/STORAGE_PIPELINE.md)**: Device collection → storage → retrieval workflow with Celery worker routing
-- **[Celery Integration](docs/CELERY_INTEGRATION.md)**: Task queue architecture and worker routing
-- **[Celery Setup](docs/CELERY_SETUP.md)**: Detailed Celery configuration and startup instructions
-- **[Development Docker Integration](docs/DEVELOPMENT_DOCKER_INTEGRATION.md)**: Docker development setup with Redis & RabbitMQ
-- **[Docker Compose Comparison](docs/COMPOSE_COMPARISON.md)**: Development vs production Docker configurations
-- **[Production Deployment](docs/PRODUCTION_README.md)**: Image-first production build and role-based deployment workflow
-- **[Authentication](docs/AUTHENTICATION.md)**: Auth methods (Local, LDAP, SAML, Entra ID)
-- **[Timezone Implementation](docs/TIMEZONE_IMPLEMENTATION.md)**: Timezone handling and configuration
-
-## Technology Stack
-
-- **Backend**: Python 3.13+ with Django 6.0
-- **Frontend**: Vue 3 with Quasar Framework
-- **Database**: SQLite (default), PostgreSQL, or MySQL
-- **API**: Django REST Framework
-
-## Quick Start
-
-```bash
-# Start the application
-./devicevault.sh start
-
-# Access at http://localhost:9000
-# Login: admin / admin
-```
-
-## Installation
-
-See detailed installation instructions below.
-
-### Prerequisites
-
-On Debian Linux 13:
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Python 3.13
-sudo apt install python3 python3-pip python3-venv -y
-
-# Install Node.js 18+ and npm
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install nodejs -y
-
-# Install Docker and Docker Compose (recommended for development)
-sudo apt install docker.io docker-compose-plugin -y
-sudo usermod -aG docker $USER
-# Log out and back in for group changes to take effect
-
-# Verify installations
-python3 --version  # Should be 3.13+
-node --version     # Should be 18+
-npm --version
-docker --version
-docker compose version
-```
-
-### Application Setup
-
-0. **Clone the repository**
-```bash
-# clone into /opt/devicevault (requires sudo to write to /opt)
-export GIT_BRANCH="${GIT_BRANCH:-master}"
-sudo git clone --single-branch --branch "$GIT_BRANCH" https://github.com/SlinkySoftware/DeviceVault.git /opt/devicevault
-cd /opt/devicevault
-```
-
-1. **Set Up Python Virtual Environment**
-```bash
-cd /opt/devicevault
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-2. **Install Python Dependencies**
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-3. **Install Frontend Dependencies**
-```bash
-cd ../frontend
-npm install
-npm install -g @quasar/cli
-```
-
-4. **Initialize Database**
-```bash
-cd ../backend
-python manage.py migrate --run-syncdb
-```
-
-5. **Create Admin User**
-```bash
-# Preferred: run the supplied idempotent helper (from repo root)
-chmod +x setup/create-initial-configuration.sh
-./setup/create-initial-configuration.sh
-
-# Alternatively (manual):
-cd backend
-python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser('admin', 'admin@example.com', 'admin') if not User.objects.filter(username='admin').exists() else print('Admin user already exists')"
-```
-
-## Running the Application
-
-### Using the Management Script (Recommended)
-
-The `devicevault.sh` script provides a comprehensive management interface for all services, including automatic Docker service orchestration:
-
-```bash
-cd /opt/devicevault
-
-# Start all services (Docker, frontend, backend, workers, consumers, flower)
-./devicevault.sh start
-
-# Check status of all services
-./devicevault.sh status
-
-# View logs (all services or specific service)
-./devicevault.sh logs              # All logs
-./devicevault.sh logs backend      # Backend only
-./devicevault.sh logs frontend     # Frontend only
-./devicevault.sh logs backup-worker       # Backup worker
-./devicevault.sh logs storage-worker      # Storage worker
-./devicevault.sh logs backup-consumer     # Backup consumer
-./devicevault.sh logs storage-consumer    # Storage consumer
-./devicevault.sh logs flower              # Flower monitoring
-./devicevault.sh logs docker              # Docker services (Redis & RabbitMQ)
-
-# Restart all services
-./devicevault.sh restart
-
-# Stop all services
-./devicevault.sh stop
-```
-
-> **Note**: The `devicevault.sh` script now automatically manages Docker containers for Redis and RabbitMQ using `docker-build/docker-compose.dev.yaml`. If Docker is not available, the script will warn you and continue with native services (you'll need to provide Redis and RabbitMQ separately).
-
-#### What the Management Script Starts
-
-The `./devicevault.sh start` command automatically starts:
-
-1. **Docker Services** — Redis and RabbitMQ containers (via `docker-compose.dev.yaml`)
-   - **Redis** (`localhost:6379`) — Distributed locking and result streams
-   - **RabbitMQ** (`localhost:5672`) — Message broker for Celery
-   - **RabbitMQ Management UI** (`http://localhost:15672`) — Web interface (guest/guest)
-2. **Django Backend** (`http://localhost:8000`) — REST API and admin interface
-3. **Frontend (Quasar)** (`http://localhost:9000`) — SPA web interface
-4. **Backup Worker** — Celery worker for device backup collection (queues: `default`, `collector.group.*`)
-5. **Storage Worker** — Celery worker for backup storage operations (queues: `storage.fs`, `storage.git`)
-6. **Backup Consumer** — Django management command that consumes backup results from Redis Stream (`device:results`)
-7. **Storage Consumer** — Django management command that consumes storage results from Redis Stream (`storage:results`)
-8. **Flower Monitoring** (`http://localhost:5555`) — Celery task monitoring interface
-
-All native services are managed as background processes with PID files stored in `.pids/`. Docker services are managed via Docker Compose and can be controlled independently if needed.
-
-### Docker Development Services
-
-The development setup uses `docker-build/docker-compose.dev.yaml` to provide backing services:
-
-```bash
-# Managed automatically by devicevault.sh, or manually:
-cd docker-build
-
-# Start Redis & RabbitMQ only
-docker compose -f docker-compose.dev.yaml up -d
-
-# Check status
-docker compose -f docker-compose.dev.yaml ps
-
-# View logs
-docker compose -f docker-compose.dev.yaml logs -f
-
-# Stop services
-docker compose -f docker-compose.dev.yaml down
-```
-
-**Services provided:**
-- **redis** (port 6379) — Result backend and caching
-- **rabbitmq** (ports 5672, 15672) — Message broker with management UI
-
-Data is persisted in named Docker volumes:
-- `devicevault-dev-redis-data`
-- `devicevault-dev-rabbitmq-data`
-
-### Fully Containerized Development (Production-Like E2E)
-
-For end-to-end testing with all components containerized (while still running Django via `runserver` and frontend via Vite), use:
-
-```bash
-./devicevault-docker-dev.sh start
-```
-
-This stack includes:
-- PostgreSQL (`localhost:5432`)
-- Redis (`localhost:6379`)
-- RabbitMQ + management UI (`localhost:5672`, `http://localhost:15672`)
-- Orchestrator container (Django API + consumers + Celery Beat) (`http://localhost:8000`)
-- Two collector worker containers
-- One storage worker container
-- Flower monitoring (`http://localhost:5555`)
-- Frontend Vite dev server (`http://localhost:9000`)
-
-On startup, the orchestrator seeds a default first admin user if missing:
-- Username: `admin`
-- Password: `admin`
-
-For this containerized dev stack, backend CORS is explicitly configured to allow frontend origins:
-- `http://localhost:9000`
-- `http://127.0.0.1:9000`
-
-The `./devicevault-docker-dev.sh start` command performs a CORS preflight check (`OPTIONS`) from `http://localhost:9000` to `http://localhost:8000/api/` and fails startup if CORS is not correctly exposed.
-
-Other commands:
-
-```bash
-./devicevault-docker-dev.sh status
-./devicevault-docker-dev.sh logs
-./devicevault-docker-dev.sh logs -f
-./devicevault-docker-dev.sh logs -f orchestrator
-./devicevault-docker-dev.sh logs orchestrator
-./devicevault-docker-dev.sh reset
-./devicevault-docker-dev.sh stop
-```
-
-Persistent bind-mounted development data lives under `var/docker-dev/` (config, logs, database files, broker data, and storage data).
-The `reset` command asks for confirmation (`Type YES to continue`) and then removes containers, networks, and persisted runtime data under `var/docker-dev/` (while keeping the generated backend config file so custom config changes are retained).
-
-### Running Individual Services Manually
-
-For development or debugging, start individual services:
-
-```bash
-# Activate virtual environment (required for all commands)
-source .venv/bin/activate
-cd backend
-
-# Start Django development server only
-python manage.py runserver 0.0.0.0:8000
-
-# Start Backup Worker (in separate terminal)
-celery -A celery_app worker \
-  -Q default,collector.group.dmz_zone_queue,collector.group.secure_zone_queue \
-  -l info --concurrency=1
-
-# Start Storage Worker (in separate terminal)
-celery -A celery_app worker \
-  -Q storage.fs,storage.git \
-  -l info --concurrency=1 \
-  -n storage-worker@%h
-
-# Start Backup Consumer (in separate terminal)
-python manage.py consume_device_results
-
-# Start Storage Consumer (in separate terminal)
-python manage.py consume_storage_results
-
-# Start Flower monitoring (in separate terminal)
-celery -A celery_app flower --broker-api=http://guest:guest@localhost:15672/api/ --port=5555
-```
-
-Convenience scripts are also provided in the repository root:
-- `start-backup-worker.sh` — Quick start for backup worker
-- `start-storage-worker.sh` — Quick start for storage worker
-- `start-flower.sh` — Quick start for Flower monitoring
-
-## Accessing the Application
-
-- **Frontend**: http://localhost:9000
-- **Backend API**: http://localhost:8000/api/
-- **Django Admin**: http://localhost:8000/admin/
-- **Flower Monitoring**: http://localhost:5555 (Celery task monitor)
-- **RabbitMQ Management**: http://localhost:15672 (Message broker UI, credentials: guest/guest)
-
-**Default Credentials:**
-- Username: `admin`
-- Password: `admin`
-
-## Configuration
-
-### Backend Configuration File
-
-The backend reads configuration from `backend/config/config.yaml`. This file controls:
-
-```yaml
-# Database engine: sqlite, postgres, or mysql
-database:
-  engine: sqlite
-  name: devicevault.sqlite3      # SQLite file path
-  # For postgres/mysql, also configure:
-  # user: dbuser
-  # password: dbpass
-  # host: localhost
-  # port: 5432
-
-# Application timezone (for display; database stores UTC)
-# Valid values: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-timezone: Australia/Sydney
-
-# Local admin user seed
-local_admin:
-  username: admin
-  encrypted_password: ''
-
-# Authentication settings
-auth:
-  type: Local                     # Options: Local, LDAP, SAML, EntraID
-  local_enabled: true
-```
-
-### Environment Variables
-
-Key environment variables for configuration (override config.yaml settings):
-
-```bash
-# Django settings
-export DEVICEVAULT_CONFIG=backend/config/config.yaml
-export DEVICEVAULT_SECRET_KEY=your-secret-key
-
-# Database (overrides config.yaml)
-export DEVICEVAULT_DB_ENGINE=postgres
-export DEVICEVAULT_DB_NAME=devicevault
-export DEVICEVAULT_DB_USER=dbuser
-export DEVICEVAULT_DB_PASSWORD=dbpass
-export DEVICEVAULT_DB_HOST=localhost
-export DEVICEVAULT_DB_PORT=5432
-
-# Celery / Message Broker (RabbitMQ)
-export DEVICEVAULT_BROKER_URL=amqp://guest:guest@localhost:5672//
-
-# Redis (for locks and result streams)
-export DEVICEVAULT_REDIS_URL=redis://localhost:6379/1
-
-# Celery result backend
-export DEVICEVAULT_RESULT_BACKEND=redis://localhost:6379/1
-
-# RabbitMQ management API (for Flower monitoring)
-export DEVICEVAULT_BROKER_API=http://guest:guest@localhost:15672/api/
-
-# Result stream names (Redis Streams for worker-to-django communication)
-export DEVICEVAULT_RESULTS_STREAM=device:results
-export DEVICEVAULT_STORAGE_RESULTS_STREAM=storage:results
-
-# Logging
-export DEVICEVAULT_LOG_LEVEL=INFO
-```
-
-### Required Services for Full Operation
-
-DeviceVault requires the following services when running with Celery workers:
-
-1. **RabbitMQ** (or Redis) — Message broker for Celery tasks
-   - Default: `amqp://guest:guest@localhost:5672//`
-   - Management UI: `http://localhost:15672` (default credentials: guest/guest)
-   - **Automatically started** by `devicevault.sh` via Docker Compose
-
-2. **Redis** — Distributed locking and result streams
-   - Default: `redis://localhost:6379`
-   - Database 1 is used by default for results
-   - **Automatically started** by `devicevault.sh` via Docker Compose
-
-3. **Database** — SQLite (default), PostgreSQL, or MySQL
-   - Default: `devicevault.sqlite3` in backend directory
-
-**Recommended Setup**: Use `./devicevault.sh start` which automatically manages Redis and RabbitMQ via Docker containers defined in `docker-build/docker-compose.dev.yaml`.
-
-**Alternative Setup** (without Docker): Install and run Redis and RabbitMQ natively:
-
-```bash
-# Install on Debian/Ubuntu
-sudo apt install redis-server rabbitmq-server -y
-
-# Enable and start services
-sudo systemctl enable redis-server rabbitmq-server
-sudo systemctl start redis-server rabbitmq-server
-
-# Enable RabbitMQ management plugin
-sudo rabbitmq-plugins enable rabbitmq_management
-```
-
-## Admin Pages
-
-1. **Dashboard** - Statistics, charts, and recent activity
-2. **Devices** - Device management with filtering
-3. **Device Types** - Manage device type categories
-4. **Backup Methods** - View available backup method plugins
-5. **Credentials** - Credential storage and management
-6. **Backup Locations** - Configure storage backends
-7. **Retention Policies** - Define backup retention rules
-
-### Backup Location Configuration
-
-Backup locations are configured via the **Backup Locations** admin page or the API. Each location has a `location_type` and a JSON `config` field with type-specific settings.
-
-**Git storage**:
-```json
-{
-  "repo_path": "/var/backups/devicevault-repo",
-  "branch": "main"
-}
-```
-
-**Filesystem storage**:
-```json
-{
-  "path": "/var/backups/devicevault",
-  "compress": true
-}
-```
-
-The `compress` option (also accepted as `gzip`) enables gzip compression for text backups stored on the filesystem. Compressed files are transparently decompressed on retrieval. Binary backups are never compressed. See [Storage Pipeline](docs/STORAGE_PIPELINE.md) for full details.
-
-## Docker-Based Setup
-
-DeviceVault provides two Docker Compose configurations:
-
-### Development (Recommended for Local Development)
-
-**File**: `docker-build/docker-compose.dev.yaml`
-
-Provides only backing services (Redis & RabbitMQ) while Django, frontend, and workers run natively for easier debugging:
-
-```bash
-# Integrated with devicevault.sh (recommended)
-./devicevault.sh start    # Automatically starts Docker services + native services
-./devicevault.sh status   # Shows status of all services including Docker
-./devicevault.sh logs docker  # View Docker service logs
-
-# Or manual Docker management
-cd docker-build
-docker compose -f docker-compose.dev.yaml up -d    # Start Redis & RabbitMQ
-docker compose -f docker-compose.dev.yaml ps       # Check status
-docker compose -f docker-compose.dev.yaml logs -f  # View logs
-docker compose -f docker-compose.dev.yaml down     # Stop services
-```
-
-**Services**: Redis (6379), RabbitMQ (5672, 15672)  
-**Volumes**: `devicevault-dev-redis-data`, `devicevault-dev-rabbitmq-data`
-
-See [docs/DEVELOPMENT_DOCKER_INTEGRATION.md](docs/DEVELOPMENT_DOCKER_INTEGRATION.md) for detailed documentation.
-
-### Production (Full Stack Deployment)
-
-**File**: `docker-build/docker-compose.yaml`
-
-For one-host containerized stack testing from a source checkout:
-
-```bash
-cd docker-build
-
-# Build all images
-make build
-
-# Start all services (nginx, django, postgres, redis, flower)
-make up
-
-# Stop all services
-make down
-
-# Restart services
-make restart
-
-# View logs
-make logs
-
-# Celery-specific
-make logs-celery
-make logs-django
-
-# Run Django management commands in container
-make migrate
-make makemigrations
-make shell
-```
-
-Available Makefile targets:
-```
-build              - Build all Docker images
-up                 - Start all services
-down               - Stop all services
-restart            - Restart all services
-scale-celery       - Scale Celery workers (usage: make scale-celery n=5)
-migrate            - Run Django migrations
-makemigrations     - Create new migrations
-shell              - Open Django shell
-build-frontend     - Build frontend for production
-watch-frontend     - Watch and rebuild frontend on changes
-logs               - View logs (all services)
-logs-celery        - View Celery worker logs
-logs-django        - View Django logs
-clean-volumes      - Remove volumes (full reset)
-prune              - Remove unused Docker resources
-clean-build        - Clean Docker build cache
-```
-
-### Docker Services (Containerized Full Stack)
-
-The `docker-build/docker-compose.yaml` includes:
-
-- **nginx** — Reverse proxy and static file server
-- **django** — Django application server
-- **postgres** — PostgreSQL database (default for Docker)
-- **redis** — Redis for caching and result storage
-- **flower** — Celery task monitoring UI (optional, commented out by default)
-
-For the role-based production workflow, use the dedicated scripts and docs instead:
-
-- [docs/PRODUCTION_README.md](docs/PRODUCTION_README.md)
-- [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
-- [docs/PRODUCTION_OPERATIONS_RUNBOOK.md](docs/PRODUCTION_OPERATIONS_RUNBOOK.md)
-
-### Comparison
-
-| Aspect | Development | Production |
-|--------|------------|------------|
-| **File** | `docker-compose.dev.yaml` | `docker-compose.yaml` |
-| **Services** | Redis, RabbitMQ only | Full stack (nginx, django, postgres, redis) |
-| **Django/Frontend** | Native (easier debugging) | Containerized |
-| **Database** | SQLite (native) | PostgreSQL (container) |
-| **Management** | `devicevault.sh` script | `docker compose` or `Makefile` |
-| **Use Case** | Local development | Production deployment |
-
-See [docs/COMPOSE_COMPARISON.md](docs/COMPOSE_COMPARISON.md) for a detailed comparison.
-
-## Troubleshooting
-
-### View Logs
-
-```bash
-# View all logs
-./devicevault.sh logs
-
-# View specific service logs
-./devicevault.sh logs backend
-./devicevault.sh logs frontend
-./devicevault.sh logs backup-worker
-./devicevault.sh logs storage-worker
-
-# Follow logs in real-time (Docker)
-cd docker-build && make logs
-```
-
-### Restart Services
-
-```bash
-# Using management script
-./devicevault.sh restart
-
-# Or individually stop and start
-./devicevault.sh stop
-./devicevault.sh start
-
-# Using Docker
-cd docker-build && make restart
-```
-
-### Database Issues
-
-```bash
-# Run migrations (local development)
-cd backend
-source ../.venv/bin/activate
-python manage.py migrate --run-syncdb
-
-# Run migrations (Docker)
-cd docker-build && make migrate
-```
-
-### Worker Connection Issues
-
-If workers are not processing tasks:
-
-1. **Check Docker services are running**:
-   ```bash
-   # Via devicevault.sh
-   ./devicevault.sh status
-   
-   # Or directly
-   cd docker-build
-   docker compose -f docker-compose.dev.yaml ps
-   ```
-
-2. **Check RabbitMQ/Redis connectivity**:
-   ```bash
-   # Test RabbitMQ (in Docker)
-   docker exec devicevault-dev-rabbitmq rabbitmq-diagnostics ping
-   
-   # Test Redis (in Docker)
-   docker exec devicevault-dev-redis redis-cli ping
-   
-   # Or if running natively
-   rabbitmq-diagnostics -q ping
-   redis-cli ping
-   ```
-
-3. **Check Redis streams** (worker-to-django communication):
-   ```bash
-   # View pending backup results
-   redis-cli -n 1 XREVRANGE device:results + - COUNT 10
-   
-   # View pending storage results
-   redis-cli -n 1 XREVRANGE storage:results + - COUNT 10
-   ```
-
-3. **Verify workers are running**:
-   ```bash
-   ./devicevault.sh status
-   ```
-
-### Celery / Flower Issues
-
-- **Flower not showing tasks**: Ensure `DEVICEVAULT_BROKER_API` points to RabbitMQ management API (port 15672, not 5672)
-- **Workers not receiving tasks**: Check queue names match device collection group configurations
-- **Tasks stuck in queue**: Check worker logs: `./devicevault.sh logs backup-worker`
-
-## Running in Production
-
-DeviceVault now has a dedicated production workflow:
-
-1. Build the reusable production images with [scripts/build-prod-images.sh](./scripts/build-prod-images.sh).
-2. Deploy one of the four production roles with the matching setup script.
-3. Keep infrastructure and secrets in `/etc/devicevault/<role>/.env`.
-4. Keep application/domain configuration in `/etc/devicevault/<role>/config.yaml`.
-5. Run installed compose assets from `/opt/devicevault/deploy/<role>/`.
-
-Start here:
-
-- [docs/PRODUCTION_README.md](docs/PRODUCTION_README.md)
-- [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md)
-- [docs/PRODUCTION_CONFIG_EXAMPLES.md](docs/PRODUCTION_CONFIG_EXAMPLES.md)
+GNU General Public License v3.0 or later. See [LICENSE.md](LICENSE.md).

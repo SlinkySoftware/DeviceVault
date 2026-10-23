@@ -16,10 +16,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* Theme colours; the theme store overrides these from the API at startup. */
+:root {
+  --theme-title-bar: #1976d2;
+  --theme-dashboard-box: #1976d2;
+  --theme-dashboard-nested-box: #2196f3;
 }
 
 body {

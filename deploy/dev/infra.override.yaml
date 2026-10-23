@@ -1,0 +1,22 @@
+# Development overrides for deploy/infra/compose.yaml: fixed throwaway
+# credentials instead of infra.env, and PostgreSQL always enabled.
+
+services:
+  rabbitmq:
+    env_file: !reset []
+    environment:
+      RABBITMQ_DEFAULT_USER: devicevault
+      RABBITMQ_DEFAULT_PASS: devicevault
+
+  redis:
+    env_file: !reset []
+    environment:
+      REDIS_PASSWORD: devicevault
+
+  postgres:
+    profiles: !reset []
+    env_file: !reset []
+    environment:
+      POSTGRES_DB: devicevault
+      POSTGRES_USER: devicevault
+      POSTGRES_PASSWORD: devicevault
