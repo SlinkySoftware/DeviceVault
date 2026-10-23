@@ -27,8 +27,9 @@ from rest_framework import serializers
 from api.permissions import is_admin
 from audit.models import AuditLog
 from backups.models import Backup
-from core.models import WorkerRegistration
+from core.models import Worker
 from core.theme_settings import ThemeSettings
+from core.workers import driver_catalogue, is_online
 from credentials.models import Credential, CredentialType
 from devices.models import (
     CollectionGroup,
@@ -42,8 +43,17 @@ from devices.models import (
     Manufacturer,
     UserDeviceGroupRole,
 )
+from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
 from locations.models import BackupLocation
 from policies.models import BackupSchedule, RetentionPolicy
+
+
+def drivers(context: dict) -> dict:
+    """Collector driver catalogue, computed once per request (the context is shared by list items)."""
+    if 'drivers' not in context:
+        context['drivers'] = driver_catalogue()
+    return context['drivers']
+
 
 # ===== Model Serializers (Standard CRUD) =====
 
@@ -79,11 +89,25 @@ class CollectionGroupSerializer(serializers.ModelSerializer):
     """
 
     device_count = serializers.SerializerMethodField()
+    collector_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectionGroup
-        fields = ['id', 'name', 'description', 'rabbitmq_queue_id', 'device_count', 'created_at', 'updated_at']
+        fields = [
+            'id',
+            'name',
+            'description',
+            'rabbitmq_queue_id',
+            'device_count',
+            'collector_count',
+            'created_at',
+            'updated_at',
+        ]
         read_only_fields = ['created_at', 'updated_at']
+
+    def get_collector_count(self, obj):
+        """Approved collectors consuming this group's queue."""
+        return obj.workers.filter(status=STATUS_APPROVED, role=ROLE_COLLECTOR).count()
 
     def get_device_count(self, obj):
         """Return count of devices assigned to this collection group"""
@@ -205,11 +229,8 @@ class DeviceSerializer(serializers.ModelSerializer):
         return list(user_get_device_group_django_permissions(request.user, obj.device_group))
 
     def get_backup_method_display(self, obj):
-        """Get friendly name of backup method plugin"""
-        from devicevault_worker.plugins import get_plugin
-
-        plugin = get_plugin(obj.backup_method)
-        return plugin.friendly_name if plugin else obj.backup_method
+        driver = drivers(self.context).get(obj.backup_method)
+        return driver['name'] if driver else obj.backup_method
 
     def get_last_backup_time(self, obj):
         return getattr(obj, 'last_success_time', None) or obj.last_backup_time
@@ -267,15 +288,9 @@ class DeviceBackupResultWithStorageSerializer(serializers.ModelSerializer):
         return 'success'
 
     def get_is_text(self, obj):
-        """Determine if backup is text or binary by checking device's backup method plugin."""
-        from devicevault_worker.plugins import get_plugin
-
-        if not obj.device or not obj.device.backup_method:
-            return True  # Default to text if no method specified
-        plugin = get_plugin(obj.device.backup_method)
-        if not plugin:
-            return True  # Default to text if plugin not found
-        return not plugin.is_binary
+        """Text unless the device's backup method is a binary driver (unknown drivers count as text)."""
+        driver = drivers(self.context).get(obj.device.backup_method) if obj.device else None
+        return not (driver and driver['is_binary'])
 
     def get_is_encrypted(self, obj):
         """Return True if the stored backup is encrypted."""
@@ -710,11 +725,8 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         return list(user_get_device_group_django_permissions(request.user, obj.device_group))
 
     def get_backup_method_display(self, obj):
-        """Get friendly name of backup method plugin"""
-        from devicevault_worker.plugins import get_plugin
-
-        plugin = get_plugin(obj.backup_method)
-        return plugin.friendly_name if plugin else obj.backup_method
+        driver = drivers(self.context).get(obj.backup_method)
+        return driver['name'] if driver else obj.backup_method
 
     def get_last_backup_time(self, obj):
         return getattr(obj, 'last_success_time', None) or obj.last_backup_time
@@ -750,10 +762,11 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
         extra_kwargs = {'device_group': {'required': True, 'allow_null': False}}
 
     def validate_backup_method(self, value):
-        from devicevault_worker.plugins import get_plugin
-
-        if not get_plugin(value):
-            raise serializers.ValidationError(f'Unknown backup method "{value}"')
+        # An unchanged method stays valid even while no collector offers it.
+        if self.instance is not None and value == self.instance.backup_method:
+            return value
+        if value not in drivers(self.context):
+            raise serializers.ValidationError(f'No approved collector offers the backup method "{value}"')
         return value
 
     def to_representation(self, instance):
@@ -769,23 +782,78 @@ class ThemeSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'updated_at']
 
 
-class WorkerRegistrationSerializer(serializers.ModelSerializer):
-    """Serializes worker registration and liveliness metadata for dashboard views."""
+class WorkerSerializer(serializers.ModelSerializer):
+    """A registered worker, with its assignment and liveness."""
+
+    is_online = serializers.SerializerMethodField()
+    in_sync = serializers.SerializerMethodField()
+    assigned_queues = serializers.SerializerMethodField()
+    pinned_orchestrator_matches = serializers.SerializerMethodField()
+    approved_by_username = serializers.CharField(source='approved_by.username', read_only=True, default=None)
 
     class Meta:
-        model = WorkerRegistration
+        model = Worker
         fields = [
-            'worker_id',
-            'worker_name',
-            'worker_type',
+            'id',
+            'name',
+            'celery_hostname',
             'hostname',
             'pid',
-            'queues',
-            'details',
+            'version',
+            'status',
+            'role',
+            'collection_groups',
+            'storage_backends',
+            'fingerprint',
+            'capabilities',
+            'desired_version',
+            'applied_version',
+            'applied_queues',
+            'assigned_queues',
+            'in_sync',
+            'pinned_orchestrator_matches',
+            'registered_at',
+            'approved_at',
+            'approved_by_username',
             'last_seen_at',
-            'last_heartbeat_at',
-            'last_ping_at',
-            'last_pong_at',
-            'last_probe_id',
-            'updated_at',
+            'is_online',
         ]
+        read_only_fields = [f for f in fields if f not in ('name', 'role', 'collection_groups', 'storage_backends')]
+
+    def get_is_online(self, obj):
+        return is_online(obj)
+
+    def get_in_sync(self, obj):
+        return obj.applied_version == obj.desired_version
+
+    def get_assigned_queues(self, obj):
+        return obj.assigned_queues()
+
+    def get_pinned_orchestrator_matches(self, obj):
+        from core.signing import public_key
+
+        return obj.pinned_orchestrator_key == public_key() if obj.pinned_orchestrator_key else None
+
+    def validate(self, attrs):
+        role = attrs.get('role', getattr(self.instance, 'role', ''))
+        capabilities = getattr(self.instance, 'capabilities', {}) or {}
+        if role == ROLE_COLLECTOR and not capabilities.get('collector_drivers'):
+            raise serializers.ValidationError({'role': 'This worker offers no collector drivers.'})
+        if role == ROLE_STORAGE:
+            offered = set(capabilities.get('storage_backends') or [])
+            backends = set(attrs.get('storage_backends', getattr(self.instance, 'storage_backends', [])))
+            if not backends:
+                raise serializers.ValidationError({'storage_backends': 'Choose at least one storage backend.'})
+            if backends - offered:
+                raise serializers.ValidationError(
+                    {'storage_backends': f'Not offered by this worker: {", ".join(sorted(backends - offered))}'}
+                )
+        return attrs
+
+
+class WorkerApprovalSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=ROLES)
+    collection_groups = serializers.PrimaryKeyRelatedField(
+        queryset=CollectionGroup.objects.all(), many=True, required=False
+    )
+    storage_backends = serializers.ListField(child=serializers.CharField(), required=False)

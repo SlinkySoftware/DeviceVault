@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 # New plugin contract:
@@ -82,7 +82,7 @@ class BackupPlugin:
             return {
                 'task_id': None,
                 'status': 'failure',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(UTC).isoformat(),
                 'log': [f'plugin_exception: {repr(exc)}'],
                 'device_config': None,
             }
@@ -93,7 +93,7 @@ class BackupPlugin:
             return {
                 'task_id': result.get('task_id'),
                 'status': result.get('status', 'failure'),
-                'timestamp': result.get('timestamp') or (datetime.utcnow().isoformat() + 'Z'),
+                'timestamp': result.get('timestamp') or (datetime.now(UTC).isoformat()),
                 'log': result.get('log') or [],
                 'device_config': result.get('device_config'),
             }
@@ -102,7 +102,7 @@ class BackupPlugin:
             return {
                 'task_id': None,
                 'status': 'success',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(UTC).isoformat(),
                 'log': ['plugin_returned_raw_string'],
                 'device_config': result,
             }

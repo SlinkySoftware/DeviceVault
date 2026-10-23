@@ -57,7 +57,7 @@ def test_reference_data_is_readable_but_not_writable_by_users(user, path):
         '/api/device-group-permissions/',
         '/api/user-device-group-roles/',
         '/api/group-device-group-roles/',
-        '/api/worker-registry/',
+        '/api/workers/',
     ],
 )
 def test_administration_endpoints_are_admin_only(user, admin, path):

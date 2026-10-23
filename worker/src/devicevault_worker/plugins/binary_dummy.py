@@ -21,7 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import base64
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from .base import BackupPlugin
@@ -55,7 +55,7 @@ def _generate_binary_backup(config: dict[str, Any], timeout: int | None = None) 
             return {
                 'task_id': None,
                 'status': 'failure',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(UTC).isoformat(),
                 'log': ['missing ip_address in config'],
                 'device_config': None,
             }
@@ -74,7 +74,7 @@ def _generate_binary_backup(config: dict[str, Any], timeout: int | None = None) 
         return {
             'task_id': None,
             'status': 'success',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [
                 f'Connected to device at {ip_address}',
                 f'Downloaded binary firmware: {len(fake_firmware)} bytes',
@@ -87,7 +87,7 @@ def _generate_binary_backup(config: dict[str, Any], timeout: int | None = None) 
         return {
             'task_id': None,
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [f'binary_backup_failed: {repr(exc)}'],
             'device_config': None,
         }

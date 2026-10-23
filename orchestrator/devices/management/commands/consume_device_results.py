@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from redis import Redis
 
+from core.signing import sign_task
 from devices.models import Device, DeviceBackupResult
 from devicevault.celery import app as celery_app
 from devicevault_protocol.names import (
@@ -206,7 +207,7 @@ class Command(BaseCommand):
         try:
             celery_app.send_task(
                 STORE_TASK,
-                args=[payload],
+                args=[sign_task(payload)],
                 queue=queue,
                 routing_key=queue,
             )

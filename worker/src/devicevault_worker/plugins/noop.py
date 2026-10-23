@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from .base import BackupPlugin
@@ -28,7 +28,7 @@ def _noop_export(config: dict[str, Any], timeout: int | None = None) -> dict[str
     return {
         'task_id': None,
         'status': 'success',
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(UTC).isoformat(),
         'log': ['noop_plugin_executed'],
         'device_config': '',
     }

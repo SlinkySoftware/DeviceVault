@@ -25,7 +25,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group, Permission, User
 from django.db.models import Avg, Count, OuterRef, Subquery
 from django.utils import timezone
-from rest_framework import decorators, response, status, viewsets
+from rest_framework import decorators, mixins, response, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -34,7 +34,9 @@ from rest_framework.views import APIView
 from api.permissions import IsAdmin, IsAdminOrReadOnly
 from audit.models import AuditLog
 from backups.models import Backup, StoredBackup
-from core.models import DashboardLayout, WorkerRegistration
+from core import workers as worker_registry
+from core.models import DashboardLayout, Worker
+from core.workers import driver_catalogue
 from credentials.models import Credential, CredentialType
 from devices.dispatch import DispatchError, dispatch_collection
 from devices.models import (
@@ -49,6 +51,7 @@ from devices.models import (
     UserDeviceGroupRole,
 )
 from devices.permissions import user_has_device_group_permission
+from devicevault_protocol.registration import STATUS_APPROVED
 from locations.models import BackupLocation
 from policies.models import BackupSchedule, RetentionPolicy
 
@@ -78,7 +81,8 @@ from .serializers import (
     UserProfileSerializer,
     UserSerializer,
     UserUpdateSerializer,
-    WorkerRegistrationSerializer,
+    WorkerApprovalSerializer,
+    WorkerSerializer,
 )
 
 
@@ -111,6 +115,12 @@ class CollectionGroupViewSet(viewsets.ModelViewSet):
     serializer_class = CollectionGroupSerializer
     permission_classes = [IsAdminOrReadOnly]
 
+    def perform_update(self, serializer):
+        old_queue = serializer.instance.rabbitmq_queue_id
+        group = serializer.save()
+        if group.rabbitmq_queue_id != old_queue:
+            worker_registry.bump_collection_group(group)
+
     def perform_destroy(self, instance):
         """Prevent deletion if any devices are assigned to this collection group"""
         if instance.device_count > 0:
@@ -122,23 +132,21 @@ class CollectionGroupViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class BackupMethodViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    Read-only ViewSet for listing available backup method plugins
-
-    Returns all plugins discovered under devicevault_worker.plugins with their
-    friendly_name, description, and is_binary flag.
-    """
+class BackupMethodViewSet(viewsets.ViewSet):
+    """Backup methods (collector drivers) offered by approved collectors."""
 
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
-        from devicevault_worker.plugins import list_plugins
-
-        plugins = list_plugins()
         data = [
-            {'key': p.key, 'friendly_name': p.friendly_name, 'description': p.description, 'is_binary': p.is_binary}
-            for p in plugins
+            {
+                'key': d['key'],
+                'friendly_name': d['name'],
+                'description': d['description'],
+                'is_binary': d['is_binary'],
+                'collectors': d['workers'],
+            }
+            for d in driver_catalogue().values()
         ]
         return response.Response(data, status=status.HTTP_200_OK)
 
@@ -355,14 +363,9 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
             from django.http import FileResponse
 
             from backups.storage_client import read_backup_via_worker
-            from devicevault_worker.plugins import get_plugin
 
-            # Check if backup is binary by looking up the device's backup method plugin
-            is_binary = False
-            if backup_result.device and backup_result.device.backup_method:
-                plugin = get_plugin(backup_result.device.backup_method)
-                if plugin:
-                    is_binary = plugin.is_binary
+            driver = driver_catalogue().get(backup_result.device.backup_method) if backup_result.device else None
+            is_binary = bool(driver and driver['is_binary'])
 
             result = read_backup_via_worker(
                 storage_backend=storage_record.storage_backend,
@@ -430,11 +433,9 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Normalize log entries: support both string (legacy) and structured formats
         normalized_logs = []
-        from devicevault_worker.plugins import get_plugin
-
         plugin_key = backup_result.device.backup_method if backup_result.device else 'unknown'
-        plugin = get_plugin(plugin_key) if plugin_key else None
-        source_default = plugin.friendly_name if plugin else plugin_key
+        driver = driver_catalogue().get(plugin_key)
+        source_default = driver['name'] if driver else plugin_key
 
         for entry in log_data:
             if isinstance(entry, dict):
@@ -507,8 +508,6 @@ class StoredBackupViewSet(viewsets.ReadOnlyModelViewSet):
 def recent_backup_activity(request):
     """Get recent backup activity for devices user has access to"""
     from datetime import timedelta
-
-    from django.utils import timezone
 
     from devices.permissions import user_get_accessible_device_groups
 
@@ -595,40 +594,77 @@ def timezone_config(request):
     return response.Response({'timezone': get_timezone_name()})
 
 
-class WorkerRegistryView(APIView):
-    """Return worker registration and liveliness data for the orchestrator dashboard."""
+class WorkerViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Registered workers: approve, assign, revoke and forget.
 
+    - PATCH: change name/role/assignment of an approved worker (pushes a new assignment)
+    - POST {id}/approve/: approve a pending (or revoked) worker with a role and assignment
+    - POST {id}/revoke/: stop the worker consuming anything
+    - DELETE: forget the worker (revoking it first); a live worker registers again as pending
+    - GET orchestrator/: this orchestrator's key fingerprint, to compare with what workers pinned
+    """
+
+    queryset = Worker.objects.prefetch_related('collection_groups').select_related('approved_by')
+    serializer_class = WorkerSerializer
     permission_classes = [IsAdmin]
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
-    def get(self, request):
-        online_timeout_sec = settings.DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC
-        pong_grace_sec = settings.DEVICEVAULT_WORKER_PONG_GRACE_SEC
-        now = timezone.now()
-        online_cutoff = now - timedelta(seconds=online_timeout_sec)
-        pong_cutoff = now - timedelta(seconds=pong_grace_sec)
+    def perform_update(self, serializer):
+        groups = serializer.validated_data.pop('collection_groups', None)
+        changes = dict(serializer.validated_data)
+        if groups is not None:
+            changes['collection_groups'] = groups
+        worker_registry.update_assignment(serializer.instance, **changes)
 
-        workers = WorkerRegistration.objects.all()
-        payload = []
+    def perform_destroy(self, instance):
+        if instance.status == STATUS_APPROVED:
+            worker_registry.revoke(instance)
+        instance.delete()
 
-        for worker in workers:
-            is_recently_seen = bool(worker.last_seen_at and worker.last_seen_at >= online_cutoff)
-            pong_expected = bool(worker.last_ping_at and worker.last_ping_at <= pong_cutoff)
-            pong_received = bool(
-                worker.last_pong_at and worker.last_ping_at and worker.last_pong_at >= worker.last_ping_at
-            )
-            is_online = is_recently_seen and (not pong_expected or pong_received)
+    @decorators.action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        worker = self.get_object()
+        approval = WorkerApprovalSerializer(data=request.data)
+        approval.is_valid(raise_exception=True)
+        data = approval.validated_data
+        # Reuse the worker serializer's capability checks.
+        check = WorkerSerializer(
+            worker,
+            data={
+                'role': data['role'],
+                'storage_backends': data.get('storage_backends', []),
+            },
+            partial=True,
+        )
+        check.is_valid(raise_exception=True)
+        worker_registry.approve(
+            worker,
+            role=data['role'],
+            user=request.user,
+            collection_groups=data.get('collection_groups', []),
+            storage_backends=data.get('storage_backends', []),
+        )
+        return response.Response(WorkerSerializer(worker, context=self.get_serializer_context()).data)
 
-            worker_data = WorkerRegistrationSerializer(worker).data
-            worker_data['is_online'] = is_online
-            worker_data['status'] = 'online' if is_online else 'offline'
-            payload.append(worker_data)
+    @decorators.action(detail=True, methods=['post'])
+    def revoke(self, request, pk=None):
+        worker = worker_registry.revoke(self.get_object())
+        return response.Response(WorkerSerializer(worker, context=self.get_serializer_context()).data)
+
+    @decorators.action(detail=False, methods=['get'])
+    def orchestrator(self, request):
+        from core.signing import fingerprint
 
         return response.Response(
             {
-                'workers': payload,
-                'online_timeout_seconds': online_timeout_sec,
-                'pong_grace_seconds': pong_grace_sec,
-                'generated_at': now.isoformat(),
+                'fingerprint': fingerprint(),
+                'online_timeout_seconds': settings.DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC,
             }
         )
 

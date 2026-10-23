@@ -40,7 +40,7 @@ def _discover_plugins() -> dict[str, BackupPlugin]:
 
     discovered: dict[str, BackupPlugin] = {}
     for module_info in pkgutil.iter_modules(__path__):
-        if module_info.name.startswith('_'):
+        if module_info.name.startswith('_') or module_info.name == 'base':
             continue
         module_fqn = f'{__name__}.{module_info.name}'
         try:

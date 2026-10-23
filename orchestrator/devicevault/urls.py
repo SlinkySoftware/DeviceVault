@@ -44,6 +44,7 @@ router.register(r'user-device-group-roles', views.UserDeviceGroupRoleViewSet)
 router.register(r'group-device-group-roles', views.GroupDeviceGroupRoleViewSet)
 router.register(r'users', views.UserViewSet, basename='users')
 router.register(r'audit-logs', views.AuditLogViewSet)
+router.register(r'workers', views.WorkerViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -52,7 +53,6 @@ urlpatterns = [
     path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', views.dashboard_stats),
     path('api/recent-backup-activity/', views.recent_backup_activity),
-    path('api/worker-registry/', views.WorkerRegistryView.as_view()),
     path('api/timezone/', views.timezone_config),
     path('api/auth/config/', views.AuthConfigView.as_view()),
     path('api/backups/compare/', views.compare_backups),

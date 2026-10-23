@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from core.signing import sign_task
 from devicevault.celery import app as celery_app
 from devicevault_protocol.names import READ_TASK, storage_backend_for, storage_queue_name
 
@@ -34,15 +35,18 @@ def read_backup_via_worker(
         Dict with 'content' (str or base64-encoded for binary) and metadata.
     """
     queue = storage_queue_name(storage_backend_for(storage_backend) or storage_backend)
-    task = celery_app.send_task(
-        READ_TASK,
-        kwargs={
+    envelope = sign_task(
+        {
             'storage_backend': storage_backend,
             'storage_ref': storage_ref,
             'storage_config': storage_config,
             'task_identifier': task_identifier,
             'is_binary': is_binary,
-        },
+        }
+    )
+    task = celery_app.send_task(
+        READ_TASK,
+        args=[envelope],
         queue=queue,
         routing_key=queue,
     )

@@ -6,7 +6,7 @@ These tasks are intentionally standalone and avoid Django imports.
 import json
 import re
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 from celery.exceptions import SoftTimeLimitExceeded
 
@@ -14,6 +14,7 @@ from devicevault_protocol.names import READ_TASK, STORE_RESULTS_STREAM, STORE_TA
 from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.storage import fs as fs_storage
 from devicevault_worker.storage import git as git_storage
+from devicevault_worker.trust import SignatureError, verified_payload
 
 logger = get_logger('devicevault.storage.worker')
 
@@ -76,7 +77,7 @@ def _get_crypto_storage():
 
 
 def _iso_now() -> str:
-    return datetime.utcnow().isoformat() + 'Z'
+    return datetime.now(UTC).isoformat()
 
 
 def _sanitize_rel_path(device_id: int | None, task_identifier: str) -> str:
@@ -118,10 +119,10 @@ def _publish_result(result: dict) -> None:
     retry_backoff=True,
     retry_kwargs={'max_retries': 3},
 )
-def storage_store_task(self, payload: dict) -> dict:
+def storage_store_task(self, envelope: dict) -> dict:
     """Store backup content using the configured storage backend.
 
-    Expected payload keys:
+    ``envelope`` is orchestrator-signed; its payload keys:
         - storage_backend: git | fs
         - storage_config: dict
         - device_config: str (raw backup content)
@@ -131,11 +132,11 @@ def storage_store_task(self, payload: dict) -> dict:
     """
     log_lines: list[str] = []
 
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except Exception:
-            payload = {}
+    try:
+        payload = verified_payload(envelope)
+    except SignatureError as exc:
+        logger.error('task_rejected', extra={'task': STORE_TASK, 'reason': str(exc)})
+        return {'status': 'failure', 'operation': 'store', 'log': [f'task_rejected: {exc}']}
 
     requested_backend = payload.get('storage_backend')
     storage_backend = storage_backend_for(requested_backend) or requested_backend
@@ -341,15 +342,23 @@ def storage_store_task(self, payload: dict) -> dict:
     retry_backoff=True,
     retry_kwargs={'max_retries': 2},
 )
-def storage_read_task(
-    self,
-    storage_backend: str,
-    storage_ref: str,
-    storage_config: dict,
-    task_identifier: str | None = None,
-    is_binary: bool = False,
-) -> dict:
-    """Retrieve backup content synchronously via the storage backend."""
+def storage_read_task(self, envelope: dict) -> dict:
+    """Retrieve backup content synchronously via the storage backend.
+
+    ``envelope`` is orchestrator-signed; its payload keys: storage_backend,
+    storage_ref, storage_config, task_identifier (optional), is_binary.
+    """
+    try:
+        payload = verified_payload(envelope)
+    except SignatureError as exc:
+        logger.error('task_rejected', extra={'task': READ_TASK, 'reason': str(exc)})
+        return {'status': 'failure', 'operation': 'read', 'content': None, 'log': [f'task_rejected: {exc}']}
+
+    storage_backend = payload.get('storage_backend', '')
+    storage_ref = payload.get('storage_ref', '')
+    storage_config = payload.get('storage_config') or {}
+    task_identifier = payload.get('task_identifier')
+    is_binary = bool(payload.get('is_binary', False))
     log_lines: list[str] = []
     tid = getattr(getattr(self, 'request', None), 'id', None)
     task_identifier = task_identifier or f'read:{storage_ref}'

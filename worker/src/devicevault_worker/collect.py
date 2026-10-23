@@ -18,13 +18,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 from celery.exceptions import SoftTimeLimitExceeded
 
 from devicevault_protocol.names import COLLECT_RESULTS_STREAM, COLLECT_TASK, device_lock_key
 from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.plugins import get_plugin
+from devicevault_worker.trust import SignatureError, verified_payload
 
 logger = get_logger('devicevault.worker')
 
@@ -39,11 +40,11 @@ logger = get_logger('devicevault.worker')
     retry_backoff=True,
     retry_kwargs={'max_retries': 3},
 )
-def device_collect_task(self, config_json: str) -> dict:
+def device_collect_task(self, envelope: dict) -> dict:
     """Collect device configuration using the configured backup plugin.
 
     Args:
-        config_json: JSON string of a dict containing at minimum:
+        envelope: orchestrator-signed envelope whose payload contains at minimum:
             - device_id: optional device PK (integer)
             - task_identifier: logical identifier for this job
             - ip: device IP
@@ -55,19 +56,19 @@ def device_collect_task(self, config_json: str) -> dict:
         dict matching collector result schema. This function also persists a DeviceBackupResult row.
     """
     try:
-        cfg = json.loads(config_json)
-    except Exception as exc:
-        logger.exception('invalid_config_json')
+        cfg = verified_payload(envelope)
+    except SignatureError as exc:
+        logger.error('task_rejected', extra={'task': COLLECT_TASK, 'reason': str(exc)})
         return {
             'task_id': None,
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'log': [f'invalid_config_json: {repr(exc)}'],
+            'timestamp': datetime.now(UTC).isoformat(),
+            'log': [f'task_rejected: {exc}'],
             'device_config': None,
         }
 
     device_id = cfg.get('device_id')
-    task_identifier = cfg.get('task_identifier') or f'collect:{device_id}:{datetime.utcnow().isoformat()}'
+    task_identifier = cfg.get('task_identifier') or f'collect:{device_id}:{datetime.now(UTC).isoformat()}'
     timeout = cfg.get('timeout', 240)
 
     lock_key = device_lock_key(device_id) if device_id else None
@@ -88,7 +89,7 @@ def device_collect_task(self, config_json: str) -> dict:
         return {
             'task_id': self.request.id if hasattr(self, 'request') else None,
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [msg],
             'device_config': None,
         }
@@ -128,7 +129,7 @@ def device_collect_task(self, config_json: str) -> dict:
             result = {
                 'task_id': None,
                 'status': 'failure',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(UTC).isoformat(),
                 'log': ['invalid_plugin_result'],
                 'device_config': None,
             }
@@ -178,7 +179,7 @@ def device_collect_task(self, config_json: str) -> dict:
         return {
             'task_id': getattr(self.request, 'id', None),
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [msg],
             'device_config': None,
         }
@@ -188,7 +189,7 @@ def device_collect_task(self, config_json: str) -> dict:
         return {
             'task_id': getattr(self.request, 'id', None),
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [f'unhandled: {repr(exc)}'],
             'device_config': None,
         }

@@ -11,7 +11,7 @@ def test_worker_imports_without_django():
     code = (
         "import sys; sys.modules['django'] = None; "
         'import devicevault_worker.app, devicevault_worker.collect, '
-        'devicevault_worker.storage.tasks, devicevault_worker.presence'
+        'devicevault_worker.storage.tasks, devicevault_worker.agent'
     )
     result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=False)
 

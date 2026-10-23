@@ -6,7 +6,8 @@ from devices.models import CollectionGroup, Device, DeviceGroup, DeviceGroupDjan
 
 
 @pytest.fixture
-def refs(db):
+def refs(db, approved_collector):
+    approved_collector()  # offers the noop backup method
     return {
         'router': DeviceType.objects.create(name='Router'),
         'switch': DeviceType.objects.create(name='Switch'),

@@ -1,9 +1,8 @@
 """Dispatch device collection tasks to collector queues."""
 
-import json
-
 from django.utils import timezone
 
+from core.signing import sign_task
 from devicevault.celery import app as celery_app
 from devicevault_protocol.names import COLLECT_TASK, collection_queue_name
 
@@ -32,5 +31,5 @@ def dispatch_collection(device, trigger: str) -> tuple[str, str]:
         'initiated_at': now.isoformat(),
     }
     queue = collection_queue_name(device.collection_group.rabbitmq_queue_id)
-    task = celery_app.send_task(COLLECT_TASK, args=[json.dumps(cfg)], queue=queue)
+    task = celery_app.send_task(COLLECT_TASK, args=[sign_task(cfg)], queue=queue)
     return task.id, queue

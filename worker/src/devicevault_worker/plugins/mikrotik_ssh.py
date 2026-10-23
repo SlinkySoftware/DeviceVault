@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import paramiko
@@ -46,11 +46,11 @@ def _export_config(config: dict[str, Any], timeout: int | None = None) -> dict[s
         return {
             'task_id': None,
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [
                 {
                     'source': 'mikrotik_ssh',
-                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'timestamp': datetime.now(UTC).isoformat(),
                     'severity': 'ERROR',
                     'message': 'Missing username or password in credentials',
                 }
@@ -77,11 +77,11 @@ def _export_config(config: dict[str, Any], timeout: int | None = None) -> dict[s
             return {
                 'task_id': None,
                 'status': 'failure',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(UTC).isoformat(),
                 'log': [
                     {
                         'source': 'mikrotik_ssh',
-                        'timestamp': datetime.utcnow().isoformat() + 'Z',
+                        'timestamp': datetime.now(UTC).isoformat(),
                         'severity': 'ERROR',
                         'message': f'Mikrotik export returned error: {error_text.strip()}',
                     }
@@ -91,17 +91,17 @@ def _export_config(config: dict[str, Any], timeout: int | None = None) -> dict[s
         return {
             'task_id': None,
             'status': 'success',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [
                 {
                     'source': 'mikrotik_ssh',
-                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'timestamp': datetime.now(UTC).isoformat(),
                     'severity': 'INFO',
                     'message': f'Connected as {username}',
                 },
                 {
                     'source': 'mikrotik_ssh',
-                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'timestamp': datetime.now(UTC).isoformat(),
                     'severity': 'DEBUG',
                     'message': f'Credentials: {_mask_credentials(credentials)}',
                 },
@@ -112,11 +112,11 @@ def _export_config(config: dict[str, Any], timeout: int | None = None) -> dict[s
         return {
             'task_id': None,
             'status': 'failure',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(UTC).isoformat(),
             'log': [
                 {
                     'source': 'mikrotik_ssh',
-                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'timestamp': datetime.now(UTC).isoformat(),
                     'severity': 'ERROR',
                     'message': f'Connection failed: {repr(exc)}',
                 }
