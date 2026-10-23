@@ -40,44 +40,51 @@ database storage, push collection, external authentication (LDAP/SAML/Entra ID).
 Requirements: Docker (with Compose) and `make`. Everything else runs in containers.
 
 ```bash
-make dev-up        # start the full dev stack (db, redis, rabbitmq, orchestrator, workers, flower, frontend)
-make dev-status    # show container status
-make dev-logs      # tail logs
+make dev-up        # start the dev stack: infra, orchestrator, 2 collectors, 1 storage worker, flower, frontend
+make dev-seed      # load demo data
+make dev-ps        # container status
+make dev-logs      # tail all logs (SERVICE=api for one)
 make dev-down      # stop the stack
 make dev-reset     # stop and delete all dev data
 ```
 
 | Service | URL |
 |---|---|
-| Web UI | http://localhost:9000 (admin / admin) |
-| API | http://localhost:8000/api/ |
+| Web UI (hot reload) | http://localhost:9000 (admin / admin) |
+| API (Django runserver) | http://localhost:8000/api/ |
 | Flower | http://localhost:5555 |
-| RabbitMQ management | http://localhost:15672 (guest / guest) |
+| RabbitMQ management | http://localhost:15672 (devicevault / devicevault) |
 
-Load demo data into a running stack:
-
-```bash
-docker exec devicevault-docker-dev-orchestrator python manage.py seed_demo
-```
+Ports can be moved with `DV_DEV_WEB_PORT`, `DV_DEV_API_PORT`, `DV_DEV_FLOWER_PORT`,
+`DV_RABBITMQ_PORT`, `DV_RABBITMQ_MANAGEMENT_PORT`, `DV_REDIS_PORT` and `DV_POSTGRES_PORT`.
 
 ### Quality checks
 
 ```bash
 make lint            # ruff lint + format check
 make fmt             # apply ruff fixes and formatting
-make test            # pytest
+make test            # pytest for protocol, worker and orchestrator
 make frontend-build  # production build of the SPA
 make check           # all of the above
 make lock            # refresh uv.lock after editing a pyproject.toml
+make images          # build the orchestrator, worker and web images
 ```
+
+## Deployment
+
+Three independent stacks (infra, orchestrator, workers). See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Repository layout
 
 ```
-orchestrator/   Django project, Celery app and (until phase 2) the worker code
+protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
+worker/         Collection and storage worker: Celery tasks, plugins, storage backends (no Django)
+orchestrator/   Django project: API, result consumers, worker monitor
 frontend/       Quasar/Vue single-page app
-dev-env/        Docker development stack (replaced by deploy/ in phase 2)
-docs/           Architecture and delivery plan
+docker/         Image definitions and entrypoints
+deploy/         Compose stacks: infra, orchestrator, worker, dev
+docs/           Architecture, delivery plan and deployment guide
 Makefile        Single entry point for development and CI
 ```
 

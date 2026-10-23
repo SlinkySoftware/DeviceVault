@@ -46,6 +46,8 @@ No component talks to another directly. Everything goes over AMQP or Redis.
 | `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`, `read.result`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
 | `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
+Until phase 4/5 the orchestrator runs the interim processes `collect-results`, `store-results` and `worker-monitor` (Redis-stream consumers and the presence monitor), which `events` and `scheduler` replace. The no-op celery beat process was dropped in phase 2.
+
 ### Worker runtime (pure Celery + kombu, **no Django**)
 
 The worker has a bootstrap, registration, and control layer, plus driver registries: `collectors/` and `storage/`.
@@ -57,13 +59,13 @@ protocol/        shared package: queue/exchange names, message schemas (pydantic
 orchestrator/    Django project + apps (pyproject, depends on protocol)
 worker/          Celery worker runtime + drivers (pyproject, depends on protocol)
 frontend/        Quasar/Vue SPA (TypeScript)
-docker/          Dockerfile.orchestrator, Dockerfile.worker, Dockerfile.web
+docker/          Dockerfile (targets: orchestrator, worker, dev), web.Dockerfile, entrypoints, nginx template
 deploy/
   infra/         compose: postgres, rabbitmq, redis (+ example HA notes)
   orchestrator/  compose: web, api, events, scheduler, flower(profile)
   worker/        compose: worker (env: DV_BROKER_URL, DV_REDIS_URL, DV_TLS_CA?, DV_WORKER_NAME?)
   dev/           compose overlay: everything on one host, bind-mounted source, hot reload
-docs/            ARCHITECTURE.md, DEPLOYMENT.md, OPERATIONS.md, DRIVERS.md, SECURITY.md
+docs/            ARCHITECTURE.md, DEPLOYMENT.md (later: OPERATIONS.md, DRIVERS.md, SECURITY.md)
 CLAUDE.md
 ```
 
@@ -169,7 +171,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 |---|---|---|---|
 | 0 | `plan/architecture` | This document and `CLAUDE.md` | yes |
 | 1 | `chore/foundation` | New layout, uv workspace, Py 3.14, Django 6.1, pinned deps, ruff/pytest, `Makefile`, cruft and docs removal, squashed migrations, MySQL removed, unused external-auth deps removed | yes (behaviour unchanged) |
-| 2 | `feat/deploy-layout` | Dockerfiles, `deploy/{infra,orchestrator,worker,dev}`, worker de-Djangoed (still old routing) | yes |
+| 2 | `feat/deploy-layout` | Dockerfiles, `deploy/{infra,orchestrator,worker,dev}`, `protocol/` + `worker/` packages (worker de-Djangoed, still old routing), env-only config | yes |
 | 3 | `feat/frontend-rewrite` | Straight port of existing pages to the new stack | yes |
 | 4 | `feat/registration` | protocol package, keys, signing, register/approve/assign, liveness, Workers UI | yes |
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, credential encryption, retry semantics, collector driver framework (Netmiko/Scrapli bases), schema-driven device form | yes |

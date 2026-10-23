@@ -1,0 +1,112 @@
+# DeviceVault development stack: everything on one host, source bind-mounted.
+# Use the Makefile (make dev-up / dev-down / dev-logs) rather than calling this
+# directly; it exports DV_UID/DV_GID so files written to the tree are yours.
+
+name: devicevault-dev
+
+include:
+  - path:
+      - ../infra/compose.yaml
+      - infra.override.yaml
+
+x-python: &python
+  # Built once by `make dev-image` (a dependency of `make dev-up`).
+  image: devicevault-dev
+  pull_policy: never
+  user: "${DV_UID:-1000}:${DV_GID:-1000}"
+  env_file: [dev.env]
+  volumes:
+    - ../..:/workspace
+  depends_on: &infra-ready
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+x-orchestrator: &orchestrator
+  <<: *python
+  depends_on:
+    <<: *infra-ready
+    migrate:
+      condition: service_completed_successfully
+
+x-worker: &worker
+  <<: *python
+  working_dir: /workspace
+  entrypoint: [dv-worker]
+  volumes:
+    - ../..:/workspace
+    - storage:/srv/devicevault
+
+services:
+  migrate:
+    <<: *python
+    entrypoint: [dv-orchestrator]
+    command: [migrate]
+
+  api:
+    <<: *orchestrator
+    entrypoint: [dv-orchestrator]
+    command: [api-dev]
+    ports:
+      - "${DV_DEV_API_PORT:-8000}:8000"
+
+  collect-results:
+    <<: *orchestrator
+    entrypoint: [dv-orchestrator]
+    command: [collect-results]
+
+  store-results:
+    <<: *orchestrator
+    entrypoint: [dv-orchestrator]
+    command: [store-results]
+
+  worker-monitor:
+    <<: *orchestrator
+    entrypoint: [dv-orchestrator]
+    command: [worker-monitor]
+
+  flower:
+    <<: *orchestrator
+    entrypoint: [dv-orchestrator]
+    command: [flower]
+    ports:
+      - "${DV_DEV_FLOWER_PORT:-5555}:5555"
+
+  collector-1:
+    <<: *worker
+    environment:
+      DV_WORKER_NAME: collector-1
+      DV_WORKER_QUEUES: collector.group.dmz_zone_queue,collector.group.secure_zone_queue
+
+  collector-2:
+    <<: *worker
+    environment:
+      DV_WORKER_NAME: collector-2
+      DV_WORKER_QUEUES: collector.group.dmz_zone_queue,collector.group.secure_zone_queue
+
+  storage-1:
+    <<: *worker
+    environment:
+      DV_WORKER_NAME: storage-1
+      DV_WORKER_QUEUES: storage.fs,storage.git
+
+  frontend:
+    image: node:24-alpine
+    user: "${DV_UID:-1000}:${DV_GID:-1000}"
+    working_dir: /workspace/frontend
+    environment:
+      HOME: /tmp
+      DV_DEV_API_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING: "true"
+    command: ["sh", "-c", "[ -d node_modules ] || npm ci --no-audit --no-fund; exec npx quasar dev"]
+    volumes:
+      - ../../frontend:/workspace/frontend
+    ports:
+      - "${DV_DEV_WEB_PORT:-9000}:9000"
+    depends_on: [api]
+
+volumes:
+  storage:

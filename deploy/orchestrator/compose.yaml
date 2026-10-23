@@ -1,0 +1,71 @@
+# DeviceVault orchestrator: web UI, API, result consumers and worker monitor.
+#
+#   cp orchestrator.env.example orchestrator.env   # then edit
+#   docker compose up -d
+#   docker compose --profile flower up -d          # ... plus Flower on :5555
+#
+# Infrastructure (RabbitMQ, Redis, PostgreSQL) is deployed separately; see
+# deploy/infra. "host.docker.internal" resolves to this host, for infra
+# running on the same machine.
+
+name: devicevault-orchestrator
+
+x-orchestrator: &orchestrator
+  image: ${DV_ORCHESTRATOR_IMAGE:-devicevault-orchestrator:latest}
+  restart: unless-stopped
+  env_file: [orchestrator.env]
+  volumes:
+    - data:/var/lib/devicevault
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+x-after-migrate: &after-migrate
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  migrate:
+    <<: *orchestrator
+    command: [migrate]
+    restart: "no"
+
+  api:
+    <<: [*orchestrator, *after-migrate]
+    command: [api]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  collect-results:
+    <<: [*orchestrator, *after-migrate]
+    command: [collect-results]
+
+  store-results:
+    <<: [*orchestrator, *after-migrate]
+    command: [store-results]
+
+  worker-monitor:
+    <<: [*orchestrator, *after-migrate]
+    command: [worker-monitor]
+
+  web:
+    image: ${DV_WEB_IMAGE:-devicevault-web:latest}
+    restart: unless-stopped
+    ports:
+      - "${DV_HTTP_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  flower:
+    <<: *orchestrator
+    profiles: [flower]
+    command: [flower]
+    ports:
+      - "${DV_FLOWER_PORT:-5555}:5555"
+
+volumes:
+  data:

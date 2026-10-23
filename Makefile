@@ -3,24 +3,31 @@
 # targets rather than duplicating the commands.
 
 DEV_IMAGE ?= devicevault-dev
-NODE_IMAGE ?= node:24-bookworm-slim
+NODE_IMAGE ?= node:24-alpine
+IMAGE_TAG ?= latest
 
-DOCKER_RUN = docker run --rm -v $(CURDIR):/workspace -u $$(id -u):$$(id -g) -e HOME=/tmp
+# Containers run as you, so files they write to the tree are yours.
+export DV_UID := $(shell id -u)
+export DV_GID := $(shell id -g)
+
+DOCKER_RUN = docker run --rm -v $(CURDIR):/workspace -u $(DV_UID):$(DV_GID) -e HOME=/tmp
 PY = $(DOCKER_RUN) -w /workspace $(DEV_IMAGE)
-PY_ORCH = $(DOCKER_RUN) -w /workspace/orchestrator $(DEV_IMAGE)
 NODE = $(DOCKER_RUN) -w /workspace/frontend $(NODE_IMAGE)
+DEV_COMPOSE = docker compose -f deploy/dev/compose.yaml
 
-.PHONY: help dev-image lock lint fmt test check frontend-install frontend-build \
-	dev-up dev-down dev-restart dev-reset dev-status dev-logs
+PY_PACKAGES = protocol worker orchestrator
+
+.PHONY: help dev-image lock lint fmt test check frontend-install frontend-build images \
+	dev-up dev-down dev-reset dev-ps dev-logs dev-seed
 
 help:
 	@echo "Quality:   lint fmt test check"
 	@echo "Deps:      lock dev-image frontend-install"
-	@echo "Build:     frontend-build"
-	@echo "Dev stack: dev-up dev-down dev-restart dev-reset dev-status dev-logs"
+	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
+	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed"
 
 dev-image:
-	docker build -q -t $(DEV_IMAGE) -f dev-env/Dockerfile.backend-dev .
+	docker build -q -f docker/Dockerfile --target dev -t $(DEV_IMAGE) .
 
 lock: dev-image
 	$(PY) uv lock
@@ -32,7 +39,7 @@ fmt: dev-image
 	$(PY) sh -c 'ruff check --fix . && ruff format .'
 
 test: dev-image
-	$(PY_ORCH) pytest
+	$(PY) sh -c 'set -e; for pkg in $(PY_PACKAGES); do (cd $$pkg && pytest); done'
 
 check: lint test frontend-build
 
@@ -42,20 +49,25 @@ frontend-install:
 frontend-build: frontend-install
 	$(NODE) npx quasar build
 
-dev-up:
-	./devicevault-docker-dev.sh start
+images:
+	docker build -f docker/Dockerfile --target orchestrator -t devicevault-orchestrator:$(IMAGE_TAG) .
+	docker build -f docker/Dockerfile --target worker -t devicevault-worker:$(IMAGE_TAG) .
+	docker build -f docker/web.Dockerfile -t devicevault-web:$(IMAGE_TAG) .
+
+dev-up: dev-image
+	$(DEV_COMPOSE) up -d
 
 dev-down:
-	./devicevault-docker-dev.sh stop
-
-dev-restart:
-	./devicevault-docker-dev.sh restart
+	$(DEV_COMPOSE) down
 
 dev-reset:
-	./devicevault-docker-dev.sh reset
+	$(DEV_COMPOSE) down --volumes --remove-orphans
 
-dev-status:
-	./devicevault-docker-dev.sh status
+dev-ps:
+	$(DEV_COMPOSE) ps -a
 
 dev-logs:
-	./devicevault-docker-dev.sh logs
+	$(DEV_COMPOSE) logs --follow --tail=100 $(SERVICE)
+
+dev-seed:
+	$(DEV_COMPOSE) exec api dv-orchestrator manage seed_demo

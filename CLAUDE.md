@@ -7,9 +7,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 
 - **Docker only.** No host Python/Node. Run every tool through `make` (see `Makefile`):
   `make lint`, `make fmt`, `make test`, `make frontend-build`, `make lock`, `make dev-up`.
-  For ad-hoc commands, use the dev image:
+  For ad-hoc commands, use the dev image (`make dev-image` builds it):
   `docker run --rm -v "$PWD":/workspace -u "$(id -u):$(id -g)" -e HOME=/tmp -w /workspace/orchestrator devicevault-dev <cmd>`.
-- **Dependencies**: edit `orchestrator/pyproject.toml`, then `make lock`. `uv.lock` is committed.
+- **Dependencies**: edit the package's `pyproject.toml` (`protocol/`, `worker/` or `orchestrator/`), then `make lock`. `uv.lock` is committed.
   Frontend deps are pinned in `frontend/package.json` with `package-lock.json` committed.
 - **No backward compatibility required.** Nothing is deployed. Change models freely, but
   keep migrations generated (`makemigrations`), and the test suite guards against drift.
@@ -18,12 +18,22 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 
 ## Layout
 
-- `orchestrator/`: Django project (`devicevault/` settings and urls) plus apps: `api`,
-  `audit`, `backups`, `core`, `credentials`, `devices`, `locations`, `policies`, `crypto`.
-  It still contains the worker code (`celery_app.py`, `devicevault_worker.py`, `storage/`,
-  `backups/plugins/`); phase 2 moves that to `worker/` without Django.
-- `frontend/`: Quasar/Vue SPA. API client in `src/services/api.js`.
-- `dev-env/` + `devicevault-docker-dev.sh`: current dev stack (replaced by `deploy/` in phase 2).
+- `protocol/` (`devicevault_protocol`): env helpers (`DV_*`, `<NAME>_FILE` secrets),
+  task/queue/stream names, the Celery app factory, presence constants, `crypto`.
+  Shared by both sides; must not import Django.
+- `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
+  storage tasks, `plugins/` (collector plugins), `storage/` (backends), `presence`.
+  Must not import Django (a test enforces it).
+- `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
+  sending tasks) plus apps: `api`, `audit`, `backups`, `core`, `credentials`, `devices`,
+  `locations`, `policies`. Settings are env-only; tests use `devicevault.test_settings`.
+  It depends on `worker` only for the plugin catalogue (temporary, until phase 4).
+- `frontend/`: Quasar/Vue SPA. Talks to same-origin `/api` (nginx in production,
+  the Quasar dev proxy in development). API client in `src/services/api.js`.
+- `docker/`: `Dockerfile` (targets `orchestrator`, `worker`, `dev`), `web.Dockerfile`,
+  entrypoints (`dv-orchestrator <role>`, `dv-worker`).
+- `deploy/`: Compose stacks `infra`, `orchestrator`, `worker`, and `dev` (everything on
+  one host, source bind-mounted).
 
 ## Conventions
 
@@ -33,6 +43,10 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   `frontend/src/services/api.js` in step.
 - Workers must not import Django. The orchestrator owns all database access; workers
   communicate only through RabbitMQ and Redis.
-- Collector plugins expose `PLUGIN = BackupPlugin(...)` in `backups/plugins/<name>.py`.
-  Storage backends are registered in `storage/tasks.py`. Both become entry-point
-  driver registries in later phases.
+- Collector plugins expose `PLUGIN = BackupPlugin(...)` in
+  `worker/src/devicevault_worker/plugins/<name>.py`. Storage backends are registered in
+  `worker/src/devicevault_worker/storage/tasks.py`. Both become entry-point driver
+  registries in later phases.
+- Configuration is `DV_*` environment variables read through `devicevault_protocol.env`;
+  never add config files. Document new variables in `docs/DEPLOYMENT.md` and the
+  relevant `*.env.example`.

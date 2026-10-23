@@ -1,0 +1,16 @@
+.git
+**/__pycache__
+**/*.pyc
+.ruff_cache
+.pytest_cache
+.venv
+var
+**/var
+orchestrator/staticfiles
+frontend/node_modules
+frontend/.quasar
+frontend/dist
+deploy
+docs
+*.md
+!README.md
