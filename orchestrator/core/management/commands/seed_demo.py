@@ -16,11 +16,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from django.core.management.base import BaseCommand
-from storage.models import StorageTarget
 
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
 from policies.models import BackupSchedule, RetentionPolicy
+from storage.models import StorageTarget
 
 
 def create_sample_data():

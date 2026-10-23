@@ -28,10 +28,12 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `api`, `audit`, `backups`, `core`, `credentials`, `devices`,
+  `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `storage` (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
   registry (events, approval, assignments, collector and storage driver catalogues);
-  `core/signing.py` holds the signing key and `core/keys.py` the data and vault keys. The orchestrator
+  `core/signing.py` holds the signing key, `core/keys.py` the data and vault keys, and `core/installation.py`
+  the one-database-per-bus claim `migrate` makes. The orchestrator
   must not import the worker package.
 - `frontend/`: Quasar 2 / Vue 3 SPA in TypeScript. Talks to same-origin `/api` (nginx in
   production, the Quasar dev proxy in development). `src/api/` (axios client,

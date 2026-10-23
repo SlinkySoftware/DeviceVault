@@ -9,7 +9,6 @@ from typing import Any
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from storage.service import target_spec, target_workers
 
 from backups.models import BackupJob
 from core import keys
@@ -28,6 +27,7 @@ from devicevault_protocol.jobs import (
 )
 from devicevault_protocol.names import COLLECT_TASK, collection_queue_name
 from devicevault_protocol.registration import ROLE_COLLECTOR, STATUS_APPROVED
+from storage.service import target_spec, target_workers
 
 logger = logging.getLogger('devicevault.jobs')
 

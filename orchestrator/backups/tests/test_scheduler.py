@@ -7,18 +7,6 @@ from backups.scheduler import run_due_schedules
 from policies.models import BackupSchedule
 
 
-@pytest.fixture
-def nightly(setup, settings):
-    settings.DEVICEVAULT_DISPLAY_TIMEZONE = 'Australia/Sydney'
-    schedule = BackupSchedule.objects.create(name='Nightly', schedule_type='daily', hour=2, minute=0)
-    # 01:00 Sydney (AEDT, UTC+11) on 2026-10-23.
-    BackupSchedule.objects.filter(pk=schedule.pk).update(created_at=datetime(2026, 10, 22, 14, 0, tzinfo=UTC))
-    setup['device'].schedule = schedule
-    setup['device'].save()
-    schedule.refresh_from_db()
-    return schedule
-
-
 def test_schedules_fire_in_the_display_timezone(nightly):
     assert nightly.next_run() == datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 

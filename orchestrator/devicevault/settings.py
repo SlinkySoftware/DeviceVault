@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'backups',
     'credentials',
     'storage',
+    'monitoring',
     'policies',
     'audit',
     'api',
@@ -110,6 +111,9 @@ elif DB_ENGINE == 'postgres':
             'CONN_HEALTH_CHECKS': True,
         }
     }
+    # Several hosts (a replicated cluster): connect to whichever accepts writes.
+    if ',' in DATABASES['default']['HOST']:
+        DATABASES['default']['OPTIONS'] = {'target_session_attrs': 'read-write'}
 else:
     raise ConfigError(f'DV_DB_ENGINE must be sqlite or postgres, got {DB_ENGINE!r}')
 

@@ -438,3 +438,19 @@ export interface ActivityItem {
   error: string
   has_log: boolean
 }
+
+export interface FlowerEndpoint {
+  id: Id
+  name: string
+  /** Proxied at /flower/<slug>/. */
+  slug: string
+  /** The upstream the web tier proxies to, or the address opened directly. */
+  url: string
+  proxied: boolean
+  /** Where the UI opens it. */
+  link: string
+  created_at: IsoDateTime
+  updated_at: IsoDateTime
+}
+
+export type FlowerEndpointWrite = Pick<FlowerEndpoint, 'name' | 'slug' | 'url' | 'proxied'>

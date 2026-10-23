@@ -16,7 +16,7 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "api", "audit", "backups", "core", "credentials", "devices", "devicevault",
-    "devicevault_protocol", "devicevault_worker", "locations", "policies",
+    "devicevault_protocol", "devicevault_worker", "monitoring", "policies", "storage",
 ]
 
 [tool.ruff.format]

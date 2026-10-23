@@ -1,12 +1,12 @@
 """Approve registered workers from the command line (automation and development)."""
 
 from django.core.management.base import BaseCommand, CommandError
-from storage.models import StorageTarget
 
 from core import workers
 from core.models import Worker
 from devices.models import CollectionGroup
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_PENDING
+from storage.models import StorageTarget
 
 
 class Command(BaseCommand):

@@ -46,7 +46,7 @@ No component talks to another directly. Everything goes over AMQP or Redis.
 | `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
 | `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
-Both are in place since phase 5: `events` handles worker registration, heartbeats and the signed job events (`orchestrator.job_event`: started, retrying, collected, stored, failed); `scheduler` holds the Redis lease `dv:scheduler:leader` (60 s, renewed every tick) and creates `BackupJob`s for due schedules. Backup content travels collector → Redis (`dv:blob:job:<id>`, 24 h TTL) → storage worker; a job is `stored` only when the collector and storage worker report the same SHA-256.
+Both are in place since phase 5: `events` handles worker registration, heartbeats and the signed job events (`orchestrator.job_event`: started, retrying, collected, stored, failed); `scheduler` holds the Redis lease `dv:scheduler:leader` (60 s or twice the tick interval, renewed every tick, released on shutdown) and creates `BackupJob`s for due schedules. Backup content travels collector → Redis (`dv:blob:job:<id>`, 24 h TTL) → storage worker; a job is `stored` only when the collector and storage worker report the same SHA-256.
 
 ### Worker runtime (pure Celery + kombu, **no Django**)
 
@@ -138,7 +138,7 @@ Retries: drivers raise typed errors. Transient errors (timeout, connection refus
 - `StorageTarget` (replaces `BackupLocation`): name, driver key, config (validated against the driver schema, secret fields encrypted), M2M workers, queue `storage.target.<uuid>`. Assigning a non-`shareable` driver (local fs, local git) to more than one worker is blocked.
 - `Device`: `driver` + `driver_params` (validated against the driver schema), collection_group, storage_target, credential, schedule (FK; currently missing, which is why schedules never fire), retention_policy.
 - `BackupJob` (replaces `DeviceBackupResult` + `StoredBackup`): one row per attempt with state, timings, logs, storage_ref, enc metadata, size, sha256.
-- `FlowerEndpoint`: name, url, proxied (bool). Admin-only.
+- `FlowerEndpoint`: name, slug, url, proxied (bool). Admin-only. Proxied endpoints are served at `/flower/<slug>/`.
 
 ## 7. Driver framework
 
@@ -162,10 +162,11 @@ Drivers are discovered through Python entry points, so a new driver can ship as 
 
 ## 8. HA
 
-- Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lock leader acts, and the standby takes over when the lock expires (around 30s).
-- The front-end VIP/load balancer (keepalived, or an existing LB) sits outside the stacks. A keepalived example is documented.
-- HA needs PostgreSQL. **SQLite = single orchestrator node only**, enforced at startup. SQLite runs in WAL mode with immediate transactions, which is fine at this scale.
-- Infra HA (Postgres replication, a 3-node RabbitMQ quorum cluster, Redis Sentinel) is out of the compose stacks. The orchestrator and workers accept multi-host URLs.
+- Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lease leader acts. The standby takes over at its next tick when the leader stops cleanly (the lease is released), or once the lease expires (60 s by default) when it dies. The leader re-checks the lease before each due schedule, so one that stalled past its lease stops scheduling.
+- The front-end VIP/load balancer (keepalived, or an existing LB) sits outside the stacks. A keepalived example is documented in DEPLOYMENT.md.
+- HA needs PostgreSQL. **SQLite = single orchestrator node only**, enforced at startup: each database has an installation id, and `migrate` claims Redis for it (`dv:orchestrator:installation`), so a node whose database differs (such as a second SQLite file) refuses to start. SQLite runs in WAL mode with immediate transactions, which is fine at this scale.
+- Infra HA (Postgres replication, a 3-node RabbitMQ cluster, Redis Sentinel) is out of the compose stacks. PostgreSQL (`DV_DB_HOST=pg1,pg2`, connecting to the writable one) and RabbitMQ (`;`-separated broker URLs) accept several hosts; Redis is a single endpoint until Sentinel support is added.
+- Flower: each node's `web` proxies `/flower/<slug>/` to Flower after asking the API (`auth_request` to `/api/flower-auth/`), which checks the browser's session cookie and names the upstream. A Flower on every node at `http://flower:5555` keeps it available through either node.
 
 ## 9. Frontend
 
@@ -183,7 +184,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, per-recipient sealed secrets, credential encryption at rest, retry semantics, collector driver framework (Netmiko base; Cisco IOS and MikroTik drivers), schema-driven device form | yes |
 | 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |
 | 7 | `feat/flower-ha` | FlowerEndpoint and nginx proxy, scheduler leader election verified with 2 nodes, HA docs | yes |
-| later | — | Retention enforcement, DB storage driver, push collection, new vendor drivers, external auth | — |
+| later | — | Retention enforcement, DB storage driver, push collection, new vendor drivers, external auth, Redis Sentinel | — |
 
 Each backend phase ships its own UI changes, so master never has a broken frontend.
 
@@ -202,4 +203,6 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 9 | (phase 5) Collector drivers use Netmiko for SSH CLI platforms; Scrapli can be added as a second base when a platform needs it. |
 | 10 | (phase 6) Storage target settings travel in each signed storage task (sealed to the target's workers) rather than in assignments, for the same reason as decision 8: workers keep no configuration state. Assignments carry only queues. Jobs protect their storage target from deletion, and a target's driver is fixed once it holds backups. |
 | 11 | (phase 6) Reads and target checks are request/response tasks answered through the Celery result backend, not `read.result` events: the API needs the answer within the same HTTP request, which an event handled by any `events` process cannot give it. The content itself still travels through Redis, checked against the job's recorded SHA-256. |
+| 12 | (phase 7) A proxied Flower is authorised by a short-lived signed cookie, scoped to `/flower/<slug>/` and bound to the user's API token, that the UI requests before opening it: the SPA's token lives in browser storage, which a new tab doesn't send. The API names the upstream in the `auth_request` response, so the nginx configuration stays static. |
+| 13 | (phase 7) One database per message bus: `migrate` claims Redis for its database's installation id and a node with another database refuses to start. This enforces single-node SQLite and also catches nodes pointed at different PostgreSQL databases. |
 | — | Retention enforcement: in scope, designed in a later phase. |

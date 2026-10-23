@@ -1,10 +1,10 @@
 import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
-from storage.models import StorageTarget
 
 from credentials.models import Credential, CredentialType
 from devices.models import DeviceGroup, DeviceGroupRole, UserDeviceGroupRole
+from storage.models import StorageTarget
 
 
 def _client(user):

@@ -1,12 +1,15 @@
 """The scheduler: runs due backup schedules and expires stuck jobs.
 
-Every orchestrator node may run it; only the holder of a Redis lease acts, so
-with two nodes one schedules and the other takes over within ``LEASE_SECONDS``
-if it stops.
+Every orchestrator node may run it; only the holder of a Redis lease acts. The
+leader renews the lease every tick and releases it on a clean shutdown, so a
+standby takes over at its next tick; if the leader dies instead, the lease
+expires first (``LEASE_SECONDS``). The leader also re-checks the lease before
+each due schedule, so a leader that stalled past its lease stops scheduling.
 """
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 
 from django.db import transaction
@@ -32,13 +35,17 @@ return 0
 
 
 class Leadership:
-    def __init__(self, redis: Redis, node: str | None = None):
+    """This node's claim on the scheduler lease."""
+
+    def __init__(self, redis: Redis, node: str | None = None, lease_seconds: int = LEASE_SECONDS):
         self.redis = redis
         self.token = f'{node or "node"}:{uuid.uuid4().hex}'
+        self.lease_seconds = lease_seconds
         self._renew = redis.register_script(_RENEW)
 
     def acquire_or_renew(self) -> bool:
-        ttl_ms = LEASE_SECONDS * 1000
+        """Take the lease if it is free, or extend it if we hold it. True while we lead."""
+        ttl_ms = self.lease_seconds * 1000
         if self._renew(keys=[LEASE_KEY], args=[self.token, ttl_ms]):
             return True
         return bool(self.redis.set(LEASE_KEY, self.token, nx=True, px=ttl_ms))
@@ -48,11 +55,12 @@ class Leadership:
             self.redis.delete(LEASE_KEY)
 
 
-def run_due_schedules(now: datetime | None = None) -> int:
+def run_due_schedules(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> int:
     """Create jobs for every enabled device on every schedule that is due. Returns jobs created.
 
     A schedule that was missed (e.g. the orchestrator was down) runs once on
-    catch-up, not once per missed slot.
+    catch-up, not once per missed slot. ``leading`` is asked before each due
+    schedule; once it says no, nothing more is scheduled.
     """
     now = now or timezone.now()
     created = 0
@@ -64,6 +72,9 @@ def run_due_schedules(now: datetime | None = None) -> int:
             continue
         if not due:
             continue
+        if leading is not None and not leading():
+            logger.warning('scheduler_lease_lost', extra={'schedule': schedule.pk})
+            break
         with transaction.atomic():
             for device in schedule.devices.filter(enabled=True).select_related(
                 'collection_group', 'storage_target', 'credential'
@@ -77,9 +88,9 @@ def run_due_schedules(now: datetime | None = None) -> int:
     return created
 
 
-def tick(now: datetime | None = None) -> None:
+def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> None:
     now = now or timezone.now()
-    created = run_due_schedules(now)
+    created = run_due_schedules(now, leading)
     expired = expire_stale_jobs(now)
     if created or expired:
         logger.info('scheduler_tick', extra={'jobs_created': created, 'jobs_expired': expired})

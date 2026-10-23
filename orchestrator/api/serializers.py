@@ -24,7 +24,6 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group, User
 from jsonschema import Draft202012Validator
 from rest_framework import serializers
-from storage.models import StorageTarget
 
 from api.permissions import is_admin
 from audit.models import AuditLog
@@ -45,6 +44,7 @@ from devices.models import (
 )
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy, validate_cron
+from storage.models import StorageTarget
 
 
 def drivers(context: dict) -> dict:

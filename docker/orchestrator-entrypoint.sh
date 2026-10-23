@@ -9,6 +9,8 @@ case "$role" in
     migrate)
         python manage.py migrate --noinput
         python manage.py create_admin
+        # Refuse a second database (e.g. another node's own SQLite file) on the same bus.
+        python manage.py claim_installation
         ;;
     api)
         exec gunicorn devicevault.wsgi:application \
@@ -36,9 +38,11 @@ case "$role" in
             "$@"
         ;;
     flower)
+        # Behind the web tier's /flower/<slug>/ proxy, DV_FLOWER_URL_PREFIX is flower/<slug>.
         exec celery -A devicevault.celery flower \
             --address=0.0.0.0 --port=5555 \
             ${DV_BROKER_API:+--broker-api="$DV_BROKER_API"} \
+            ${DV_FLOWER_URL_PREFIX:+--url_prefix="$DV_FLOWER_URL_PREFIX"} \
             "$@"
         ;;
     manage)

@@ -25,6 +25,8 @@ import type {
   DeviceType,
   DeviceWrite,
   DjangoPermission,
+  FlowerEndpoint,
+  FlowerEndpointWrite,
   Id,
   LogEntry,
   LoginResponse,
@@ -94,6 +96,14 @@ export const storageTargetsApi = {
     (await http.post<{ ok: boolean; message?: string; worker?: string; error?: string }>(
       `/storage-targets/${id}/check/`,
     )).data,
+}
+
+const flowerEndpoints = resource<FlowerEndpoint, FlowerEndpointWrite>('/flower-endpoints/')
+
+export const flowerEndpointsApi = {
+  ...flowerEndpoints,
+  /** Sets the cookie that lets this browser open a proxied endpoint (for a few hours). */
+  session: async (id: Id) => (await http.post<{ link: string }>(`/flower-endpoints/${id}/session/`)).data,
 }
 export const storageDriversApi = {
   list: async () => (await http.get<StorageDriver[]>('/storage-drivers/')).data,

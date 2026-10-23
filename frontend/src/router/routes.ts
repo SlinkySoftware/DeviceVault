@@ -82,6 +82,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresSuperuser: true, title: 'Workers' },
       },
       {
+        path: 'vaultadmin/flower',
+        name: 'flower',
+        component: () => import('@/pages/admin/FlowerPage.vue'),
+        meta: { requiresSuperuser: true, title: 'Flower' },
+      },
+      {
         path: 'vaultadmin/theme',
         name: 'theme',
         component: () => import('@/pages/admin/ThemePage.vue'),

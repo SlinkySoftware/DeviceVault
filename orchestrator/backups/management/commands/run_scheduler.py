@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from redis import Redis
 
-from backups.scheduler import Leadership, tick
+from backups.scheduler import LEASE_SECONDS, Leadership, tick
 
 
 class Command(BaseCommand):
@@ -19,10 +19,15 @@ class Command(BaseCommand):
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: stop.set())
 
-        leadership = Leadership(Redis.from_url(settings.DEVICEVAULT_BUS.redis_url), node=socket.gethostname())
         interval = settings.DEVICEVAULT_SCHEDULER_INTERVAL_SEC
+        # Renewed every tick, so the lease must outlast at least one missed tick.
+        leadership = Leadership(
+            Redis.from_url(settings.DEVICEVAULT_BUS.redis_url),
+            node=socket.gethostname(),
+            lease_seconds=max(LEASE_SECONDS, 2 * interval),
+        )
         leading = False
-        self.stdout.write(f'Scheduler started (interval {interval}s)')
+        self.stdout.write(f'Scheduler started on {leadership.token} (interval {interval}s)')
         while not stop.is_set():
             try:
                 now_leading = leadership.acquire_or_renew()
@@ -32,7 +37,7 @@ class Command(BaseCommand):
                     )
                     leading = now_leading
                 if leading:
-                    tick()
+                    tick(leading=leadership.acquire_or_renew)
             except Exception as exc:  # keep running through broker/database hiccups
                 self.stderr.write(f'Scheduler tick failed: {exc}')
             stop.wait(interval)

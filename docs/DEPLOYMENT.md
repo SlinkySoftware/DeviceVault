@@ -44,7 +44,7 @@ cp orchestrator.env.example orchestrator.env   # see the reference below
 # DV_SIGNING_KEY, DV_DATA_KEYS and DV_VAULT_KEYS as env lines (notes go to stderr):
 docker run --rm -e DV_DEBUG=true --entrypoint python devicevault-orchestrator manage.py generate_keys
 docker compose up -d                           # UI on :8080 (DV_HTTP_PORT)
-docker compose --profile flower up -d          # ... plus Flower on :5555
+docker compose --profile flower up -d          # ... plus Flower (see Flower below)
 ```
 
 The `migrate` service runs first: it applies migrations and creates the
@@ -53,7 +53,7 @@ not exist. Put a TLS-terminating proxy or load balancer in front of `web`, and
 set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
 
 With `DV_DB_ENGINE=sqlite` the database lives in the stack's `data` volume, which
-limits you to a single orchestrator node.
+limits you to a single orchestrator node (see [High availability](#6-high-availability)).
 
 Every orchestrator node needs the same three keys:
 
@@ -127,6 +127,109 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
   where it writes (path, bucket, prefix) makes earlier backups unreadable unless their
   data moves too.
 
+## 5. Flower
+
+Flower shows live workers, queues and tasks. Register each Flower under
+**Admin Settings > Flower**, which opens it in a new tab:
+
+- **Proxied** (recommended): the `web` service serves it at `/flower/<slug>/` to
+  signed-in administrators only, so Flower needs no login of its own and its port
+  stays private. The URL is where `web` reaches Flower, with no path
+  (`http://flower:5555`). Flower must run with `--url_prefix=flower/<slug>`
+  (`DV_FLOWER_URL_PREFIX`).
+- **Direct**: the UI links to the URL as it is. That Flower must secure itself
+  (its `--basic-auth` or `--auth` options): anyone who reaches it can stop workers.
+
+The orchestrator stack's optional `flower` service is ready to be proxied:
+
+```bash
+docker compose --profile flower up -d
+```
+
+Then add an endpoint with slug `local`, URL `http://flower:5555`, proxied. The
+service runs with `DV_FLOWER_URL_PREFIX=flower/local` (set it in the shell or the
+stack's `.env` to change it) and publishes its own port on `127.0.0.1:5555` only.
+With two orchestrator nodes, run it on both: each node's `web` proxies
+`http://flower:5555` to its own Flower, and both show the same cluster.
+
+Opening the Flower page gives the browser a session cookie for each proxied
+endpoint, scoped to its path and valid for 8 hours or until you sign out. When it
+lapses, the proxy sends you back to the page to open Flower again.
+
+A proxied Flower is served from the UI's origin, so treat it as trusted code and
+proxy only Flower instances you run. The development stack has no nginx: add its
+Flower as a direct endpoint, `http://localhost:5555`.
+
+## 6. High availability
+
+Run two orchestrator nodes behind a load balancer or a virtual IP.
+
+- **PostgreSQL is required**, and every node must use the same database. A SQLite
+  orchestrator is a single node: `migrate` records in Redis which database uses
+  the message bus (`dv:orchestrator:installation`) and refuses to start a node
+  whose database is a different one, such as a second node with its own SQLite
+  file. Restoring the same database keeps its identity. If a new database
+  deliberately replaces the old one, take the bus over with
+  `docker compose run --rm migrate manage claim_installation --force`.
+- **Every node has the same configuration**: the same `orchestrator.env`, in
+  particular `DV_SECRET_KEY`, `DV_SIGNING_KEY`, `DV_DATA_KEYS` and `DV_VAULT_KEYS`.
+- **Every service runs on both nodes.** `web`, `api` and `events` are
+  active/active. `scheduler` runs on both, but only the holder of the Redis lease
+  `dv:scheduler:leader` schedules backups. The leader renews the lease every tick
+  (`DV_SCHEDULER_INTERVAL_SEC`) for 60 seconds, or twice the interval if that is
+  longer. Stopping the leader releases the lease and the other node takes over at
+  its next tick; if the leader dies, the other node takes over once the lease
+  expires. A scheduler logs `This node is now the scheduler leader` when it takes
+  over.
+- **Front end**: point a load balancer at both nodes' `web` port, with
+  `/api/health/` as the health check, or float a virtual IP between them with
+  keepalived, for example (`/etc/keepalived/keepalived.conf` on both nodes):
+
+  ```
+  vrrp_script devicevault_web {
+      script "/usr/bin/curl -fsS -o /dev/null http://127.0.0.1:8080/api/health/"
+      interval 5
+      fall 2
+      rise 2
+  }
+
+  vrrp_instance devicevault {
+      state BACKUP              # on both nodes; the higher priority holds the address
+      interface eth0
+      virtual_router_id 51
+      priority 100              # 90 on the second node
+      advert_int 1
+      authentication {
+          auth_type PASS
+          auth_pass change-me
+      }
+      virtual_ipaddress {
+          192.0.2.10/24
+      }
+      track_script {
+          devicevault_web
+      }
+  }
+  ```
+
+  Terminate TLS on the load balancer or on a proxy on each node, and set
+  `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to the shared name.
+
+The infrastructure's own redundancy is outside these stacks:
+
+- **PostgreSQL**: a primary and a streaming replica with a failover manager
+  (Patroni, repmgr...). List every host in `DV_DB_HOST`, comma separated
+  (`pg1,pg2`); the orchestrator connects to whichever one accepts writes.
+- **RabbitMQ**: a three-node cluster. List every node in `DV_BROKER_URL`,
+  separated by `;` (`amqp://user:pass@mq1:5672//;amqp://user:pass@mq2:5672//`);
+  orchestrators and workers fail over between them.
+- **Redis**: one URL for now (Redis Sentinel isn't supported yet). Run a replica
+  managed by Sentinel and give clients an address that follows the primary, such
+  as a keepalived address moved by Sentinel's `client-reconfig-script`. Redis
+  holds only transient state: backups in transit, the scheduler lease, the
+  database claim and Celery results. Losing it fails the jobs in flight, and the
+  next `migrate` claims the bus again.
+
 ## Configuration reference
 
 Every variable can be supplied as a file by setting `<NAME>_FILE` (Docker
@@ -144,11 +247,12 @@ secrets). The file takes precedence.
 | `DV_LOG_LEVEL` | `INFO` | |
 | `DV_DB_ENGINE` | `sqlite` | `sqlite` or `postgres` |
 | `DV_DB_NAME` | `/var/lib/devicevault/devicevault.sqlite3` or `devicevault` | |
-| `DV_DB_HOST` / `DV_DB_PORT` / `DV_DB_USER` / `DV_DB_PASSWORD` | `localhost` / `5432` / `devicevault` / empty | PostgreSQL only |
-| `DV_BROKER_URL` | `amqp://guest:guest@localhost:5672//` | RabbitMQ |
+| `DV_DB_HOST` / `DV_DB_PORT` / `DV_DB_USER` / `DV_DB_PASSWORD` | `localhost` / `5432` / `devicevault` / empty | PostgreSQL only; several hosts comma separated |
+| `DV_BROKER_URL` | `amqp://guest:guest@localhost:5672//` | RabbitMQ; several nodes separated by `;` |
 | `DV_REDIS_URL` | `redis://localhost:6379/0` | Redis |
 | `DV_RESULT_BACKEND` | `DV_REDIS_URL` | Celery result backend |
 | `DV_BROKER_API` | none | RabbitMQ management API, for Flower |
+| `DV_FLOWER_URL_PREFIX` | none (`flower/local` in the orchestrator stack) | `flower` service: its path, `flower/<slug>` when proxied |
 | `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin |
 | `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local user accounts |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
@@ -160,7 +264,7 @@ secrets). The file takes precedence.
 | `DV_EVENTS_CONCURRENCY` | `4` | Processes in the `events` service (worker and job events) |
 | `DV_COLLECT_TIMEOUT_SEC` | `120` | Time a collector driver gets to reach and read a device, per attempt |
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
-| `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules |
+| `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules (and renews its lease) |
 
 ### Worker
 
@@ -181,3 +285,4 @@ secrets). The file takes precedence.
 - Backups are staged whole in Redis between collection and storage (24 hours at
   most), so size Redis memory for your largest backups times concurrent jobs.
 - Retention policies are stored but not yet applied.
+- Redis is a single endpoint; Redis Sentinel URLs are not supported yet.

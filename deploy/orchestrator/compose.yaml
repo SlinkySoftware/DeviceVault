@@ -2,7 +2,7 @@
 #
 #   cp orchestrator.env.example orchestrator.env   # then edit
 #   docker compose up -d
-#   docker compose --profile flower up -d          # ... plus Flower on :5555
+#   docker compose --profile flower up -d          # ... plus Flower, proxied at /flower/local/
 #
 # Infrastructure (RabbitMQ, Redis, PostgreSQL) is deployed separately; see
 # deploy/infra. "host.docker.internal" resolves to this host, for infra
@@ -56,12 +56,17 @@ services:
       api:
         condition: service_healthy
 
+  # Add it under Admin Settings > Flower as slug "local", URL http://flower:5555,
+  # proxied: the web service then serves it at /flower/local/ to administrators.
+  # Its own port is unauthenticated, so it is published on loopback only.
   flower:
     <<: *orchestrator
     profiles: [flower]
     command: [flower]
+    environment:
+      DV_FLOWER_URL_PREFIX: ${DV_FLOWER_URL_PREFIX:-flower/local}
     ports:
-      - "${DV_FLOWER_PORT:-5555}:5555"
+      - "127.0.0.1:${DV_FLOWER_PORT:-5555}:5555"
 
 volumes:
   data:

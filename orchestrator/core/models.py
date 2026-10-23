@@ -19,6 +19,8 @@ Defines user preferences and dashboard layout configuration.
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import uuid
+
 from django.contrib.auth.models import User
 from django.db import models
 
@@ -183,3 +185,10 @@ class Worker(models.Model):
         if self.role == ROLE_STORAGE:
             return sorted(target.queue for target in self.storage_targets.all())
         return []
+
+
+class Installation(models.Model):
+    """This database's identity: one row, created on first use (see core.installation)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)

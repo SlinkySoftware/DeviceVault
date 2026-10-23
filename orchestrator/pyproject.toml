@@ -20,6 +20,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "fakeredis[lua]>=2.32",
     "pytest>=9",
     "pytest-django>=4.11",
     "ruff>=0.14",

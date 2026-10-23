@@ -6,13 +6,13 @@ from functools import cache
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from redis import Redis
-from storage.service import TargetUnavailable, ask, target_spec
 
 from backups.models import BackupJob
 from core import keys
 from devicevault_protocol.crypto import EncryptionHeader, decrypt_backup, is_encrypted
 from devicevault_protocol.crypto.exceptions import CryptoError
 from devicevault_protocol.names import READ_TASK
+from storage.service import TargetUnavailable, ask, target_spec
 
 
 class ContentUnavailable(Exception):

@@ -20,10 +20,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework import routers
-from storage import api as storage_api
 
 from api import views
 from backups import api as backup_api
+from monitoring import api as monitoring_api
+from storage import api as storage_api
 
 router = routers.DefaultRouter()
 router.register(r'device-types', views.DeviceTypeViewSet)
@@ -47,11 +48,13 @@ router.register(r'group-device-group-roles', views.GroupDeviceGroupRoleViewSet)
 router.register(r'users', views.UserViewSet, basename='users')
 router.register(r'audit-logs', views.AuditLogViewSet)
 router.register(r'workers', views.WorkerViewSet)
+router.register(r'flower-endpoints', monitoring_api.FlowerEndpointViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/health/', views.health),
+    path('api/flower-auth/', monitoring_api.flower_auth),
     path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', backup_api.dashboard_stats),
     path('api/recent-backup-activity/', backup_api.recent_backup_activity),

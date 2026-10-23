@@ -1,7 +1,6 @@
 import pytest
 from django.core import checks
 from django.db import connection
-from storage.models import StorageTarget
 
 from backups import content
 from backups.jobs import JobError, collect_payload, create_job
@@ -12,6 +11,7 @@ from credentials.models import Credential, CredentialType
 from devicevault_protocol import signing
 from devicevault_protocol.crypto import EncryptionHeader, VaultPublicKey, encrypt_backup, unseal
 from devicevault_protocol.tasks import verify_task
+from storage.models import StorageTarget
 
 ORCHESTRATOR = lambda: signing.public_key_from_b64(public_key())  # noqa: E731
 
