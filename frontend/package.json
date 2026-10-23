@@ -7,13 +7,17 @@
     "build": "quasar build"
   },
   "dependencies": {
-    "@quasar/extras": "*",
-    "axios": "*",
-    "quasar": "*",
-    "vue": "*",
-    "vue-router": "*"
+    "@quasar/extras": "^2.1.0",
+    "axios": "^1.20.0",
+    "quasar": "^2.35.2",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
   },
   "devDependencies": {
-    "@quasar/app-vite": "*"
+    "@quasar/app-vite": "^3.10.3"
+  },
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
   }
 }

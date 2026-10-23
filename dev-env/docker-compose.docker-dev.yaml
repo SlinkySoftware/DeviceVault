@@ -95,8 +95,9 @@ services:
     environment: *backend-env
     command:
       - bash
-      - -lc
+      - -c
       - >
+        set -o pipefail &&
         mkdir -p /var/devicevault/logs/collector-1 &&
         celery -A celery_app worker
         -Q default,collector.group.dmz_zone_queue,collector.group.secure_zone_queue
@@ -121,8 +122,9 @@ services:
     environment: *backend-env
     command:
       - bash
-      - -lc
+      - -c
       - >
+        set -o pipefail &&
         mkdir -p /var/devicevault/logs/collector-2 &&
         celery -A celery_app worker
         -Q default,collector.group.dmz_zone_queue,collector.group.secure_zone_queue
@@ -147,8 +149,9 @@ services:
     environment: *backend-env
     command:
       - bash
-      - -lc
+      - -c
       - >
+        set -o pipefail &&
         mkdir -p /var/devicevault/logs/storage-worker &&
         celery -A celery_app worker
         -Q storage.fs,storage.git
@@ -173,8 +176,9 @@ services:
     environment: *backend-env
     command:
       - bash
-      - -lc
+      - -c
       - >
+        set -o pipefail &&
         mkdir -p /var/devicevault/logs/flower &&
         celery -A celery_app flower --address=0.0.0.0 --port=5555
         --broker-api=http://guest:guest@rabbitmq:15672/api/
@@ -197,8 +201,9 @@ services:
       CHOKIDAR_USEPOLLING: "true"
     command:
       - bash
-      - -lc
+      - -c
       - >
+        set -o pipefail &&
         npm install --no-audit --no-fund &&
         mkdir -p /var/devicevault/logs/frontend &&
         npm run dev
