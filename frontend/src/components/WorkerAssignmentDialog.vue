@@ -10,7 +10,7 @@
     @submit="submit"
   >
     <template v-if="worker">
-      <q-banner v-if="approving" dense rounded class="bg-blue-1 text-black">
+      <q-banner v-if="approving" dense rounded class="bg-primary-subtle">
         <template #avatar><q-icon name="fingerprint" color="primary" /></template>
         Approve only if this fingerprint matches the one the worker printed in its log
         (<code>worker_identity</code>):

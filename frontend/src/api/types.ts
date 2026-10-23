@@ -341,12 +341,6 @@ export interface LoginResponse {
 
 export type ThemeMode = 'dark' | 'light'
 
-export interface ThemeColors {
-  title_bar_color: string
-  dashboard_box_color: string
-  dashboard_nested_box_color: string
-}
-
 export interface UserPreferences {
   theme: ThemeMode
 }

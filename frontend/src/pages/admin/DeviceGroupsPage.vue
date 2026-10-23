@@ -9,7 +9,7 @@
       <template #body-cell-description="props">
         <q-td :props="props">
           <span v-if="props.row.description">{{ props.row.description }}</span>
-          <span v-else class="text-grey-6">No description</span>
+          <span v-else class="text-muted">No description</span>
         </q-td>
       </template>
       <template #body-cell-actions="props">

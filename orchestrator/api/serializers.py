@@ -28,7 +28,6 @@ from rest_framework import serializers
 from api.permissions import is_admin
 from audit.models import AuditLog
 from core.models import Worker
-from core.theme_settings import ThemeSettings
 from core.workers import driver_catalogue, is_online
 from credentials.models import Credential, CredentialType
 from devices.models import (
@@ -712,15 +711,6 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         return DeviceDetailedSerializer(instance, context=self.context).data
-
-
-class ThemeSettingsSerializer(serializers.ModelSerializer):
-    """Serializes ThemeSettings model for API responses"""
-
-    class Meta:
-        model = ThemeSettings
-        fields = ['id', 'title_bar_color', 'dashboard_box_color', 'dashboard_nested_box_color', 'updated_at']
-        read_only_fields = ['id', 'updated_at']
 
 
 class WorkerSerializer(serializers.ModelSerializer):

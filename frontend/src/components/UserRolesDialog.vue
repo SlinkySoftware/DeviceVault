@@ -31,7 +31,7 @@
             </q-item-section>
           </q-item>
         </q-list>
-        <div v-else-if="!loading" class="text-grey-6">No roles assigned</div>
+        <div v-else-if="!loading" class="text-muted">No roles assigned</div>
       </q-card-section>
 
       <q-card-section>

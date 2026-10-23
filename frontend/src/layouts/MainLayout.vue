@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <q-layout view="hHh lpR fFf">
-    <q-header elevated class="text-white" :style="{ backgroundColor: theme.colors.title_bar_color }">
+    <q-header elevated class="app-header">
       <q-toolbar>
         <q-btn flat dense round icon="menu" aria-label="Toggle menu" class="lt-md" @click="drawerOpen = !drawerOpen" />
         <q-toolbar-title class="row items-center no-wrap">
@@ -94,7 +94,6 @@ async function logout(): Promise<void> {
 }
 
 onMounted(() => {
-  void theme.loadColors()
   void theme.loadPreference()
   void settings.loadTimeZone()
   // Refresh cached permissions in the background.
@@ -103,6 +102,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.app-header {
+  background: var(--header-bg);
+  color: var(--header-text);
+}
+
 .logo-mini {
   height: 28px;
   width: auto;
@@ -113,7 +117,11 @@ onMounted(() => {
 }
 
 body.body--dark .nav :deep(.q-item) {
-  color: #42a5f5;
+  color: var(--text-primary);
+}
+
+body.body--dark .nav :deep(.q-item .q-icon) {
+  color: var(--q-primary);
 }
 
 .nav :deep(.nav-section) {
@@ -121,7 +129,7 @@ body.body--dark .nav :deep(.q-item) {
 }
 
 body.body--dark .nav :deep(.nav-section) {
-  color: #e0e0e0;
+  color: var(--text-secondary);
 }
 
 .nav :deep(.nav-level-1) {
@@ -146,6 +154,11 @@ body.body--dark .nav-items {
 }
 
 body.body--dark .nav :deep(.q-item.q-router-link--active) {
-  background-color: #0d47a1;
+  background-color: rgba(0, 122, 255, 0.28);
+  color: var(--text-primary);
+}
+
+body.body--dark .nav :deep(.q-item.q-router-link--active .q-icon) {
+  color: var(--text-primary);
 }
 </style>

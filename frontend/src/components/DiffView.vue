@@ -93,7 +93,7 @@ const visibleRows = computed(() =>
   max-height: 70vh;
   background: #1e1e1e;
   color: #e0e0e0;
-  border: 1px solid #2d2d2d;
+  border: 1px solid var(--border-color-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;

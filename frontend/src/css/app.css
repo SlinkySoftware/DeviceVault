@@ -16,11 +16,154 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* Theme colours; the theme store overrides these from the API at startup. */
+/* Semantic tokens used throughout the app; dark mode redefines them. */
 :root {
-  --theme-title-bar: #1976d2;
-  --theme-dashboard-box: #1976d2;
-  --theme-dashboard-nested-box: #2196f3;
+  --header-bg: var(--q-primary);
+  --header-text: #fff;
+  --accent-border: 2px solid var(--q-primary);
+  --nested-border: 3px solid #2196f3;
+  --nested-bg: transparent;
+
+  --text-primary: rgba(0, 0, 0, 0.87);
+  --text-secondary: rgba(0, 0, 0, 0.6);
+  --text-tertiary: rgba(0, 0, 0, 0.38);
+  --border-color-muted: rgba(0, 0, 0, 0.12);
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --surface-subtle: #eeeeee;
+  --surface-primary-subtle: #e3f2fd;
+}
+
+/*
+ * Dark mode, modelled on macOS: cool neutral greys rather than black, lighter surfaces
+ * for raised layers, hairline borders instead of heavy shadows, and translucent white
+ * text in three levels. Quasar adds .body--dark to <body> when $q.dark.isActive, and
+ * dialogs and menus are teleported into <body>, so everything inherits these.
+ */
+body.body--dark {
+  /* System backgrounds */
+  --q-dark-page: #1e1e1e;
+  --q-dark: #2d2d2d;
+
+  /* Elevation: Quasar's dark shadows read these three. */
+  --q-dark-shadow-color: rgba(0, 0, 0, 0.3);
+  --q-dark-shadow-umbra: var(--q-dark-shadow-color);
+  --q-dark-shadow-penumbra: rgba(0, 0, 0, 0.18);
+  --q-dark-shadow-ambient: rgba(0, 0, 0, 0.12);
+  --q-dark-shadow-layout: var(--q-dark-shadow-color);
+  --border-color-muted: rgba(255, 255, 255, 0.08);
+
+  /* Apple system colours */
+  --q-primary: #007aff;
+  --q-secondary: #545456;
+  --q-accent: #af52de;
+  --q-positive: #34c759;
+  --q-negative: #ff453a;
+  --q-warning: #ff9f0a;
+  --q-info: #64d2ff;
+
+  /* Text hierarchy */
+  --text-primary: rgba(255, 255, 255, 0.88);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.3);
+
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --hover-primary-bg: rgba(0, 122, 255, 0.15);
+  --surface-subtle: rgba(255, 255, 255, 0.06);
+  --surface-primary-subtle: rgba(0, 122, 255, 0.15);
+
+  /* Title bar and dashboard boxes: raised surfaces with hairlines, not coloured frames. */
+  --header-bg: var(--q-dark);
+  --header-text: var(--text-primary);
+  --accent-border: 1px solid var(--border-color-muted);
+  --nested-border: 1px solid var(--border-color-muted);
+  --nested-bg: rgba(255, 255, 255, 0.04);
+
+  color: var(--text-primary);
+  background: var(--q-dark-page);
+}
+
+body.body--dark .q-dark {
+  color: var(--text-primary);
+}
+
+/* Semantic text and surface utilities; use these instead of text-grey-N / bg-grey-N. */
+.text-muted {
+  color: var(--text-secondary) !important;
+}
+
+.text-faint {
+  color: var(--text-tertiary) !important;
+}
+
+.bg-subtle {
+  background: var(--surface-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+.bg-primary-subtle {
+  background: var(--surface-primary-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+body.body--dark .text-caption,
+body.body--dark .q-item__label--caption,
+body.body--dark .q-item__label--header,
+body.body--dark .q-field__bottom {
+  color: var(--text-secondary);
+}
+
+body.body--dark .q-field__label,
+body.body--dark .q-field__marginal {
+  color: var(--text-secondary);
+}
+
+body.body--dark .q-field__native,
+body.body--dark .q-field__input {
+  color: var(--text-primary);
+}
+
+body.body--dark ::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Layers: hairline borders and soft shadows. */
+body.body--dark .q-menu,
+body.body--dark .q-dialog .q-card {
+  border: 1px solid var(--border-color-muted) !important;
+  box-shadow: 0 8px 24px var(--q-dark-shadow-color) !important;
+}
+
+body.body--dark .q-header,
+body.body--dark .q-footer,
+body.body--dark .q-drawer,
+body.body--dark .q-separator--dark,
+body.body--dark .q-list--dark,
+body.body--dark .q-item--dark {
+  border-color: var(--border-color-muted);
+}
+
+body.body--dark .q-separator--dark {
+  background: var(--border-color-muted);
+}
+
+body.body--dark .q-header .q-layout__shadow:after {
+  box-shadow: none;
+}
+
+body.body--dark .q-header {
+  border-bottom: 1px solid var(--border-color-muted);
+}
+
+/* Interaction states */
+body.body--dark .q-item.q-hoverable:hover > .q-focus-helper {
+  background: #fff;
+  opacity: 0.08;
+}
+
+body.body--dark .q-item.q-manual-focusable--focused > .q-focus-helper,
+body.body--dark .q-item.q-hoverable:focus-visible > .q-focus-helper {
+  background: var(--q-primary);
+  opacity: 0.15;
 }
 
 body {
@@ -36,44 +179,47 @@ body {
 
 /* Global consistent styling */
 .q-card {
-  border: 2px solid var(--theme-dashboard-box, #2196F3) !important;
+  border: 2px solid var(--q-primary) !important;
   border-radius: 8px !important;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1) !important;
 }
 
 body.body--dark .q-card {
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid var(--border-color-muted) !important;
+  box-shadow: none !important;
 }
 
 .q-table {
-  border: 2px solid var(--theme-dashboard-box, #2196F3) !important;
+  border: 2px solid var(--q-primary) !important;
   border-radius: 8px !important;
 }
 
 body.body--dark .q-table {
-  border-color: #1976D2 !important;
+  border: 1px solid var(--border-color-muted) !important;
+  box-shadow: none;
 }
 
 .q-table thead tr,
 .q-table tbody td {
-  border-color: var(--theme-dashboard-box, #2196F3) !important;
+  border-color: var(--q-primary) !important;
 }
 
 body.body--dark .q-table thead tr,
-body.body--dark .q-table tbody td {
-  border-color: #1976D2 !important;
+body.body--dark .q-table tbody td,
+body.body--dark .q-table thead th {
+  border-color: var(--border-color-muted) !important;
 }
 
 .q-table thead th {
   background: #f5f5f5;
   color: #000;
   font-weight: 600;
-  border-bottom: 2px solid var(--theme-dashboard-box, #2196F3) !important;
+  border-bottom: 2px solid var(--q-primary) !important;
 }
 
 body.body--dark .q-table thead th {
-  background: #1e1e1e;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
 }
 
 .q-table tbody tr {
@@ -85,7 +231,7 @@ body.body--dark .q-table thead th {
 }
 
 body.body--dark .q-table tbody tr:hover {
-  background: rgba(33, 150, 243, 0.1);
+  background: var(--hover-bg);
 }
 
 .q-table tbody td {
@@ -108,7 +254,7 @@ body.body--dark .q-table tbody tr:hover {
 }
 
 body.body--dark .q-field--outlined .q-field__control {
-  border-color: #1976D2 !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
 }
 
 .q-field--outlined.q-field--focused .q-field__control {
@@ -117,8 +263,14 @@ body.body--dark .q-field--outlined .q-field__control {
 }
 
 body.body--dark .q-field--outlined.q-field--focused .q-field__control {
-  border-color: #2196F3 !important;
-  box-shadow: 0 0 0 1px #2196F3 !important;
+  border-color: var(--q-primary) !important;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.35) !important;
+}
+
+/* Quasar draws its own outline in :before; the border above replaces it. */
+body.body--dark .q-field--outlined .q-field__control:before,
+body.body--dark .q-field--outlined .q-field__control:after {
+  border: none;
 }
 
 .q-dialog__backdrop {

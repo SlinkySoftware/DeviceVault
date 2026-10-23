@@ -8,7 +8,7 @@
         <q-btn v-close-popup icon="close" flat round dense aria-label="Close" />
       </q-card-section>
 
-      <q-card-section v-if="info" class="text-caption text-grey-7">
+      <q-card-section v-if="info" class="text-caption text-muted">
         <div>
           Device: <strong>{{ info.deviceName }}</strong>
         </div>
@@ -29,7 +29,7 @@
           <q-icon name="error_outline" size="3em" />
           <div class="q-mt-sm">{{ error }}</div>
         </div>
-        <div v-else-if="logs.length === 0" class="text-center text-grey-7 q-pa-md">No log entries found</div>
+        <div v-else-if="logs.length === 0" class="text-center text-muted q-pa-md">No log entries found</div>
         <q-list v-else bordered separator class="rounded-borders">
           <q-item v-for="(entry, index) in logs" :key="index">
             <q-item-section side top>

@@ -35,7 +35,6 @@ import type {
   StorageDriver,
   StorageTarget,
   StorageTargetWrite,
-  ThemeColors,
   User,
   UserCreate,
   UserDetails,
@@ -198,8 +197,6 @@ export const authApi = {
 
 export const settingsApi = {
   timezone: async () => (await http.get<{ timezone: string }>('/timezone/')).data.timezone,
-  theme: async () => (await http.get<ThemeColors>('/theme-settings/')).data,
-  updateTheme: async (body: ThemeColors) => (await http.put<ThemeColors>('/theme-settings/', body)).data,
 }
 
 export const workersApi = {

@@ -87,12 +87,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/admin/FlowerPage.vue'),
         meta: { requiresSuperuser: true, title: 'Flower' },
       },
-      {
-        path: 'vaultadmin/theme',
-        name: 'theme',
-        component: () => import('@/pages/admin/ThemePage.vue'),
-        meta: { requiresSuperuser: true, title: 'Theme' },
-      },
     ],
   },
   { path: '/:catchAll(.*)*', redirect: { name: 'dashboard' } },

@@ -23,10 +23,10 @@ defineProps<{ title: string }>()
 
 .dashboard-card__title {
   background: #f5f5f5;
-  border-bottom: 2px solid var(--theme-dashboard-box);
+  border-bottom: var(--accent-border);
 }
 
 body.body--dark .dashboard-card__title {
-  background: #1f1f1f;
+  background: rgba(255, 255, 255, 0.04);
 }
 </style>

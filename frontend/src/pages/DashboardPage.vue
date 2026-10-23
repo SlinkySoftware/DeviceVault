@@ -168,7 +168,8 @@ watch(chartDays, async (days) => {
 
 <style scoped>
 .type-list {
-  border: 3px solid var(--theme-dashboard-nested-box);
+  border: var(--nested-border);
+  background: var(--nested-bg);
   border-radius: 8px;
 }
 </style>

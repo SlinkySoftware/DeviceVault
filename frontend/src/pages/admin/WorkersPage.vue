@@ -5,7 +5,7 @@
       <q-btn color="primary" icon="refresh" label="Refresh" :loading="loading" @click="load" />
     </template>
 
-    <q-banner v-if="identity" dense rounded class="q-mb-md bg-grey-2 text-black">
+    <q-banner v-if="identity" dense rounded class="q-mb-md bg-subtle">
       <template #avatar><q-icon name="verified_user" color="primary" /></template>
       Workers pin this orchestrator's key when first approved. Its fingerprint:
       <span class="fingerprint">{{ identity.fingerprint }}</span>

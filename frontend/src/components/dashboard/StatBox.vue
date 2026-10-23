@@ -16,7 +16,8 @@ withDefaults(defineProps<{ label: string; value: string | number; color?: string
 
 <style scoped>
 .stat-box {
-  border: 3px solid var(--theme-dashboard-nested-box);
+  border: var(--nested-border);
+  background: var(--nested-bg);
   border-radius: 8px;
   padding: 10px 12px;
   flex: 1 1 0;

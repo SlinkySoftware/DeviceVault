@@ -15,6 +15,3 @@ export const integerBetween =
     const n = Number(value)
     return (Number.isInteger(n) && n >= min && n <= max) || `Must be between ${min} and ${max}`
   }
-
-export const hexColor = (value: unknown): true | string =>
-  /^#[0-9a-f]{6}$/i.test(String(value)) || 'Use a hex colour such as #1976D2'

@@ -33,9 +33,6 @@ from devicevault_protocol.registration import (
     STATUS_REVOKED,
 )
 
-# ThemeSettings lives in its own module; importing it here registers the model with the app.
-from .theme_settings import ThemeSettings  # noqa: F401
-
 
 class UserProfile(models.Model):
     """

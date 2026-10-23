@@ -5,7 +5,7 @@
       <div class="text-center q-mb-lg">
         <img src="/logos/dv-mini-logo.png" alt="" class="login-logo" />
         <h1 class="text-h4 q-my-sm">DeviceVault</h1>
-        <div class="text-grey-7">Device Backup Management System</div>
+        <div class="text-muted">Device Backup Management System</div>
       </div>
 
       <q-banner v-if="error" dense rounded class="bg-negative text-white q-mb-md">
@@ -89,6 +89,10 @@ async function submit(): Promise<void> {
 .login-page {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+body.body--dark .login-page {
+  background: radial-gradient(circle at 30% 20%, #2d2d2d 0%, #1e1e1e 70%);
 }
 
 .login-card {

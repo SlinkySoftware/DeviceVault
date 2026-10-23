@@ -23,7 +23,7 @@
             <q-chip v-for="perm in props.row.device_group_permissions" :key="perm.id" dense outline color="primary">
               {{ perm.name }}
             </q-chip>
-            <span v-if="props.row.device_group_permissions.length === 0" class="text-grey-6">No permissions</span>
+            <span v-if="props.row.device_group_permissions.length === 0" class="text-muted">No permissions</span>
           </div>
         </q-td>
       </template>
