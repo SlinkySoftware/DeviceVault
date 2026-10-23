@@ -20,7 +20,8 @@ other only through RabbitMQ and Redis.
 - Optional envelope encryption of stored backups (AES-256-GCM)
 - Backup viewing, download and side-by-side comparison
 - Dashboard statistics and audit log
-- Worker registration and liveness view
+- Zero-configuration workers: they register themselves, an admin approves them with a
+  role and assignment, and everything sent to them is signed by the orchestrator
 - Local authentication
 
 Not yet implemented (see the plan): scheduled backups, retention enforcement, S3 and
@@ -42,7 +43,7 @@ Requirements: Docker (with Compose) and `make`. Everything else runs in containe
 
 ```bash
 make dev-up        # start the dev stack: infra, orchestrator, 2 collectors, 1 storage worker, flower, frontend
-make dev-seed      # load demo data
+make dev-seed      # load demo data and approve the dev workers
 make dev-ps        # container status
 make dev-logs      # tail all logs (SERVICE=api for one)
 make dev-down      # stop the stack
@@ -83,7 +84,7 @@ Three independent stacks (infra, orchestrator, workers). See
 ```
 protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
 worker/         Collection and storage worker: Celery tasks, plugins, storage backends (no Django)
-orchestrator/   Django project: API, result consumers, worker monitor
+orchestrator/   Django project: API, worker events, result consumers
 frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints
 deploy/         Compose stacks: infra, orchestrator, worker, dev

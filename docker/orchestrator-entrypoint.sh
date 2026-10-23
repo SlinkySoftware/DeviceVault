@@ -27,8 +27,14 @@ case "$role" in
     store-results)
         exec python manage.py consume_storage_results "$@"
         ;;
-    worker-monitor)
-        exec python manage.py monitor_worker_registry "$@"
+    events)
+        # Worker registration and heartbeats (queue dv.orchestrator).
+        exec celery -A devicevault.celery worker \
+            --queues=dv.orchestrator \
+            --hostname="events@%h" \
+            --concurrency="${DV_EVENTS_CONCURRENCY:-2}" \
+            --loglevel="${DV_LOG_LEVEL:-INFO}" \
+            "$@"
         ;;
     flower)
         exec celery -A devicevault.celery flower \

@@ -66,11 +66,13 @@ ENTRYPOINT ["dv-worker"]
 
 # --- Dev: every package's dependencies plus dev tools; source is bind-mounted --
 FROM lock AS dev
-# Dev containers run as the host user (any UID), so the storage root is
-# world-writable and sticky here; the worker image owns it as devicevault.
+# Dev containers run as the host user (any UID), so the storage root and the
+# worker state directory are world-writable and sticky here; the worker image
+# owns them as devicevault.
 RUN apt-get update && apt-get install -y --no-install-recommends git make \
     && rm -rf /var/lib/apt/lists/* \
-    && install -d -m 1777 /srv/devicevault
+    && install -d -m 1777 /srv/devicevault \
+    && chmod 1777 /var/lib/devicevault
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --all-packages --no-install-workspace \
     && printf '/workspace/protocol/src\n/workspace/worker/src\n' \

@@ -63,10 +63,10 @@ services:
     entrypoint: [dv-orchestrator]
     command: [store-results]
 
-  worker-monitor:
+  events:
     <<: *orchestrator
     entrypoint: [dv-orchestrator]
-    command: [worker-monitor]
+    command: [events]
 
   flower:
     <<: *orchestrator
@@ -79,19 +79,28 @@ services:
     <<: *worker
     environment:
       DV_WORKER_NAME: collector-1
-      DV_WORKER_QUEUES: collector.group.dmz_zone_queue,collector.group.secure_zone_queue
+    volumes:
+      - ../..:/workspace
+      - storage:/srv/devicevault
+      - collector-1-state:/var/lib/devicevault
 
   collector-2:
     <<: *worker
     environment:
       DV_WORKER_NAME: collector-2
-      DV_WORKER_QUEUES: collector.group.dmz_zone_queue,collector.group.secure_zone_queue
+    volumes:
+      - ../..:/workspace
+      - storage:/srv/devicevault
+      - collector-2-state:/var/lib/devicevault
 
   storage-1:
     <<: *worker
     environment:
       DV_WORKER_NAME: storage-1
-      DV_WORKER_QUEUES: storage.fs,storage.git
+    volumes:
+      - ../..:/workspace
+      - storage:/srv/devicevault
+      - storage-1-state:/var/lib/devicevault
 
   frontend:
     image: node:24-alpine
@@ -110,3 +119,6 @@ services:
 
 volumes:
   storage:
+  collector-1-state:
+  collector-2-state:
+  storage-1-state:

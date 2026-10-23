@@ -3,8 +3,11 @@
 #   cp worker.env.example worker.env   # then edit
 #   docker compose -p dv-collector-dmz up -d
 #
-# The worker connects out to RabbitMQ and Redis only. Filesystem and git
-# storage locations must use paths under /srv/devicevault.
+# The worker connects out to RabbitMQ and Redis only, registers with the
+# orchestrator, and waits for an administrator to approve it (Admin Settings >
+# Workers). Its identity lives in the "state" volume; keep it, or the worker
+# registers as a new worker. Filesystem and git storage locations must use
+# paths under /srv/devicevault.
 
 name: devicevault-worker
 

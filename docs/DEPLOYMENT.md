@@ -7,12 +7,12 @@ out to RabbitMQ and Redis in the infra stack, and that is all.
 | Stack | Path | Runs |
 |---|---|---|
 | Infra | `deploy/infra` | RabbitMQ, Redis, PostgreSQL (optional) |
-| Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, result consumers, worker monitor, Flower (optional) |
+| Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, worker events, result consumers, Flower (optional) |
 | Worker | `deploy/worker` | one collector or storage worker per Compose project |
 
-> **Status:** pre-release. Workers still need their queues (and storage workers
-> their encryption keys) configured locally. Both go away in phases 4 and 5,
-> when the orchestrator assigns work. See [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Status:** pre-release. Storage workers still need encryption keys configured
+> locally if per-device encryption is used; that goes away in phase 5. See
+> [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 1. Build the images
 
@@ -43,6 +43,8 @@ them to the orchestrator and worker hosts.
 ```bash
 cd deploy/orchestrator
 cp orchestrator.env.example orchestrator.env   # see the reference below
+# A signing key for DV_SIGNING_KEY (prints the key; the fingerprint goes to stderr):
+docker run --rm -e DV_DEBUG=true --entrypoint python devicevault-orchestrator manage.py generate_signing_key
 docker compose up -d                           # UI on :8080 (DV_HTTP_PORT)
 docker compose --profile flower up -d          # ... plus Flower on :5555
 ```
@@ -55,6 +57,10 @@ set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
 With `DV_DB_ENGINE=sqlite` the database lives in the stack's `data` volume, which
 limits you to a single orchestrator node.
 
+`DV_SIGNING_KEY` signs every assignment and task sent to workers. Workers pin
+it when first approved, so use the same key on every orchestrator node and
+never change it. A new key means resetting every worker.
+
 ## 4. Workers
 
 One Compose project per worker:
@@ -65,14 +71,30 @@ cp worker.env.example worker.env
 docker compose -p dv-collector-dmz up -d
 ```
 
-A worker needs only `DV_BROKER_URL` and `DV_REDIS_URL`, plus these interim
-settings:
+A worker needs only `DV_BROKER_URL` and `DV_REDIS_URL`. On first start it
+creates its identity in the `state` volume, logs its fingerprint, and registers:
 
-- `DV_WORKER_QUEUES`: collectors use `collector.group.<queue id>` (the
-  collection group's RabbitMQ queue ID in the UI). Storage workers use
-  `storage.fs,storage.git`.
+```bash
+docker compose -p dv-collector-dmz logs worker | grep worker_identity
+```
+
+Then, in the UI under **Admin Settings > Workers**, check that the fingerprint
+matches and **Approve** the worker with a role:
+
+- **Collector**: choose the collection groups whose devices it backs up.
+- **Storage**: choose the storage backends it serves (`fs`, `git`).
+
+The worker starts consuming within seconds. It pins the orchestrator key shown
+on the Workers page; check that the fingerprint in its `orchestrator_pinned`
+log line matches. To automate approval: `manage.py approve_worker <name>
+--role collector --groups <queue id> ...`.
+
+- Keep the `state` volume. Deleting it (or `identity.json`) resets the worker:
+  it registers as a new, pending worker.
+- **Revoke** stops a worker consuming. **Forget** removes it; if it is still
+  running it registers again as pending.
 - `DV_ENCRYPTION_KEYS` / `DV_ENCRYPTION_DEFAULT_KID`: storage workers only, when
-  per-device encryption is used.
+  per-device encryption is used (interim, until phase 5).
 
 Filesystem and git backup locations must point under `/srv/devicevault`, which
 is the worker's `storage` volume.
@@ -102,7 +124,9 @@ secrets). The file takes precedence.
 | `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin |
 | `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local user accounts |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
-| `DV_WORKER_ONLINE_TIMEOUT_SEC` / `DV_WORKER_PONG_GRACE_SEC` / `DV_WORKER_PING_INTERVAL_SEC` | `90` / `45` / `30` | Worker liveness |
+| `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_signing_key`) |
+| `DV_WORKER_ONLINE_TIMEOUT_SEC` | `90` | A worker is offline after this long without a heartbeat |
+| `DV_EVENTS_CONCURRENCY` | `2` | Worker-event processes in the `events` service |
 | `DV_ENCRYPTION_ENABLED` / `DV_ENCRYPTION_KEYS` / `DV_ENCRYPTION_DEFAULT_KID` | `false` / none / none | Interim stored-backup encryption |
 
 ### Worker
@@ -114,7 +138,8 @@ secrets). The file takes precedence.
 | `DV_WORKER_NAME` | `worker` | Display name (`<name>@<container>`) |
 | `DV_WORKER_CONCURRENCY` | `2` | Parallel tasks |
 | `DV_LOG_LEVEL` | `INFO` | |
-| `DV_WORKER_QUEUES` | required (interim) | Queues to consume |
+| `DV_STATE_DIR` | `/var/lib/devicevault` | Where the worker keeps its identity |
+| `DV_WORKER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat interval |
 | `DV_ENCRYPTION_*` | none (interim) | Storage workers only |
 
 ## Known limitations (pre-release)

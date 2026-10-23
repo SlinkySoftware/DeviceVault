@@ -20,13 +20,13 @@ PY_PACKAGES = protocol worker orchestrator
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
 .PHONY: help dev-image lock lint fmt test check frontend-install frontend-lint frontend-test frontend-build \
-	images dev-up dev-down dev-reset dev-ps dev-logs dev-seed
+	images dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve
 
 help:
 	@echo "Quality:   lint fmt test frontend-lint frontend-test check"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
-	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed"
+	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve"
 
 dev-image:
 	docker build -q -f docker/Dockerfile --target dev -t $(DEV_IMAGE) .
@@ -82,3 +82,9 @@ dev-logs:
 
 dev-seed:
 	$(DEV_COMPOSE) exec api dv-orchestrator manage seed_demo
+	$(MAKE) dev-approve
+
+# Approve the dev stack's workers (they register as pending on first start).
+dev-approve:
+	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker 'collector-*' --role collector --all-groups
+	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker storage-1 --role storage --backends fs git

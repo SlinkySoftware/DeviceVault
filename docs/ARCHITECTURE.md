@@ -46,7 +46,7 @@ No component talks to another directly. Everything goes over AMQP or Redis.
 | `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`, `read.result`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
 | `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
-Until phase 4/5 the orchestrator runs the interim processes `collect-results`, `store-results` and `worker-monitor` (Redis-stream consumers and the presence monitor), which `events` and `scheduler` replace. The no-op celery beat process was dropped in phase 2.
+The `events` process (phase 4) handles worker registration and heartbeats. Until phase 5 the orchestrator also runs the interim `collect-results` and `store-results` Redis-stream consumers, which `events` and `scheduler` then replace. The no-op celery beat process was dropped in phase 2.
 
 ### Worker runtime (pure Celery + kombu, **no Django**)
 
@@ -77,21 +77,25 @@ Tooling: a `uv` workspace (one lockfile), `ruff`, `pytest`; `npm` with a lockfil
 
 ### 4.1 Worker identity
 
-- On first start the worker generates `worker_id` (UUIDv4) and an **Ed25519 signing key plus an X25519 encryption key**. It persists them in the `/var/lib/devicevault` state volume. This is self-generated state, not configuration.
-- The public key fingerprint is printed in the worker log so an admin can verify it out-of-band during approval.
+- On first start the worker generates `worker_id` (UUIDv4), an **Ed25519 signing key** and an **X25519 encryption key**, and keeps them in `identity.json` in the state volume (`DV_STATE_DIR`, default `/var/lib/devicevault`, mode 0600). This is self-generated state, not configuration. Deleting it resets the worker: it registers again under a new id.
+- The worker logs `worker_identity` with its SSH-style fingerprint (`SHA256:…`) so an admin can check it before approving.
 
-### 4.2 Registration → approval → assignment
+### 4.2 Registration → approval → assignment (built in phase 4)
 
-1. Worker starts consuming only `dv.worker.<id>`, then sends `worker.register`: `{worker_id, name, version, host facts, public keys, capabilities: {collector_drivers:[{key,version,schema}], storage_drivers:[{key,version,schema,shareable}]}}`. The message is signed with the worker's key.
-2. The orchestrator upserts `Worker(status=pending)`. Nothing is sent back until an admin approves.
-3. The admin approves in the UI after checking the fingerprint, and assigns a **role** plus either **collection group(s)** or **storage target(s)**.
-4. The orchestrator sends a signed `worker.assignment` (with a version number) to `dv.worker.<id>`: role, queues, concurrency, the orchestrator's public keys, and secrets *encrypted to that worker's key* (collection-group key or storage-target config).
-5. The worker verifies the message, applies it with `add_consumer`/`cancel_consumer` on itself, and acks with the applied version. Heartbeats carry the applied version, and the orchestrator re-pushes on mismatch. After a reconnect the worker re-registers and the orchestrator re-sends the current assignment. **No local cache.** With no assignment, the worker waits and retries.
-6. Admin can **revoke** a worker: it gets a cancel-all assignment, and its keys are dropped from group key distribution, with key rotation.
+Message formats are in `protocol/src/devicevault_protocol/registration.py`.
 
-The orchestrator signing key is **pinned TOFU** in the worker state volume when the first signed assignment arrives. From then on the worker rejects unsigned or foreign-signed control messages and tasks. Recovery from an orchestrator key change is a deliberate worker state reset.
+1. The Celery worker starts consuming only its own auto-delete direct queue `dv.worker.<id>`. A registration agent thread in the main process listens on `dv.worker.<id>.control` and sends a signed (worker key) `register` event, then `heartbeat`s every 30s. Events are Celery tasks `orchestrator.worker_event` on `dv.orchestrator`, expiring after 120s, and carry the worker's capabilities (collector drivers and storage backends), the applied assignment version and the orchestrator key it pinned.
+2. The orchestrator's `events` process records the worker as `pending`. The first event fixes the worker's signing key, so later events with the same id but another key are rejected. Pending workers are sent nothing.
+3. An admin approves the worker in the UI (or with `manage.py approve_worker`) after comparing fingerprints, choosing a **role** and either **collection groups** (collectors) or **storage backends** (storage; storage targets in phase 6).
+4. The orchestrator sends a signed assignment `{version, status, role, queues, orchestrator_key}` to the control queue. Versions only increase, and the orchestrator never falls behind a version a worker reports (for example after a worker is forgotten and re-registers, or a database restore).
+5. The worker verifies the assignment, ignores stale versions, and applies the queue difference with Celery's own `add_consumer`/`cancel_consumer`. The next heartbeat reports the new version, and the orchestrator re-sends while they differ. Nothing is cached: after a restart the worker idles until the assignment arrives again.
+6. **Revoke** sends an assignment with no queues. **Forget** revokes and deletes the record; a worker that is still running comes back as pending.
 
-Limitation: broker credentials are shared per role, so revocation is enforced cryptographically (signatures and keys), not at the broker. Per-worker broker users can be added later.
+**Trust on first use:** the worker pins the orchestrator key from the first *approved* assignment that verifies against it, so the trust decision coincides with the admin's approval. After that, assignments signed with any other key are rejected, and so is every task (`device.collect`, `storage.store`, `storage.read`) not signed by the pinned key. Tasks rejected this way fail immediately and are not retried. The Workers page shows the orchestrator's fingerprint and flags a worker that pinned a different one. Changing `DV_SIGNING_KEY` means resetting every worker's state.
+
+**Limitations:**
+- Broker credentials are shared per role, so revocation is enforced cryptographically (signatures and keys), not at the broker. Per-worker broker users can be added later.
+- Celery remote control stays enabled because Flower needs it, so anyone holding broker credentials can still send Celery control commands (for example, to stop a worker consuming). They cannot forge assignments or tasks.
 
 ### 4.3 What is encrypted
 
@@ -173,7 +177,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 1 | `chore/foundation` | New layout, uv workspace, Py 3.14, Django 6.1, pinned deps, ruff/pytest, `Makefile`, cruft and docs removal, squashed migrations, MySQL removed, unused external-auth deps removed | yes (behaviour unchanged) |
 | 2 | `feat/deploy-layout` | Dockerfiles, `deploy/{infra,orchestrator,worker,dev}`, `protocol/` + `worker/` packages (worker de-Djangoed, still old routing), env-only config | yes |
 | 3 | `feat/frontend-rewrite` | Port of existing pages to TypeScript, `<script setup>`, Pinia and Vitest, with shared CRUD/dialog components; fixes for device writes and API access control found on the way | yes |
-| 4 | `feat/registration` | protocol package, keys, signing, register/approve/assign, liveness, Workers UI | yes |
+| 4 | `feat/registration` | Worker identity and keys, signed events/assignments/tasks with TOFU pinning, register/approve/assign/revoke, `events` process, Workers UI; workers need no queue config and the orchestrator no longer depends on the worker package | yes |
 | 5 | `feat/pipeline` | BackupJob, scheduler (fixes schedules), blob data path, collector-side encryption, credential encryption, retry semantics, collector driver framework (Netmiko/Scrapli bases), schema-driven device form | yes |
 | 6 | `feat/storage-targets` | StorageTarget per worker, storage driver framework (fs, git, s3), reads, UI | yes |
 | 7 | `feat/flower-ha` | FlowerEndpoint and nginx proxy, scheduler leader election verified with 2 nodes, HA docs | yes |

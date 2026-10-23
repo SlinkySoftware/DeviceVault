@@ -23,12 +23,15 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   task/queue/stream names, the Celery app factory, presence constants, `crypto`.
   Shared by both sides; must not import Django.
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
-  storage tasks, `plugins/` (collector plugins), `storage/` (backends), `presence`.
-  Must not import Django (a test enforces it).
+  storage tasks, `plugins/` (collector plugins), `storage/` (backends), `identity`
+  (persistent worker id and keys), `agent` (registration and assignments), `trust`
+  (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `api`, `audit`, `backups`, `core`, `credentials`, `devices`,
   `locations`, `policies`. Settings are env-only; tests use `devicevault.test_settings`.
-  It depends on `worker` only for the plugin catalogue (temporary, until phase 4).
+  `core/workers.py` is the worker registry (events, approval, assignments, driver
+  catalogue); `core/signing.py` holds the orchestrator signing key. The orchestrator
+  must not import the worker package.
 - `frontend/`: Quasar 2 / Vue 3 SPA in TypeScript. Talks to same-origin `/api` (nginx in
   production, the Quasar dev proxy in development). `src/api/` (axios client,
   `types.ts` DTOs, `endpoints.ts` typed calls), `src/stores/` (Pinia: auth, theme,
@@ -57,6 +60,12 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   Tests are Vitest specs next to the code (`*.spec.ts`).
 - Workers must not import Django. The orchestrator owns all database access; workers
   communicate only through RabbitMQ and Redis.
+- Everything the orchestrator sends a worker is signed: wrap task parameters with
+  `core.signing.sign_task(...)` and have the worker task call `verified_payload(...)`
+  first. Never add an unsigned task or a worker-side config setting; workers get
+  configuration only through their assignment.
+- Backup methods shown or accepted by the API come from `core.workers.driver_catalogue()`
+  (what approved collectors advertise), not from worker code.
 - Collector plugins expose `PLUGIN = BackupPlugin(...)` in
   `worker/src/devicevault_worker/plugins/<name>.py`. Storage backends are registered in
   `worker/src/devicevault_worker/storage/tasks.py`. Both become entry-point driver

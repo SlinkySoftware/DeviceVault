@@ -1,4 +1,4 @@
-# DeviceVault orchestrator: web UI, API, result consumers and worker monitor.
+# DeviceVault orchestrator: web UI, API, result consumers and worker events.
 #
 #   cp orchestrator.env.example orchestrator.env   # then edit
 #   docker compose up -d
@@ -47,9 +47,9 @@ services:
     <<: [*orchestrator, *after-migrate]
     command: [store-results]
 
-  worker-monitor:
+  events:
     <<: [*orchestrator, *after-migrate]
-    command: [worker-monitor]
+    command: [events]
 
   web:
     image: ${DV_WEB_IMAGE:-devicevault-web:latest}
