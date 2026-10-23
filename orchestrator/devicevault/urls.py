@@ -61,5 +61,6 @@ urlpatterns = [
     path('api/auth/user/', views.UserInfoView.as_view()),
     path('api/auth/change-password/', views.ChangePasswordView.as_view()),
     path('api/theme-settings/', views.ThemeSettingsView.as_view()),
+    path('api/user/preferences/', views.UserPreferencesView.as_view()),
     # Dashboard layout/customization disabled; fixed layout only
 ]

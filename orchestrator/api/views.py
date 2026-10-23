@@ -67,6 +67,7 @@ from .serializers import (
     DeviceGroupSerializer,
     DeviceSerializer,
     DeviceTypeSerializer,
+    DeviceWriteSerializer,
     GroupDeviceGroupRoleSerializer,
     GroupSerializer,
     LoginSerializer,
@@ -160,10 +161,30 @@ class DeviceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
-        """Use detailed serializer for retrieve and update"""
-        if self.action in ['retrieve', 'update', 'partial_update']:
+        if self.action in ['create', 'update', 'partial_update']:
+            return DeviceWriteSerializer
+        if self.action == 'retrieve':
             return DeviceDetailedSerializer
         return DeviceSerializer
+
+    def _require_modify(self, device_group):
+        from devices.permissions import user_has_device_group_django_permission
+
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return
+        if device_group is None or not user_has_device_group_django_permission(user, device_group, 'modify'):
+            raise PermissionDenied('You do not have permission to modify devices in this device group')
+
+    def perform_create(self, serializer):
+        self._require_modify(serializer.validated_data.get('device_group'))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._require_modify(serializer.instance.device_group)
+        if 'device_group' in serializer.validated_data:
+            self._require_modify(serializer.validated_data['device_group'])
+        serializer.save()
 
     def get_queryset(self):
         """Filter devices based on user's Django permissions for device groups and annotate last successful backup."""

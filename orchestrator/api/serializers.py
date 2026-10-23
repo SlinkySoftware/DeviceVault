@@ -690,6 +690,43 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         return getattr(obj, 'last_success_status', None) or obj.last_backup_status
 
 
+class DeviceWriteSerializer(serializers.ModelSerializer):
+    """Accepts primary keys for related objects on create/update.
+
+    Responses use DeviceDetailedSerializer so clients see the same shape as a retrieve.
+    """
+
+    class Meta:
+        model = Device
+        fields = [
+            'id',
+            'name',
+            'ip_address',
+            'dns_name',
+            'device_type',
+            'manufacturer',
+            'backup_method',
+            'device_group',
+            'collection_group',
+            'enabled',
+            'encrypt_backups',
+            'retention_policy',
+            'backup_location',
+            'credential',
+        ]
+        extra_kwargs = {'device_group': {'required': True, 'allow_null': False}}
+
+    def validate_backup_method(self, value):
+        from devicevault_worker.plugins import get_plugin
+
+        if not get_plugin(value):
+            raise serializers.ValidationError(f'Unknown backup method "{value}"')
+        return value
+
+    def to_representation(self, instance):
+        return DeviceDetailedSerializer(instance, context=self.context).data
+
+
 class ThemeSettingsSerializer(serializers.ModelSerializer):
     """Serializes ThemeSettings model for API responses"""
 
