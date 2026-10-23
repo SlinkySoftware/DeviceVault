@@ -24,6 +24,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group, User
 from rest_framework import serializers
 
+from api.permissions import is_admin
 from audit.models import AuditLog
 from backups.models import Backup
 from core.models import WorkerRegistration
@@ -108,8 +109,24 @@ class BackupScheduleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class BackupLocationSerializer(serializers.ModelSerializer):
-    """Serializes BackupLocation model for API responses"""
+class AdminOnlyFieldsMixin:
+    """Drop fields that carry secrets from responses to non-administrators."""
+
+    admin_only_fields: tuple[str, ...] = ()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if not is_admin(getattr(request, 'user', None)):
+            for field in self.admin_only_fields:
+                data.pop(field, None)
+        return data
+
+
+class BackupLocationSerializer(AdminOnlyFieldsMixin, serializers.ModelSerializer):
+    """Serializes BackupLocation model; config (paths, credentials) is admin-only."""
+
+    admin_only_fields = ('config',)
 
     class Meta:
         model = BackupLocation
@@ -124,8 +141,10 @@ class CredentialTypeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class CredentialSerializer(serializers.ModelSerializer):
-    """Serializes Credential model for API responses"""
+class CredentialSerializer(AdminOnlyFieldsMixin, serializers.ModelSerializer):
+    """Serializes Credential model; the secret data is admin-only."""
+
+    admin_only_fields = ('data',)
 
     class Meta:
         model = Credential
@@ -603,25 +622,39 @@ class DeviceGroupSerializer(serializers.ModelSerializer):
 
 
 class UserDeviceGroupRoleSerializer(serializers.ModelSerializer):
-    """Serializes user-device group role assignments"""
+    """Serializes user-device group role assignments.
 
-    role = DeviceGroupRoleSerializer(read_only=True)
+    ``role`` is written as a primary key and read back as the nested role.
+    """
+
     username = serializers.CharField(source='user.username', read_only=True)
 
     class Meta:
         model = UserDeviceGroupRole
         fields = ['id', 'user', 'username', 'role']
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['role'] = DeviceGroupRoleSerializer(instance.role, context=self.context).data
+        return data
+
 
 class GroupDeviceGroupRoleSerializer(serializers.ModelSerializer):
-    """Serializes auth group-device group role assignments"""
+    """Serializes auth group-device group role assignments.
 
-    role = DeviceGroupRoleSerializer(read_only=True)
+    ``role`` is written as a primary key and read back as the nested role.
+    """
+
     auth_group_name = serializers.CharField(source='auth_group.name', read_only=True)
 
     class Meta:
         model = GroupDeviceGroupRole
         fields = ['id', 'auth_group', 'auth_group_name', 'role']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['role'] = DeviceGroupRoleSerializer(instance.role, context=self.context).data
+        return data
 
 
 class DeviceDetailedSerializer(serializers.ModelSerializer):

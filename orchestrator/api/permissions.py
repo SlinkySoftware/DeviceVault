@@ -14,9 +14,29 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
-class RBACPermission(BasePermission):
+def is_admin(user) -> bool:
+    """Application administrators: staff or superusers."""
+    return bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
+
+
+class IsAdmin(BasePermission):
+    """Only application administrators."""
+
     def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated
+        return is_admin(request.user)
+
+
+class IsAdminOrReadOnly(BasePermission):
+    """Any authenticated user may read; only administrators may write.
+
+    For reference data that device editors need to choose from (types,
+    policies, locations...) but must not change.
+    """
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+        return is_admin(request.user)

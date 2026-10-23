@@ -28,9 +28,10 @@ from django.utils import timezone
 from rest_framework import decorators, response, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
+from api.permissions import IsAdmin, IsAdminOrReadOnly
 from audit.models import AuditLog
 from backups.models import Backup, StoredBackup
 from core.models import DashboardLayout, WorkerRegistration
@@ -83,11 +84,13 @@ from .serializers import (
 
 class DeviceTypeViewSet(viewsets.ModelViewSet):
     queryset = DeviceType.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = DeviceTypeSerializer
 
 
 class ManufacturerViewSet(viewsets.ModelViewSet):
     queryset = Manufacturer.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = ManufacturerSerializer
 
 
@@ -106,13 +109,7 @@ class CollectionGroupViewSet(viewsets.ModelViewSet):
 
     queryset = CollectionGroup.objects.all()
     serializer_class = CollectionGroupSerializer
-    permission_classes = [IsAuthenticated]
-
-    def check_permissions(self, request):
-        """Override to enforce superuser-only access"""
-        super().check_permissions(request)
-        if not (request.user.is_staff or request.user.is_superuser):
-            self.permission_denied(request, message='Only superusers can manage collection groups')
+    permission_classes = [IsAdminOrReadOnly]
 
     def perform_destroy(self, instance):
         """Prevent deletion if any devices are assigned to this collection group"""
@@ -266,6 +263,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
 class BackupViewSet(viewsets.ModelViewSet):
     queryset = Backup.objects.all()
+    permission_classes = [IsAdmin]
     serializer_class = BackupSerializer
 
     def get_queryset(self):
@@ -600,7 +598,7 @@ def timezone_config(request):
 class WorkerRegistryView(APIView):
     """Return worker registration and liveliness data for the orchestrator dashboard."""
 
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def get(self, request):
         online_timeout_sec = settings.DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC
@@ -637,26 +635,31 @@ class WorkerRegistryView(APIView):
 
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
     queryset = RetentionPolicy.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = RetentionPolicySerializer
 
 
 class BackupScheduleViewSet(viewsets.ModelViewSet):
     queryset = BackupSchedule.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = BackupScheduleSerializer
 
 
 class BackupLocationViewSet(viewsets.ModelViewSet):
     queryset = BackupLocation.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = BackupLocationSerializer
 
 
 class CredentialViewSet(viewsets.ModelViewSet):
     queryset = Credential.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = CredentialSerializer
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
     queryset = CredentialType.objects.all()
+    permission_classes = [IsAdminOrReadOnly]
     serializer_class = CredentialTypeSerializer
 
 
@@ -673,6 +676,7 @@ class GroupViewSet(viewsets.ModelViewSet):
     """
 
     queryset = Group.objects.all()
+    permission_classes = [IsAdmin]
     serializer_class = GroupSerializer
 
     def destroy(self, request, *args, **kwargs):
@@ -682,7 +686,7 @@ class GroupViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdmin]
 
     def _is_jit_provisioned(self, user):
         try:
@@ -759,6 +763,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all().order_by('-created_at')
+    permission_classes = [IsAdmin]
     serializer_class = AuditLogSerializer
 
 
@@ -1091,7 +1096,7 @@ class DeviceGroupViewSet(viewsets.ModelViewSet):
 
     queryset = DeviceGroup.objects.all()
     serializer_class = DeviceGroupSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         """Only return device groups the user can access via any Django device-group permission"""
@@ -1142,7 +1147,7 @@ class DeviceGroupRoleViewSet(viewsets.ModelViewSet):
 
     queryset = DeviceGroupRole.objects.all()
     serializer_class = DeviceGroupRoleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdmin]
 
     def get_queryset(self):
         """Only return roles for device groups the user has access to"""
@@ -1173,7 +1178,7 @@ class DeviceGroupPermissionViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     queryset = Permission.objects.filter(codename__startswith='dg_').order_by('codename')
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def get_queryset(self):
         """Return Django auth permissions with dg_ prefix"""
@@ -1207,7 +1212,12 @@ class UserDeviceGroupRoleViewSet(viewsets.ModelViewSet):
 
     queryset = UserDeviceGroupRole.objects.all()
     serializer_class = UserDeviceGroupRoleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdmin]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('role__device_group')
+        user = self.request.query_params.get('user')
+        return qs.filter(user_id=user) if user else qs
 
 
 class GroupDeviceGroupRoleViewSet(viewsets.ModelViewSet):
@@ -1222,7 +1232,12 @@ class GroupDeviceGroupRoleViewSet(viewsets.ModelViewSet):
 
     queryset = GroupDeviceGroupRole.objects.all()
     serializer_class = GroupDeviceGroupRoleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdmin]
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('role__device_group')
+        auth_group = self.request.query_params.get('auth_group')
+        return qs.filter(auth_group_id=auth_group) if auth_group else qs
 
 
 class ThemeSettingsView(APIView):
