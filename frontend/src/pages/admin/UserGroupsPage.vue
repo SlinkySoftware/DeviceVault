@@ -21,7 +21,9 @@
         <q-td :props="props">
           {{ props.row.name }}
           <q-badge v-if="props.row.is_global_admin" color="purple" class="q-ml-xs">Global admin</q-badge>
-          <q-badge v-if="props.row.source === 'external'" color="blue" class="q-ml-xs">External</q-badge>
+          <q-badge v-if="props.row.source === 'external'" color="blue" class="q-ml-xs">
+            {{ props.row.provider_name ?? 'External' }}: {{ props.row.external_id }}
+          </q-badge>
           <div v-if="props.row.description" class="text-caption text-muted">{{ props.row.description }}</div>
         </q-td>
       </template>

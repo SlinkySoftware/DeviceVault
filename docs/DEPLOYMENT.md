@@ -62,6 +62,23 @@ use and `DV_SESSION_MAX_HOURS` after sign-in. Repeated failed sign-ins lock out 
 username or client address for `DV_LOGIN_LOCKOUT_MIN`; the client address is the
 last `X-Forwarded-For` hop, which the `web` service adds.
 
+**Identity providers** are configured in the UI (Admin Settings > Auth Providers),
+not the environment. An LDAP / Active Directory provider uses the login form: local
+accounts are tried first, then each enabled provider in order, by searching for
+the user as the service account and binding as the entry found. The orchestrator
+must reach the directory (LDAPS, or StartTLS on `ldap://`; give a CA certificate
+for a private CA). Users are created on first sign-in and linked to the
+provider by an immutable attribute (`entryUUID`, or `objectGUID` for AD), never by
+username or email. At each sign-in their provider groups are mapped onto user
+groups by mapping rules (optionally creating external groups `<slug>:<name>`
+for unmapped ones); memberships added by hand are kept. Provider secrets are
+encrypted at rest and write-only. Use **Test** to check the settings and look a
+user and their groups up.
+
+With `DV_LOCAL_AUTH_ENABLED=false`, only **break-glass** local users can sign in
+with a local password. The bootstrap admin is one; global admins can flag other
+local users on the Users page. Keep at least one, in case the directory is unreachable.
+
 Access comes only from **user groups** (Admin Settings > User Groups): each
 grants its members permissions on device groups (View Status, Backup Now, View
 Contents, Download, Group Admin), and a group flagged global administrator holds
@@ -290,8 +307,8 @@ secrets). The file takes precedence.
 | `DV_RESULT_BACKEND` | `DV_REDIS_URL` | Celery result backend |
 | `DV_BROKER_API` | none | RabbitMQ management API, for Flower |
 | `DV_FLOWER_URL_PREFIX` | none (`flower/local` in the orchestrator stack) | `flower` service: its path, `flower/<slug>` when proxied |
-| `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin |
-| `DV_LOCAL_AUTH_ENABLED` | `true` | Allow creating local user accounts |
+| `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin (a break-glass global administrator) |
+| `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local users to sign in and be created (break-glass users always can sign in) |
 | `DV_SESSION_IDLE_MIN` | `60` | A session unused this long ends |
 | `DV_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in, used or not |
 | `DV_LOGIN_MAX_FAILURES` / `DV_LOGIN_LOCKOUT_MIN` | `5` / `15` | Failed sign-ins (per username, and per client address) within the window that lock it out for the window |

@@ -7,20 +7,11 @@ from django.db.models import Count
 from rest_framework import decorators, response, serializers, status, viewsets
 
 from accounts.access import IsGlobalAdmin, IsGlobalAdminOrReadOnly, is_global_admin
-from api.serializers import driver_param_errors
+from api.serializers import driver_param_errors, secret_fields
 from core import workers as registry
 from core.models import Worker
 from storage.models import StorageTarget
 from storage.service import TargetUnavailable, check_target
-
-
-def secret_fields(schema: dict | None) -> set[str]:
-    """Settings the driver marks secret (``writeOnly``, e.g. pydantic ``SecretStr``)."""
-
-    def secret(prop: dict) -> bool:
-        return bool(prop.get('writeOnly')) or any(secret(option) for option in prop.get('anyOf', []))
-
-    return {name for name, prop in ((schema or {}).get('properties') or {}).items() if secret(prop)}
 
 
 class StorageTargetSerializer(serializers.ModelSerializer):

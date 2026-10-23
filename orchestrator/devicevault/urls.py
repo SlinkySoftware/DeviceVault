@@ -21,6 +21,7 @@ from django.urls import include, path
 from rest_framework import routers
 
 from accounts import api as accounts_api
+from accounts import provider_api
 from api import views
 from audit import api as audit_api
 from backups import api as backup_api
@@ -43,6 +44,8 @@ router.register(r'credential-types', views.CredentialTypeViewSet)
 router.register(r'device-groups', views.DeviceGroupViewSet, basename='device-groups')
 router.register(r'users', accounts_api.UserViewSet, basename='users')
 router.register(r'user-groups', accounts_api.UserGroupViewSet, basename='user-groups')
+router.register(r'auth-providers', provider_api.AuthProviderViewSet, basename='auth-providers')
+router.register(r'auth-provider-kinds', provider_api.AuthProviderKindViewSet, basename='auth-provider-kinds')
 router.register(r'audit-logs', audit_api.AuditLogViewSet, basename='audit-logs')
 router.register(r'workers', views.WorkerViewSet)
 router.register(r'flower-endpoints', monitoring_api.FlowerEndpointViewSet)

@@ -15,7 +15,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --system --uid 10001 --create-home --home-dir /var/lib/devicevault devicevault
 
 # Workspace metadata only, so dependency layers survive source changes.
+# python-ldap ships no wheels, so it is compiled against OpenLDAP and SASL here.
 FROM base AS lock
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libldap-dev libsasl2-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /src
 COPY pyproject.toml uv.lock ./
@@ -41,6 +44,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # --- Orchestrator: api, result consumers, worker monitor, flower ---------------
 FROM base AS orchestrator
+RUN apt-get update && apt-get install -y --no-install-recommends libldap2 libsasl2-2 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build-orchestrator /opt/venv /opt/venv
 COPY orchestrator /app
 WORKDIR /app

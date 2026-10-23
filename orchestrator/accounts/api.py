@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 
 from django.conf import settings
-from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -16,7 +16,9 @@ from rest_framework.views import APIView
 
 from accounts import access, sessions
 from accounts.access import IsGlobalAdmin
-from accounts.models import FLAGS, REQUIRES, DeviceGroupGrant, UserGroup, UserGroupMembership
+from accounts.login import is_break_glass, password_sign_in
+from accounts.models import FLAGS, REQUIRES, AuthProvider, DeviceGroupGrant, UserGroup, UserGroupMembership
+from accounts.providers import KINDS
 from accounts.throttle import LOGIN, locked_out
 from audit.log import client_ip, record
 from audit.models import AuditLog
@@ -25,11 +27,22 @@ from devices.models import DeviceGroup
 INVALID_LOGIN = 'Invalid username or password.'
 LOCKED_OUT = 'Too many failed sign-in attempts. Try again later.'
 LAST_ADMIN = 'This would leave no active global administrator.'
+REFUSED = 'You may not sign in to DeviceVault. Ask an administrator for access.'
 
 
 def user_source(user) -> str:
     """``local`` for password accounts; ``external`` for accounts an identity provider manages."""
-    return 'local' if user.has_usable_password() else 'external'
+    if user.external_identities.exists() or not user.has_usable_password():
+        return 'external'
+    return 'local'
+
+
+def start_session(request, user, provider=None, **details) -> None:
+    """Sign ``user`` in on this request (after a provider or password check) and audit it."""
+    login(request._request, user)
+    sessions.start(request._request)
+    request.session[sessions.PROVIDER] = provider.slug if provider else 'local'
+    record(request, LOGIN, actor=user, details={'provider': provider.slug if provider else 'local', **details})
 
 
 def current_user(user) -> dict:
@@ -41,6 +54,7 @@ def current_user(user) -> dict:
         'first_name': user.first_name,
         'last_name': user.last_name,
         'source': user_source(user),
+        'providers': sorted(user.external_identities.values_list('provider__name', flat=True)),
         'editable': user_source(user) == 'local',
         'is_global_admin': access.is_global_admin(user),
         'grants': {
@@ -88,7 +102,10 @@ class CsrfView(APIView):
 
 @method_decorator(csrf_protect, name='dispatch')
 class LoginView(APIView):
-    """Local sign-in. Unknown users and wrong passwords get the same answer; repeated failures lock out."""
+    """Password sign-in: local accounts, then each enabled LDAP provider in order.
+
+    Unknown users and wrong passwords get the same answer; repeated failures lock out.
+    """
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -101,15 +118,22 @@ class LoginView(APIView):
         if locked_out(username, client_ip(request)):
             record(request, LOGIN, outcome=AuditLog.FAILURE, actor_name=username, details={'reason': 'locked_out'})
             return response.Response({'detail': LOCKED_OUT}, status=status.HTTP_429_TOO_MANY_REQUESTS)
-        user = authenticate(request._request, username=username, password=password)
-        if user is None:
-            record(request, LOGIN, outcome=AuditLog.FAILURE, actor_name=username, details={'reason': 'bad_credentials'})
+        result = password_sign_in(request._request, username, password)
+        if result.user is None:
+            record(
+                request,
+                LOGIN,
+                outcome=AuditLog.FAILURE,
+                actor_name=username,
+                details={'reason': result.reason, **result.details},
+            )
+            if result.provider is not None:  # the password was right, but the provider's rules refuse them
+                return response.Response({'detail': REFUSED}, status=status.HTTP_403_FORBIDDEN)
             return response.Response({'detail': INVALID_LOGIN}, status=status.HTTP_400_BAD_REQUEST)
 
-        login(request._request, user)
-        sessions.start(request._request)
-        record(request, LOGIN, actor=user, details={'provider': 'local'})
-        return response.Response({'user': current_user(user)})
+        details = {key: value for key, value in result.details.items() if key != 'provider'}
+        start_session(request, result.user, result.provider, **details)
+        return response.Response({'user': current_user(result.user)})
 
 
 class LogoutView(APIView):
@@ -128,8 +152,12 @@ class AuthConfigView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        local_enabled = settings.DEVICEVAULT_LOCAL_AUTH_ENABLED
-        return response.Response({'providers': ['Local'], 'local_enabled': local_enabled})
+        providers = [
+            {'slug': p.slug, 'name': p.name, 'kind': p.kind, 'password_login': KINDS[p.kind].password_login}
+            for p in AuthProvider.objects.filter(enabled=True)
+            if p.kind in KINDS
+        ]
+        return response.Response({'providers': providers, 'local_enabled': settings.DEVICEVAULT_LOCAL_AUTH_ENABLED})
 
 
 # ===== The current user =====
@@ -198,6 +226,7 @@ def user_snapshot(user) -> dict:
         'first_name': user.first_name,
         'last_name': user.last_name,
         'is_active': user.is_active,
+        'break_glass': is_break_glass(user),
         'groups': sorted(user.user_groups.values_list('name', flat=True)),
     }
 
@@ -214,6 +243,12 @@ def set_manual_memberships(user, groups) -> None:
     access.forget(user)
 
 
+def set_break_glass(user, value: bool) -> None:
+    from core.models import UserProfile
+
+    UserProfile.objects.update_or_create(user=user, defaults={'break_glass': value})
+
+
 class UserSerializer(serializers.ModelSerializer):
     # Manual memberships of internal groups; provider-sourced memberships are kept as they are.
     groups = serializers.PrimaryKeyRelatedField(
@@ -221,7 +256,9 @@ class UserSerializer(serializers.ModelSerializer):
     )
     group_names = serializers.SerializerMethodField()
     source = serializers.SerializerMethodField()
+    providers = serializers.SerializerMethodField()
     is_global_admin = serializers.SerializerMethodField()
+    break_glass = serializers.BooleanField(required=False)
     password = serializers.CharField(write_only=True, required=False, trim_whitespace=False)
 
     class Meta:
@@ -234,9 +271,11 @@ class UserSerializer(serializers.ModelSerializer):
             'last_name',
             'is_active',
             'source',
+            'providers',
             'groups',
             'group_names',
             'is_global_admin',
+            'break_glass',
             'last_login',
             'date_joined',
             'password',
@@ -247,7 +286,15 @@ class UserSerializer(serializers.ModelSerializer):
         return sorted(group.name for group in obj.user_groups.all())
 
     def get_source(self, obj) -> str:
-        return user_source(obj)
+        return 'external' if obj.external_identities.all() or not obj.has_usable_password() else 'local'
+
+    def get_providers(self, obj) -> list[str]:
+        return sorted(identity.provider.name for identity in obj.external_identities.all())
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['break_glass'] = is_break_glass(instance)
+        return data
 
     def get_is_global_admin(self, obj) -> bool:
         return obj.is_active and any(group.is_global_admin for group in obj.user_groups.all())
@@ -265,6 +312,8 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'password': 'A password is required.'})
         elif 'password' in attrs:
             raise serializers.ValidationError({'password': 'Use the set_password action.'})
+        if attrs.get('break_glass') and self.instance is not None and user_source(self.instance) != 'local':
+            raise serializers.ValidationError({'break_glass': 'Only local users can be break-glass users.'})
         if 'password' in attrs:
             candidate = User(username=attrs.get('username', ''), email=attrs.get('email', ''))
             errors = password_errors(attrs['password'], candidate)
@@ -274,18 +323,23 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         groups = validated_data.pop('user_groups', [])
+        break_glass = validated_data.pop('break_glass', False)
         password = validated_data.pop('password')
         user = User(**validated_data)
         user.set_password(password)
         user.save()
         set_manual_memberships(user, groups)
+        set_break_glass(user, break_glass)
         return user
 
     def update(self, instance, validated_data):
         groups = validated_data.pop('user_groups', None)
+        break_glass = validated_data.pop('break_glass', None)
         user = super().update(instance, validated_data)
         if groups is not None:
             set_manual_memberships(user, groups)
+        if break_glass is not None:
+            set_break_glass(user, break_glass)
         return user
 
 
@@ -301,7 +355,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
     serializer_class = UserSerializer
     permission_classes = [IsGlobalAdmin]
-    queryset = User.objects.prefetch_related('user_groups').order_by('username')
+    queryset = User.objects.prefetch_related('user_groups', 'external_identities__provider').order_by('username')
 
     def perform_create(self, serializer):
         user = serializer.save()
@@ -392,6 +446,7 @@ class UserGroupSerializer(serializers.ModelSerializer):
     members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
     member_names = serializers.SerializerMethodField()
     grants = GrantSerializer(many=True, required=False)
+    provider_name = serializers.CharField(source='provider.name', read_only=True, default=None)
 
     class Meta:
         model = UserGroup
@@ -402,13 +457,15 @@ class UserGroupSerializer(serializers.ModelSerializer):
             'is_global_admin',
             'is_builtin',
             'source',
+            'provider_name',
+            'external_id',
             'members',
             'member_names',
             'grants',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['is_builtin', 'source', 'created_at', 'updated_at']
+        read_only_fields = ['is_builtin', 'source', 'external_id', 'created_at', 'updated_at']
 
     def get_member_names(self, obj) -> list[str]:
         return sorted(user.username for user in obj.members.all())
@@ -463,7 +520,7 @@ class UserGroupViewSet(viewsets.ModelViewSet):
 
     serializer_class = UserGroupSerializer
     permission_classes = [IsGlobalAdmin]
-    queryset = UserGroup.objects.prefetch_related('members', 'grants__device_group')
+    queryset = UserGroup.objects.select_related('provider').prefetch_related('members', 'grants__device_group')
 
     def perform_create(self, serializer):
         group = serializer.save()

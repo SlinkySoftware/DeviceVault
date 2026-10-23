@@ -27,6 +27,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { label: 'Users', icon: 'person', to: '/vaultadmin/users' },
       { label: 'User Groups', icon: 'group', to: '/vaultadmin/user-groups' },
       { label: 'Access', icon: 'grid_on', to: '/vaultadmin/access' },
+      { label: 'Auth Providers', icon: 'badge', to: '/vaultadmin/auth-providers' },
       { label: 'Audit Log', icon: 'policy', to: '/vaultadmin/audit-log' },
     ],
   },

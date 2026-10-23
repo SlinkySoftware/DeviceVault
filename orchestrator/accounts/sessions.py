@@ -17,6 +17,7 @@ from audit.log import record
 logger = logging.getLogger('devicevault.sessions')
 
 LOGIN_AT = 'dv_login_at'
+PROVIDER = 'dv_provider'  # slug of the provider the session signed in with, or 'local'
 SEEN_AT = 'dv_seen_at'
 TOUCH_SECONDS = 60
 
