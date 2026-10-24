@@ -17,7 +17,7 @@ name: devicevault-receiver
 
 services:
   receiver:
-    image: ${DV_RECEIVER_IMAGE:-devicevault-receiver:latest}
+    image: ${DV_RECEIVER_IMAGE:-ghcr.io/slinkysoftware/devicevault-receiver:${DV_VERSION:-latest}}
     restart: unless-stopped
     network_mode: host
     env_file: [receiver.env]

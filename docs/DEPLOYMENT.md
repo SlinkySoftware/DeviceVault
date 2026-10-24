@@ -14,15 +14,39 @@ receivers accept connections from devices.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
-## 1. Build the images
+## 1. Images
+
+Each release publishes multi-architecture (amd64, arm64) images to the GitHub
+Container Registry, signed with [cosign](https://docs.sigstore.dev/) and carrying
+an SBOM and build provenance:
+
+| Image | Used by |
+|---|---|
+| `ghcr.io/slinkysoftware/devicevault-orchestrator` | orchestrator stack (api, events, scheduler, Flower) |
+| `ghcr.io/slinkysoftware/devicevault-web` | orchestrator stack (nginx + UI) |
+| `ghcr.io/slinkysoftware/devicevault-worker` | worker stack |
+| `ghcr.io/slinkysoftware/devicevault-receiver` | receiver stack |
+
+Tags: `X.Y.Z`, `X.Y`, `X` (from 1.0) and `latest`; pre-releases get only their
+own tag. The stacks pull these by default. **Pin a release** by setting
+`DV_VERSION` (for example `DV_VERSION=0.1.0`) in the shell or in a `.env` file
+next to each `compose.yaml`, and run the same version everywhere: the Workers
+page flags workers and receivers whose version differs from the orchestrator's.
+`dv-orchestrator version`, `dv-worker version` and `dv-receiver version` print an
+image's version, and the UI shows it in the menu and on the sign-in page.
+
+To check a signature:
 
 ```bash
-make images IMAGE_TAG=0.1.0
-# devicevault-orchestrator:0.1.0, devicevault-worker:0.1.0, devicevault-receiver:0.1.0, devicevault-web:0.1.0
+cosign verify ghcr.io/slinkysoftware/devicevault-orchestrator:0.1.0 \
+  --certificate-identity-regexp '^https://github.com/SlinkySoftware/DeviceVault/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Push them to your registry and set `DV_ORCHESTRATOR_IMAGE`, `DV_WEB_IMAGE`,
-`DV_WORKER_IMAGE` and `DV_RECEIVER_IMAGE` when running the stacks, or retag them as `:latest`.
+To build your own instead, run `make images IMAGE_TAG=0.1.0` (which produces
+`devicevault-orchestrator:0.1.0` and so on), push them to your registry, and
+set `DV_ORCHESTRATOR_IMAGE`, `DV_WEB_IMAGE`, `DV_WORKER_IMAGE` and
+`DV_RECEIVER_IMAGE` to the full image references.
 
 ## 2. Infra
 
@@ -44,7 +68,7 @@ them to the orchestrator and worker hosts.
 cd deploy/orchestrator
 cp orchestrator.env.example orchestrator.env   # see the reference below
 # DV_SIGNING_KEY, DV_DATA_KEYS and DV_VAULT_KEYS as env lines (notes go to stderr):
-docker run --rm -e DV_DEBUG=true --entrypoint python devicevault-orchestrator manage.py generate_keys
+docker run --rm -e DV_DEBUG=true --entrypoint python ghcr.io/slinkysoftware/devicevault-orchestrator manage.py generate_keys
 docker compose up -d                           # UI on :8080 (DV_HTTP_PORT)
 docker compose --profile flower up -d          # ... plus Flower (see Flower below)
 ```

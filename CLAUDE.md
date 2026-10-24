@@ -14,7 +14,11 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   Frontend deps are pinned in `frontend/package.json` with `package-lock.json` committed.
 - **No backward compatibility required.** Nothing is deployed. Change models freely, but
   keep migrations generated (`makemigrations`), and the test suite guards against drift.
-- **No CI service yet.** `make check` is what a pipeline will run; keep it green.
+- **CI is GitHub Actions** (`.github/workflows/`): `ci.yml` runs `make check` on every PR (required to merge),
+  `release.yml` publishes images to GHCR when a `vX.Y.Z` tag is pushed. Workflows only call `make` targets; keep it green.
+- **Version**: the root `VERSION` file is the source. Bump it with `make set-version V=X.Y.Z` (updates every
+  `pyproject.toml`, `package.json`, the lockfiles), never by hand. Code reads it with `devicevault_protocol.version.version()`.
+- **Contributing**: work on a branch, open a PR to `master`, Conventional Commit messages (see `CONTRIBUTING.md`).
 - One phase per branch and PR, as listed in the architecture doc.
 
 ## Layout

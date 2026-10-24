@@ -137,7 +137,11 @@ make frontend-build  # production build of the SPA
 make check           # all of the above
 make lock            # refresh uv.lock after editing a pyproject.toml
 make images          # build the orchestrator, worker, receiver and web images
+make set-version V=0.2.0  # bump VERSION and every package that carries it
 ```
+
+Released images are published to `ghcr.io/slinkysoftware/devicevault-*`; see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Contributors and coding agents should read [CLAUDE.md](CLAUDE.md) for the ground rules and
 conventions.

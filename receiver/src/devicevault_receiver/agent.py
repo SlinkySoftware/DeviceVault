@@ -6,13 +6,13 @@ new configuration on the event loop, waiting until listeners have been
 """
 
 import asyncio
-import importlib.metadata
 from typing import Any
 
 from devicevault_protocol.agent import RegistrationAgent
 from devicevault_protocol.crypto.exceptions import CryptoError
 from devicevault_protocol.logs import get_logger
 from devicevault_protocol.push import PROTOCOLS
+from devicevault_protocol.version import version
 
 from . import hostkey
 from .config import ReceiverConfig
@@ -21,13 +21,6 @@ from .receiver import Receiver
 logger = get_logger('devicevault.receiver.agent')
 
 APPLY_TIMEOUT_SECONDS = 30
-
-
-def _version() -> str:
-    try:
-        return importlib.metadata.version('devicevault-receiver')
-    except importlib.metadata.PackageNotFoundError:
-        return '0.0.0'
 
 
 class ReceiverAgent(RegistrationAgent):
@@ -39,7 +32,7 @@ class ReceiverAgent(RegistrationAgent):
                     'host_key_fingerprint': hostkey.fingerprint(receiver.host_key),
                 }
             },
-            version=_version(),
+            version=version(),
             **kwargs,
         )
         self.receiver = receiver

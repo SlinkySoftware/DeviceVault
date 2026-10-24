@@ -5,20 +5,13 @@ Runs as a thread in the main Celery worker process (started on
 queue consumers, so the worker consumes only the queues of its approved role.
 """
 
-import importlib.metadata
 from typing import Any
 
 from celery.signals import worker_ready, worker_shutdown
 
 from devicevault_protocol.agent import RegistrationAgent
+from devicevault_protocol.version import version
 from devicevault_worker.app import app, bus, identity
-
-
-def _version() -> str:
-    try:
-        return importlib.metadata.version('devicevault-worker')
-    except importlib.metadata.PackageNotFoundError:
-        return '0.0.0'
 
 
 def capabilities() -> dict[str, Any]:
@@ -38,7 +31,7 @@ class WorkerAgent(RegistrationAgent):
             name=celery_hostname.split('@', 1)[0],
             celery_hostname=celery_hostname,
             capabilities=capabilities(),
-            version=_version(),
+            version=version(),
             **kwargs,
         )
         self._control = control

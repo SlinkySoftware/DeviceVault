@@ -222,6 +222,7 @@ export const authApi = {
 
 export const settingsApi = {
   timezone: async () => (await http.get<{ timezone: string }>('/timezone/')).data.timezone,
+  version: async () => (await http.get<{ version: string }>('/version/')).data.version,
 }
 
 export const workersApi = {

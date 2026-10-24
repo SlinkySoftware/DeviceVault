@@ -70,6 +70,8 @@
           />
         </div>
       </template>
+
+      <div v-if="settings.version" class="text-caption text-muted text-center q-mt-lg">v{{ settings.version }}</div>
     </q-card>
   </q-page>
 </template>
@@ -83,8 +85,10 @@ import { authApi, oidcLoginUrl } from '@/api/endpoints'
 import type { LoginProvider } from '@/api/types'
 import { safeRedirect } from '@/router/guard'
 import { useAuthStore } from '@/stores/auth'
+import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
+const settings = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -109,6 +113,7 @@ const queryError = typeof route.query.error === 'string' ? route.query.error : '
 const error = ref(queryError ? (PROVIDER_ERRORS[queryError] ?? 'Sign-in failed.') : '')
 
 onMounted(async () => {
+  void settings.loadVersion()
   try {
     providers.value = (await authApi.config()).providers
   } catch {

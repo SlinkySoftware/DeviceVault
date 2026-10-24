@@ -1,0 +1,162 @@
+# Publishes a release when a vX.Y.Z tag is pushed (tags are restricted to
+# maintainers): checks the tag matches VERSION and is on master, runs
+# `make check`, pushes signed multi-arch images with SBOM and provenance to
+# GHCR, then creates the GitHub Release.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/slinkysoftware
+
+jobs:
+  verify:
+    name: Verify tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(cat VERSION)"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match VERSION ($version). Run 'make set-version V=${TAG#v}', merge it, then tag that commit."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::Tag $TAG is not on master. Releases are tagged from master only."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  check:
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    name: Image (${{ matrix.image }})
+    needs: [verify, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: orchestrator
+            file: docker/Dockerfile
+            target: orchestrator
+            description: DeviceVault orchestrator (API, events, scheduler, Flower)
+          - image: worker
+            file: docker/Dockerfile
+            target: worker
+            description: DeviceVault worker (collection and storage)
+          - image: receiver
+            file: docker/Dockerfile
+            target: receiver
+            description: DeviceVault push receiver (SCP/SFTP, TFTP)
+          - image: web
+            file: docker/web.Dockerfile
+            target: ''
+            description: DeviceVault web tier (UI and API proxy)
+    env:
+      # Put the description on the multi-arch index too, where GHCR reads it.
+      DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/devicevault-${{ matrix.image }}
+          # latest, X.Y and X are skipped for pre-releases; X is skipped before 1.0.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+          flavor: latest=auto
+          labels: |
+            org.opencontainers.image.title=devicevault-${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+          annotations: |
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - uses: sigstore/cosign-installer@v4
+      - name: Sign
+        env:
+          IMAGE: ${{ env.REGISTRY }}/devicevault-${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+
+  release:
+    name: GitHub Release
+    needs: [verify, images]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          notes="$(
+            echo 'Images (linux/amd64, linux/arm64), signed with cosign:'
+            echo
+            echo '```'
+            for image in orchestrator web worker receiver; do echo "$REGISTRY/devicevault-$image:$VERSION"; done
+            echo '```'
+            echo
+            echo "Run every component at the same version: set \`DV_VERSION=$VERSION\` for each stack (see docs/DEPLOYMENT.md)."
+          )"
+          flags=(--verify-tag --title "DeviceVault $VERSION" --notes "$notes" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}"
