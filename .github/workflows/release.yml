@@ -128,7 +128,7 @@ jobs:
           provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2 # publishes no floating major tag
       - name: Sign
         env:
           IMAGE: ${{ env.REGISTRY }}/devicevault-${{ matrix.image }}
