@@ -1,9 +1,8 @@
-import stat
-import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from devicevault_protocol import identity as identity_store
 from devicevault_protocol import signing
 from devicevault_protocol.registration import (
     ASSIGNMENT,
@@ -16,8 +15,7 @@ from devicevault_protocol.registration import (
     WORKER_EVENT_TASK,
 )
 from devicevault_protocol.tasks import ORCHESTRATOR_SIGNER
-from devicevault_worker import identity as identity_store
-from devicevault_worker.agent import RegistrationAgent
+from devicevault_worker.agent import WorkerAgent
 
 ORCHESTRATOR = signing.generate_signing_key()
 ORCHESTRATOR_KEY = signing.public_key_to_b64(ORCHESTRATOR)
@@ -42,10 +40,11 @@ def identity(tmp_path):
 @pytest.fixture
 def agent(identity):
     sent = []
-    agent = RegistrationAgent(
+    agent = WorkerAgent(
         identity=identity,
         celery_hostname='collector-1@host',
         control=FakeControl(),
+        broker_url='memory://',
         send_task=lambda name, **kwargs: sent.append((name, kwargs)),
     )
     agent.sent = sent
@@ -67,30 +66,6 @@ def assignment(
         **extra,
     }
     return signing.sign(payload, key, ORCHESTRATOR_SIGNER, now=now)
-
-
-# --- identity -------------------------------------------------------------------------
-
-
-def test_identity_is_created_once_and_persisted_privately(tmp_path):
-    path = tmp_path / 'identity.json'
-    first = identity_store.load_or_create(path)
-    again = identity_store.load_or_create(path)
-
-    assert again.worker_id == first.worker_id
-    assert again.fingerprint == first.fingerprint
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_pinned_key_is_visible_to_other_processes(monkeypatch, tmp_path):
-    monkeypatch.setenv('DV_STATE_DIR', str(tmp_path))
-    identity = identity_store.load_or_create()
-    assert identity_store.pinned_orchestrator_key() is None
-
-    time.sleep(0.01)  # distinct mtime
-    identity.pin_orchestrator(ORCHESTRATOR_KEY)
-
-    assert signing.public_key_to_b64(identity_store.pinned_orchestrator_key()) == ORCHESTRATOR_KEY
 
 
 # --- events ---------------------------------------------------------------------------

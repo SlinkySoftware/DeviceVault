@@ -1,15 +1,15 @@
-"""The worker's persistent identity.
+"""The persistent identity of a worker or receiver.
 
 Generated on first start and kept in the state volume (``DV_STATE_DIR``,
 default ``/var/lib/devicevault``) as ``identity.json``:
 
 - ``worker_id``: a UUID, stable across restarts;
-- an Ed25519 signing key, which signs every event the worker sends;
-- an X25519 encryption key, for secrets the orchestrator sends it;
+- an Ed25519 signing key, which signs every event it sends;
+- an X25519 encryption key, for secrets the orchestrator seals to it;
 - the orchestrator key, pinned on the first accepted assignment.
 
 This is self-generated state, not configuration. Deleting the file resets the
-worker: it registers again under a new id and must be approved again.
+worker or receiver: it registers again under a new id and must be approved again.
 """
 
 import json

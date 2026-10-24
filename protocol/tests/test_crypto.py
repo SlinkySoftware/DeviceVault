@@ -14,6 +14,7 @@ Copyright (C) 2026, Slinky Software
 License: GPLv3+
 """
 
+import io
 import os
 import unittest
 
@@ -24,7 +25,7 @@ from devicevault_protocol.crypto.constants import (
     GCM_NONCE_BYTES,
     HEADER_MAGIC,
 )
-from devicevault_protocol.crypto.engine import _zeroize, decrypt_backup, encrypt_backup
+from devicevault_protocol.crypto.engine import _zeroize, decrypt_backup, encrypt_backup, encrypt_stream
 from devicevault_protocol.crypto.exceptions import (
     DecryptionError,
     HeaderError,
@@ -115,6 +116,26 @@ class TestEncryptionEngine(unittest.TestCase):
         blob, meta = encrypt_backup(pt, self.kp, chunk_size=chunk_size)
         recovered = decrypt_backup(blob, self.kp)
         self.assertEqual(recovered, pt)
+
+    def test_stream_matches_in_memory_format(self):
+        """encrypt_stream reads short reads into full chunks and decrypts like encrypt_backup output."""
+
+        class Trickle(io.RawIOBase):
+            def __init__(self, data):
+                self.data = io.BytesIO(data)
+
+            def readable(self):
+                return True
+
+            def read(self, size=-1):
+                return self.data.read(min(size, 1000) if size > 0 else size)
+
+        pt = os.urandom(200_000)
+        sink = io.BytesIO()
+        meta = encrypt_stream(Trickle(pt), sink, self.kp, chunk_size=64 * 1024, aad_fields={'job_id': 'j'})
+        self.assertEqual(decrypt_backup(sink.getvalue(), self.kp), pt)
+        self.assertEqual(meta['cipher'], CIPHER_ID)
+        self.assertEqual(EncryptionHeader.from_bytes(sink.getvalue()).aad['job_id'], 'j')
 
     def test_empty_payload(self):
         """Empty payload encrypts and decrypts to empty bytes."""

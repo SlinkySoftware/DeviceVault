@@ -50,9 +50,9 @@ class S3Driver(StorageDriver):
             ),
         )
 
-    def _call(self, operation: str, function, **kwargs):
+    def _call(self, operation: str, function, *args, **kwargs):
         try:
-            return function(**kwargs)
+            return function(*args, **kwargs)
         except ClientError as exc:
             code = str(exc.response.get('Error', {}).get('Code', ''))
             status = str(exc.response.get('ResponseMetadata', {}).get('HTTPStatusCode', ''))
@@ -66,13 +66,13 @@ class S3Driver(StorageDriver):
     def store(self, data, name, params):
         key = params.prefix + self.object_name(name)
         extra = {'ServerSideEncryption': params.server_side_encryption} if params.server_side_encryption else {}
+        # Multipart for large backups, so they are never read into memory whole.
         client = self.client(params)
-        self._call('upload', client.put_object, Bucket=params.bucket, Key=key, Body=data, **extra)
+        self._call('upload', client.upload_fileobj, data, params.bucket, key, ExtraArgs=extra or None)
         return key
 
-    def read(self, ref, params):
-        response = self._call('download', self.client(params).get_object, Bucket=params.bucket, Key=ref)
-        return response['Body'].read()
+    def read(self, ref, params, sink):
+        self._call('download', self.client(params).download_fileobj, params.bucket, ref, sink)
 
     def delete(self, ref, params):
         self._call('delete', self.client(params).delete_object, Bucket=params.bucket, Key=ref)

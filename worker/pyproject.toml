@@ -17,6 +17,12 @@ dependencies = [
     "python-json-logger>=4",
 ]
 
+[dependency-groups]
+dev = [
+    "fakeredis[lua]>=2.32",
+    "pytest>=9",
+]
+
 [tool.uv.sources]
 devicevault-protocol = { workspace = true }
 

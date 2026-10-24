@@ -20,12 +20,13 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 ## Layout
 
 - `protocol/` (`devicevault_protocol`): env helpers (`DV_*`, `<NAME>_FILE` secrets),
-  task and queue names, the job protocol (`jobs`), the Celery app factory, presence constants, `crypto`.
-  Shared by both sides; must not import Django.
+  task and queue names, the job protocol (`jobs`), the Celery app factory, presence constants, `crypto`,
+  and the runtime workers and receivers share: `identity` (persistent worker id and keys), `agent`
+  (registration and assignments; subclasses `apply` them), `trust` (task signature checks), `blobs`
+  (chunked, streamed Redis staging) and `logs`. Shared by all sides; must not import Django.
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
-  storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `identity`
-  (persistent worker id and keys), `agent` (registration and assignments), `trust`
-  (task signature checks). Must not import Django (a test enforces it).
+  storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `agent`
+  (applies assignments as Celery queue consumers). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
@@ -80,7 +81,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   SSH CLI platforms subclass `drivers.ssh.NetmikoDriver` (a Netmiko `device_type`, the
   commands, and regexes for volatile lines); see `drivers/cisco.py`. Built-ins are listed in
   `drivers/__init__.py`; third-party drivers register under the
-  `devicevault.collectors` entry point. Storage drivers subclass `storage.drivers.base.StorageDriver` (see `storage/drivers/local.py`, `s3.py`) and register under
+  `devicevault.collectors` entry point. Storage drivers subclass `storage.drivers.base.StorageDriver` (see `storage/drivers/local.py`, `s3.py`), stream
+  content (`store` reads a binary file, `read` writes one; backups can be hundreds of MB) and register under
   `devicevault.storage`; mark secret settings `SecretStr` so the API treats them as write-only.
 - Secrets sent to workers go through `core.keys.add_secret` (sealed per worker when payload
   encryption is on) and come out through `devicevault_worker.payload.secret`. Secret model

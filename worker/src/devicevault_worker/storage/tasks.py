@@ -8,6 +8,7 @@ Every task carries ``target`` (``{"id", "driver"}``) and the target's
 settings as ``config`` or, with payload encryption, ``config_sealed``.
 """
 
+import tempfile
 import time
 import uuid
 from typing import Any
@@ -15,6 +16,7 @@ from typing import Any
 from celery.exceptions import SoftTimeLimitExceeded
 from pydantic import ValidationError
 
+from devicevault_protocol import blobs
 from devicevault_protocol.jobs import (
     EVENT_FAILED,
     EVENT_RETRYING,
@@ -25,8 +27,9 @@ from devicevault_protocol.jobs import (
     read_blob_key,
 )
 from devicevault_protocol.names import CHECK_TASK, READ_TASK, STORE_TASK
-from devicevault_worker import blobs, events
-from devicevault_worker.app import app, get_logger
+from devicevault_protocol.trust import SignatureError, verified_payload
+from devicevault_worker import events
+from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.drivers.base import CollectionLog, PermanentError
 from devicevault_worker.payload import secret
 from devicevault_worker.storage.drivers import (
@@ -37,11 +40,18 @@ from devicevault_worker.storage.drivers import (
     StorageUnavailable,
     get_driver,
 )
-from devicevault_worker.trust import SignatureError, verified_payload
 
 logger = get_logger('devicevault.worker.storage')
 
 MAX_RETRIES = 5
+# Pushed backups can be hundreds of MB.
+STORE_TIME_LIMIT = 1800
+READ_TIME_LIMIT = 600
+
+
+def spool():
+    """A temporary file for a backup in transit: in memory while small, on disk beyond one blob chunk."""
+    return tempfile.SpooledTemporaryFile(max_size=blobs.CHUNK_SIZE)
 
 
 def open_target(spec: dict[str, Any]) -> tuple[StorageDriver, StorageParams]:
@@ -63,15 +73,15 @@ def open_target(spec: dict[str, Any]) -> tuple[StorageDriver, StorageParams]:
     acks_late=True,
     reject_on_worker_lost=True,
     max_retries=MAX_RETRIES,
-    soft_time_limit=300,
-    time_limit=360,
+    soft_time_limit=STORE_TIME_LIMIT,
+    time_limit=STORE_TIME_LIMIT + 60,
 )
 def store(self, envelope: dict, blob: dict) -> None:
     """Write the backup staged at ``blob["key"]``.
 
     ``envelope`` (orchestrator-signed) carries job_id, target, config and
-    name; ``blob`` comes from the collector and is checked against the hash
-    the collector reported, both here and by the orchestrator.
+    name; ``blob`` comes from the collector or receiver and is checked
+    against the hash it reported, both here and by the orchestrator.
     """
     try:
         spec = verified_payload(envelope)
@@ -85,26 +95,28 @@ def store(self, envelope: dict, blob: dict) -> None:
     try:
         events.send(job_id, EVENT_STARTED, attempt=attempt, stage=STAGE_STORE)
         driver, params = open_target(spec)
-        data = blobs.get(blob['key'])
-        if data is None:
-            raise StorageError('the collected backup expired before it could be stored')
-        if blobs.sha256(data) != blob['sha256']:
-            raise StorageError('the staged backup does not match the collected hash')
+        with spool() as data:
+            staged = blobs.fetch(redis_client, blob['key'], data)
+            if staged is None:
+                raise StorageError('the collected backup expired before it could be stored')
+            if staged['sha256'] != blob['sha256']:
+                raise StorageError('the staged backup does not match the collected hash')
+            data.seek(0)
 
-        started = time.monotonic()
-        try:
-            ref = driver.store(data, BackupName(**spec['name']), params)
-        except OSError as exc:  # disk full, NFS hiccup, git lock...
-            raise StorageUnavailable(str(exc)) from exc
-        blobs.delete(blob['key'])
-        log.info(f'stored {len(data)} bytes as {driver.key}:{ref}')
+            started = time.monotonic()
+            try:
+                ref = driver.store(data, BackupName(**spec['name']), params)
+            except OSError as exc:  # disk full, NFS hiccup, git lock...
+                raise StorageUnavailable(str(exc)) from exc
+        blobs.delete(redis_client, blob['key'])
+        log.info(f'stored {staged["size"]} bytes as {driver.key}:{ref}')
         events.send(
             job_id,
             EVENT_STORED,
             attempt=attempt,
             storage_ref=ref,
             sha256=blob['sha256'],
-            size=len(data),
+            size=staged['size'],
             duration_ms=int((time.monotonic() - started) * 1000),
             log=log.entries,
         )
@@ -141,18 +153,20 @@ def _answer(task: str, envelope: dict, work) -> dict:
         return {'status': 'failure', 'error': str(exc) or exc.__class__.__name__}
 
 
-@app.task(name=READ_TASK, soft_time_limit=120, time_limit=150)
+@app.task(name=READ_TASK, soft_time_limit=READ_TIME_LIMIT, time_limit=READ_TIME_LIMIT + 30)
 def read(envelope: dict) -> dict:
     """Stage a stored backup in Redis: ``{"status": "success", "key", "sha256", "size"}``.
 
     The bytes go through Redis rather than the result, because backups can be
-    tens of MB.
+    hundreds of MB.
     """
 
     def work(spec):
         driver, params = open_target(spec)
-        data = driver.read(spec['storage_ref'], params)
-        return blobs.put(read_blob_key(uuid.uuid4().hex), data, READ_BLOB_TTL_SECONDS)
+        with spool() as data:
+            driver.read(spec['storage_ref'], params, data)
+            data.seek(0)
+            return blobs.put(redis_client, read_blob_key(uuid.uuid4().hex), data, READ_BLOB_TTL_SECONDS)
 
     return _answer(READ_TASK, envelope, work)
 

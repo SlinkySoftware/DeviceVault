@@ -1,6 +1,5 @@
 """Reading stored backups back through a storage worker."""
 
-import hashlib
 from functools import cache
 
 from django.conf import settings
@@ -9,6 +8,7 @@ from redis import Redis
 
 from backups.models import BackupJob
 from core import keys
+from devicevault_protocol import blobs
 from devicevault_protocol.crypto import EncryptionHeader, decrypt_backup, is_encrypted
 from devicevault_protocol.crypto.exceptions import CryptoError
 from devicevault_protocol.names import READ_TASK
@@ -35,11 +35,11 @@ def read_raw(job: BackupJob, *, timeout: int = 60) -> bytes:
         raise ContentUnavailable(str(exc)) from exc
 
     redis = _redis()
-    data = redis.get(result['key'])
-    redis.delete(result['key'])
+    data = blobs.get(redis, result['key'])
+    blobs.delete(redis, result['key'])
     if data is None:
         raise ContentUnavailable('the backup expired before it could be fetched')
-    if hashlib.sha256(data).hexdigest() != job.stored_sha256:
+    if blobs.sha256(data) != job.stored_sha256:
         raise ContentUnavailable('the stored backup no longer matches its recorded hash')
     return data
 

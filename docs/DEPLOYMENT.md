@@ -352,7 +352,11 @@ secrets). The file takes precedence.
 
 - TLS to RabbitMQ and Redis works through `amqps://` and `rediss://` URLs, but
   the infra stack doesn't configure TLS itself yet.
-- Backups are staged whole in Redis between collection and storage (24 hours at
-  most), so size Redis memory for your largest backups times concurrent jobs.
+- Backups are staged in Redis between collection and storage (in 32 MiB chunks,
+  24 hours at most), so size Redis memory (`maxmemory`, and the host) for your
+  largest backups times the jobs in flight, including a storage outage's backlog.
+  Workers stream backups through temporary files, so they need little memory
+  but some free space in `/tmp`; the PostgreSQL storage driver holds each backup in
+  memory while writing it.
 - Retention policies are stored but not yet applied.
 - Redis is a single endpoint; Redis Sentinel URLs are not supported yet.

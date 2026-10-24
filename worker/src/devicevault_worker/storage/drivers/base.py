@@ -5,8 +5,9 @@ target configured in the orchestrator names a driver and holds its settings,
 validated against the driver's ``Params`` model (whose JSON schema drives
 the target form in the UI; mark secrets with ``SecretStr``).
 
-Content is opaque bytes: it may be ciphertext. A driver returns a
-``storage_ref`` from ``store`` from which ``read`` returns exactly those bytes.
+Content is opaque bytes: it may be ciphertext, and up to hundreds of MB. Drivers
+stream it: ``store`` reads a binary file and returns a ``storage_ref`` from
+which ``read`` writes exactly those bytes to a binary file.
 
 ``shareable`` says whether several workers can serve one target (a bucket
 can be; a directory on one worker's volume cannot).
@@ -17,7 +18,7 @@ Register drivers in ``devicevault_worker.storage.drivers`` or through the
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, BinaryIO, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -53,11 +54,12 @@ class StorageDriver(ABC):
     Params: ClassVar[type[StorageParams]] = StorageParams
 
     @abstractmethod
-    def store(self, data: bytes, name: BackupName, params: StorageParams) -> str:
-        """Write ``data``; return the reference ``read`` takes."""
+    def store(self, data: BinaryIO, name: BackupName, params: StorageParams) -> str:
+        """Write what ``data`` holds (a binary file, read from its start); return the reference ``read`` takes."""
 
     @abstractmethod
-    def read(self, ref: str, params: StorageParams) -> bytes: ...
+    def read(self, ref: str, params: StorageParams, sink: BinaryIO) -> None:
+        """Write the backup ``ref`` names to ``sink``."""
 
     @abstractmethod
     def delete(self, ref: str, params: StorageParams) -> None: ...

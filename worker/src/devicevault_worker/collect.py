@@ -5,6 +5,7 @@ from typing import Any
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from devicevault_protocol import blobs
 from devicevault_protocol.jobs import (
     BLOB_TTL_SECONDS,
     EVENT_COLLECTED,
@@ -15,12 +16,12 @@ from devicevault_protocol.jobs import (
     blob_key,
 )
 from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, device_lock_key
-from devicevault_worker import blobs, events
+from devicevault_protocol.trust import SignatureError, verified_payload
+from devicevault_worker import events
 from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.drivers import get_driver
 from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
 from devicevault_worker.payload import prepare, secret
-from devicevault_worker.trust import SignatureError, verified_payload
 
 logger = get_logger('devicevault.worker.collect')
 
@@ -104,7 +105,7 @@ def collect(self, envelope: dict) -> None:
         started = time.monotonic()
         content, is_binary = _collect(job, log)
         data, encrypted = prepare(content, job)
-        blob = blobs.put(blob_key(job_id), data, BLOB_TTL_SECONDS)
+        blob = blobs.put(redis_client, blob_key(job_id), data, BLOB_TTL_SECONDS)
         # Report first: the orchestrator records the hash the store step must match.
         events.send(
             job_id,

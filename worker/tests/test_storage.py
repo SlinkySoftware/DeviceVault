@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 from botocore.response import StreamingBody
-from botocore.stub import Stubber
+from botocore.stub import ANY, Stubber
 from psycopg import errors as pg_errors
 from pydantic import ValidationError
 
@@ -27,6 +27,16 @@ def driver_and_params(key, **settings):
     return driver(), driver.Params.model_validate(settings)
 
 
+def store(driver, data, name, params):
+    return driver.store(io.BytesIO(data), name, params)
+
+
+def read(driver, ref, params):
+    sink = io.BytesIO()
+    driver.read(ref, params, sink)
+    return sink.getvalue()
+
+
 def test_bundled_drivers_describe_themselves():
     described = {driver.key: driver.describe() for driver in list_drivers()}
 
@@ -41,10 +51,10 @@ def test_filesystem_roundtrip(volume, compress):
     driver, params = driver_and_params('filesystem', path='site-a/', compress=compress)
     data = b'hostname edge-01\n\x00\xff'
 
-    ref = driver.store(data, NAME, params)
+    ref = store(driver, data, NAME, params)
 
     assert ref.startswith('7-edge/20261023T000000Z-j1.cfg')
-    assert driver.read(ref, params) == data
+    assert read(driver, ref, params) == data
     stored = (volume / 'site-a' / ref).read_bytes()
     assert (gzip.decompress(stored) if compress else stored) == data
     driver.delete(ref, params)
@@ -53,11 +63,11 @@ def test_filesystem_roundtrip(volume, compress):
 
 def test_git_keeps_history_per_device(volume):
     driver, params = driver_and_params('git', path='repo')
-    first = driver.store(b'v1\n', NAME, params)
-    second = driver.store(b'v2\n', NAME, params)
+    first = store(driver, b'v1\n', NAME, params)
+    second = store(driver, b'v2\n', NAME, params)
 
     assert first != second
-    assert (driver.read(first, params), driver.read(second, params)) == (b'v1\n', b'v2\n')
+    assert (read(driver, first, params), read(driver, second, params)) == (b'v1\n', b'v2\n')
     assert 'repo' in driver.check(params)
 
 
@@ -73,9 +83,9 @@ def test_local_refs_cannot_escape_the_target(key):
     escaping = '../outside.cfg' if key == 'filesystem' else 'main:../outside.cfg@0000'
 
     with pytest.raises(StorageError):
-        driver.read(escaping, params)
+        read(driver, escaping, params)
     with pytest.raises(StorageError):
-        driver.store(b'x', BackupName('../evil', 'j', 't', '.cfg'), params)
+        store(driver, b'x', BackupName('../evil', 'j', 't', '.cfg'), params)
 
 
 def test_filesystem_check_creates_and_probes_the_directory(volume):
@@ -104,14 +114,15 @@ def s3(monkeypatch):
 def test_s3_store_read_delete(s3):
     driver, params, stubber = s3
     key = 'dv/7-edge/20261023T000000Z-j1.cfg'
-    stubber.add_response('put_object', {}, {'Bucket': 'backups', 'Key': key, 'Body': b'config'})
+    stubber.add_response('put_object', {}, {'Bucket': 'backups', 'Key': key, 'Body': ANY, 'ChecksumAlgorithm': ANY})
+    stubber.add_response('head_object', {'ContentLength': 6}, {'Bucket': 'backups', 'Key': key})
     stubber.add_response(
         'get_object', {'Body': StreamingBody(io.BytesIO(b'config'), 6)}, {'Bucket': 'backups', 'Key': key}
     )
     stubber.add_response('delete_object', {}, {'Bucket': 'backups', 'Key': key})
 
-    assert driver.store(b'config', NAME, params) == key
-    assert driver.read(key, params) == b'config'
+    assert store(driver, b'config', NAME, params) == key
+    assert read(driver, key, params) == b'config'
     driver.delete(key, params)
     stubber.assert_no_pending_responses()
 
@@ -228,13 +239,13 @@ def test_postgres_roundtrip(postgres):
     data = bytes(range(256)) * 10
 
     assert 'no TLS' in driver.check(params)
-    ref = driver.store(data, NAME, params)
+    ref = store(driver, data, NAME, params)
     assert ref == '7-edge/20261023T000000Z-j1.cfg'
-    assert driver.store(data[::-1], NAME, params) == ref  # a retried job replaces its row
-    assert driver.read(ref, params) == data[::-1]
+    assert store(driver, data[::-1], NAME, params) == ref  # a retried job replaces its row
+    assert read(driver, ref, params) == data[::-1]
     driver.delete(ref, params)
     with pytest.raises(StorageError, match='not found'):
-        driver.read(ref, params)
+        read(driver, ref, params)
 
 
 def test_postgres_without_create_table_needs_the_table(postgres):
