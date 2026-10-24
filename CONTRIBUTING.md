@@ -6,7 +6,7 @@ Thanks for helping. This page explains how changes get into DeviceVault.
 
 - **All changes arrive as pull requests to `master`.** Nobody pushes to `master` directly.
 - **Fork first, unless you're a SlinkySoftware developer.** Only members of the
-  `@SlinkySoftware/developers` team can create branches in this repository. Everyone
+  `@SlinkySoftware/devicevault-developers` team can create branches in this repository. Everyone
   else works in a fork.
 - **Every pull request must pass CI** (`make check`) before it can merge.
 - By contributing, you agree that your contribution is licensed under the
