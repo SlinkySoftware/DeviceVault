@@ -20,18 +20,31 @@ PY_PACKAGES = protocol worker receiver orchestrator
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
 .PHONY: help dev-image lock lint fmt test check frontend-install frontend-lint frontend-test frontend-build \
-	images dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve
+	images version set-version dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve
 
 help:
 	@echo "Quality:   lint fmt test frontend-lint frontend-test check"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
+	@echo "Release:   version set-version V=X.Y.Z"
 	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve"
 
 dev-image:
 	docker build -q -f docker/Dockerfile --target dev -t $(DEV_IMAGE) .
 
 lock: dev-image
+	$(PY) uv lock
+
+version:
+	@cat VERSION
+
+# VERSION is the source; every package's metadata (and so uv.lock) carries a copy.
+set-version: dev-image
+	@echo '$(V)' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$$' \
+		|| { echo 'usage: make set-version V=X.Y.Z' >&2; exit 1; }
+	echo '$(V)' > VERSION
+	$(PY) sed -i -E 's/^version = ".*"/version = "$(V)"/' $(PY_PACKAGES:%=%/pyproject.toml)
+	$(NODE) npm version --no-git-tag-version --allow-same-version '$(V)'
 	$(PY) uv lock
 
 lint: dev-image

@@ -11,7 +11,7 @@
 name: devicevault-orchestrator
 
 x-orchestrator: &orchestrator
-  image: ${DV_ORCHESTRATOR_IMAGE:-devicevault-orchestrator:latest}
+  image: ${DV_ORCHESTRATOR_IMAGE:-ghcr.io/slinkysoftware/devicevault-orchestrator:${DV_VERSION:-latest}}
   restart: unless-stopped
   env_file: [orchestrator.env]
   volumes:
@@ -48,7 +48,7 @@ services:
     command: [events]
 
   web:
-    image: ${DV_WEB_IMAGE:-devicevault-web:latest}
+    image: ${DV_WEB_IMAGE:-ghcr.io/slinkysoftware/devicevault-web:${DV_VERSION:-latest}}
     restart: unless-stopped
     ports:
       - "${DV_HTTP_PORT:-8080}:8080"

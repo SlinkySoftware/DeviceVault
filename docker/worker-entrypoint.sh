@@ -3,7 +3,12 @@
 #
 # Required: DV_BROKER_URL, DV_REDIS_URL. The worker registers with the
 # orchestrator and consumes whatever queues an administrator assigns it.
+# `dv-worker version` prints the release version.
 set -eu
+
+if [ "${1:-}" = version ]; then
+    exec python -m devicevault_protocol.version
+fi
 
 if [ "$#" -gt 0 ]; then
     exec "$@"

@@ -25,38 +25,43 @@
     </q-header>
 
     <q-drawer v-model="drawerOpen" show-if-above side="left" bordered>
-      <q-list class="nav">
-        <q-item v-for="link in MAIN_LINKS" :key="link.to" clickable :to="link.to" :exact="link.to === '/'">
-          <q-item-section avatar><q-icon :name="link.icon" /></q-item-section>
-          <q-item-section>{{ link.label }}</q-item-section>
-        </q-item>
+      <div class="column no-wrap full-height">
+        <q-list class="nav">
+          <q-item v-for="link in MAIN_LINKS" :key="link.to" clickable :to="link.to" :exact="link.to === '/'">
+            <q-item-section avatar><q-icon :name="link.icon" /></q-item-section>
+            <q-item-section>{{ link.label }}</q-item-section>
+          </q-item>
 
-        <q-expansion-item
-          v-if="adminSections.length"
-          icon="admin_panel_settings"
-          label="Admin Settings"
-          header-class="nav-section"
-          :default-opened="onAdminRoute"
-        >
           <q-expansion-item
-            v-for="section in adminSections"
-            :key="section.label"
-            :icon="section.icon"
-            :label="section.label"
-            dense
-            dense-toggle
-            header-class="nav-section nav-level-1"
-            :default-opened="section.links.some((link) => route.path.startsWith(link.to))"
+            v-if="adminSections.length"
+            icon="admin_panel_settings"
+            label="Admin Settings"
+            header-class="nav-section"
+            :default-opened="onAdminRoute"
           >
-            <q-list class="nav-items">
-              <q-item v-for="link in section.links" :key="link.to" clickable dense :to="link.to" class="nav-item">
-                <q-item-section avatar><q-icon :name="link.icon" size="xs" /></q-item-section>
-                <q-item-section>{{ link.label }}</q-item-section>
-              </q-item>
-            </q-list>
+            <q-expansion-item
+              v-for="section in adminSections"
+              :key="section.label"
+              :icon="section.icon"
+              :label="section.label"
+              dense
+              dense-toggle
+              header-class="nav-section nav-level-1"
+              :default-opened="section.links.some((link) => route.path.startsWith(link.to))"
+            >
+              <q-list class="nav-items">
+                <q-item v-for="link in section.links" :key="link.to" clickable dense :to="link.to" class="nav-item">
+                  <q-item-section avatar><q-icon :name="link.icon" size="xs" /></q-item-section>
+                  <q-item-section>{{ link.label }}</q-item-section>
+                </q-item>
+              </q-list>
+            </q-expansion-item>
           </q-expansion-item>
-        </q-expansion-item>
-      </q-list>
+        </q-list>
+        <div v-if="settings.version" class="app-version text-caption text-grey q-pa-md">
+          DeviceVault v{{ settings.version }}
+        </div>
+      </div>
     </q-drawer>
 
     <q-page-container>
@@ -100,6 +105,7 @@ async function logout(): Promise<void> {
 onMounted(() => {
   void theme.loadPreference()
   void settings.loadTimeZone()
+  void settings.loadVersion()
   // Refresh cached permissions in the background.
   auth.fetchUser().catch(() => undefined)
 })
@@ -109,6 +115,11 @@ onMounted(() => {
 .app-header {
   background: var(--header-bg);
   color: var(--header-text);
+}
+
+/* Pinned to the bottom of the drawer. */
+.app-version {
+  margin-top: auto;
 }
 
 .logo-mini {

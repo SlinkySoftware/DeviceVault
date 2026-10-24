@@ -77,7 +77,7 @@ docs/            ARCHITECTURE.md, DEPLOYMENT.md (later: OPERATIONS.md, DRIVERS.m
 CLAUDE.md
 ```
 
-Tooling: a `uv` workspace (one lockfile), `ruff`, `pytest`; `npm` with a lockfile, `engines.node >= 24`, ESLint, Vitest. Everything is pinned. A top-level `Makefile` (`make lint`, `make test`, `make images`) is the single entry point and stays CI-agnostic, so a future GitLab or Gitea pipeline can just call it. No GitHub Actions.
+Tooling: a `uv` workspace (one lockfile), `ruff`, `pytest`; `npm` with a lockfile, `engines.node >= 24`, ESLint, Vitest. Everything is pinned. A top-level `Makefile` (`make lint`, `make test`, `make images`) is the single entry point and stays CI-agnostic: the GitHub Actions workflows (decision 29) only call its targets, so a GitLab or Gitea pipeline could do the same.
 
 **Removed:** `devicevault.sh`, `devicevault-docker-dev.sh`, `start-*.sh`, `setup/`, `scripts/`, `docker-build/`, `dev-env/`, `var/`, `original_prompt.txt`, `PRODUCTION_DEPLOYMENT_SUMMARY.md`, `backend/dv_*` empty apps, the one-off migrate/show scripts, the committed sample backup, the current `docs/*` (replaced by the set above), all existing migrations (squashed to a fresh `0001`), and MySQL support.
 
@@ -360,7 +360,7 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 4 | Infra HA and the front-end VIP/LB are documented, not shipped in compose. |
 | 5 | Config comes from env and Docker secrets only; no `config.yaml`. SQLite→Postgres migration is a `manage.py` command. |
 | 6 | External auth (LDAP/SAML/Entra) deps removed; external auth becomes a later phase. Superseded by decisions 14-22 (phases 8-10); SAML is not planned. |
-| 7 | No CI for now (no GitHub Actions minutes). A CI-agnostic `Makefile` is ready for a future GitLab or Gitea pipeline. |
+| 7 | No CI for now (no GitHub Actions minutes). A CI-agnostic `Makefile` is ready for a future GitLab or Gitea pipeline. Superseded by decision 29. |
 | 8 | (phase 5) Secrets in transit are sealed per recipient worker rather than to collection-group keys: simpler, no key distribution or re-keying on membership change, and cheap at the expected 6-8 collectors. The vault public key and the payload-encryption switch travel in each signed task rather than in assignments. |
 | 9 | (phase 5) Collector drivers use Netmiko for SSH CLI platforms; Scrapli can be added as a second base when a platform needs it. |
 | 10 | (phase 6) Storage target settings travel in each signed storage task (sealed to the target's workers) rather than in assignments, for the same reason as decision 8: workers keep no configuration state. Assignments carry only queues. Jobs protect their storage target from deletion, and a target's driver is fixed once it holds backups. |
@@ -382,4 +382,5 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 26 | (phase 12) Receiver settings, the push-enabled device list, the vault key and the encryption switch travel in the receiver's **assignment**, an exception to decision 10's queues-only assignments, since a receiver receives no tasks to carry them. |
 | 27 | (phase 12) Pushing is a per-device setting alongside polling, not a backup method. Each accepted file is its own `BackupJob(trigger=push)`, exempt from the one-active-job rule. Rejected pushes are refused at the protocol level and reported (audited, shown per receiver), never quarantined. |
 | 28 | (phase 11) Pushed files may be up to 512 MiB, beyond Redis's 512 MB value cap with encryption overhead, so blobs are staged in 32 MiB chunks and streamed. |
+| 29 | The repository is public, which makes GitHub Actions free. `ci.yml` runs `make check` on every pull request and is required to merge to `master`. Pushing a `vX.Y.Z` tag runs `release.yml`, which checks the tag against the `VERSION` file, runs `make check`, publishes signed multi-arch images to GHCR and creates the GitHub Release. `VERSION` is the single source of the release version; `make set-version` copies it into each package, and a test fails if any package disagrees. |
 | — | Retention enforcement: in scope, designed in a later phase. |

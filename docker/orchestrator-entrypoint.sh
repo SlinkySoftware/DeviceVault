@@ -6,6 +6,15 @@ role="${1:-api}"
 [ "$#" -gt 0 ] && shift
 
 case "$role" in
+    migrate|api|api-dev|scheduler|events|flower)
+        echo "DeviceVault $(python -m devicevault_protocol.version) orchestrator: $role" >&2
+        ;;
+esac
+
+case "$role" in
+    version)
+        exec python -m devicevault_protocol.version
+        ;;
     migrate)
         python manage.py migrate --noinput
         python manage.py create_admin

@@ -7,6 +7,10 @@
 FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
 
 FROM python:3.14-slim-trixie AS base
+# The release workflow adds version, revision and creation labels.
+LABEL org.opencontainers.image.source=https://github.com/SlinkySoftware/DeviceVault \
+      org.opencontainers.image.licenses=GPL-3.0-or-later \
+      org.opencontainers.image.vendor="Slinky Software"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv \

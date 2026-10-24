@@ -53,6 +53,7 @@ router.register(r'flower-endpoints', monitoring_api.FlowerEndpointViewSet)
 urlpatterns = [
     path('api/', include(router.urls)),
     path('api/health/', views.health),
+    path('api/version/', views.version_info),
     path('api/flower-auth/', monitoring_api.flower_auth),
     path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', backup_api.dashboard_stats),

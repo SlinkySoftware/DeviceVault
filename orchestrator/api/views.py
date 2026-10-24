@@ -369,6 +369,16 @@ def health(request):
 
 
 @decorators.api_view(['GET'])
+@decorators.authentication_classes([])
+@decorators.permission_classes([AllowAny])
+def version_info(request):
+    """The running release; public, since the sign-in page shows it."""
+    from devicevault_protocol.version import version
+
+    return response.Response({'version': version()})
+
+
+@decorators.api_view(['GET'])
 @decorators.permission_classes([IsAuthenticated])
 def onboarding(request):
     # Configuration is supplied by the deployment environment, so an

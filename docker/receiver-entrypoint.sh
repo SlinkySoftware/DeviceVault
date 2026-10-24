@@ -3,8 +3,13 @@
 #
 # Required: DV_BROKER_URL, DV_REDIS_URL. The receiver registers with the
 # orchestrator and, once approved as a receiver, listens on whatever its
-# assignment enables (SCP/SFTP, TFTP).
+# assignment enables (SCP/SFTP, TFTP). `dv-receiver version` prints the
+# release version.
 set -eu
+
+if [ "${1:-}" = version ]; then
+    exec python -m devicevault_protocol.version
+fi
 
 if [ "$#" -gt 0 ]; then
     exec "$@"

@@ -162,6 +162,7 @@ class RegistrationAgent:
         logger.warning(
             'worker_identity',
             extra={
+                'version': self._version,
                 'worker_id': self.identity.worker_id,
                 'fingerprint': self.identity.fingerprint,
                 'orchestrator_pinned': bool(self.identity.orchestrator_key),

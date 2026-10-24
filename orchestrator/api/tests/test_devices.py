@@ -33,3 +33,12 @@ def test_health_needs_no_authentication(db):
 
     assert resp.status_code == 200
     assert resp.json() == {'status': 'ok'}
+
+
+def test_version_needs_no_authentication(db):
+    from devicevault_protocol.version import version
+
+    resp = APIClient().get('/api/version/')
+
+    assert resp.status_code == 200
+    assert resp.json() == {'version': version()}

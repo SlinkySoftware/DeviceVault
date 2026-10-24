@@ -41,7 +41,13 @@
       <template #body-cell-name="props">
         <q-td :props="props">
           <div class="text-weight-medium">{{ props.row.name }}</div>
-          <div class="text-caption text-grey">{{ props.row.hostname }} · v{{ props.row.version || '?' }}</div>
+          <div class="text-caption text-grey">
+            {{ props.row.hostname }} · v{{ props.row.version || '?' }}
+            <template v-if="versionMismatch(props.row)">
+              <q-icon name="warning" color="warning" aria-label="Version mismatch" />
+              <q-tooltip>The orchestrator runs v{{ settings.version }}; upgrade this worker to match</q-tooltip>
+            </template>
+          </div>
         </q-td>
       </template>
       <template #body-cell-fingerprint="props">
@@ -147,6 +153,7 @@ import TimeCell from '@/components/TimeCell.vue'
 import WorkerAssignmentDialog from '@/components/WorkerAssignmentDialog.vue'
 import { useNotify } from '@/composables/useNotify'
 import { usePolling } from '@/composables/usePolling'
+import { useSettingsStore } from '@/stores/settings'
 import { pushProtocolLabel } from '@/utils/format'
 
 const STATUS_COLORS: Record<WorkerStatus, string> = { pending: 'warning', approved: 'positive', revoked: 'grey' }
@@ -157,6 +164,9 @@ const STATUS_ORDER: Record<WorkerStatus, number> = { pending: 0, approved: 1, re
 
 const $q = useQuasar()
 const notify = useNotify()
+const settings = useSettingsStore()
+const versionMismatch = (worker: Worker) =>
+  !!settings.version && !!worker.version && worker.version !== settings.version
 const workers = ref<Worker[]>([])
 const identity = ref<OrchestratorIdentity | null>(null)
 const loading = ref(false)

@@ -13,7 +13,7 @@ name: devicevault-worker
 
 services:
   worker:
-    image: ${DV_WORKER_IMAGE:-devicevault-worker:latest}
+    image: ${DV_WORKER_IMAGE:-ghcr.io/slinkysoftware/devicevault-worker:${DV_VERSION:-latest}}
     restart: unless-stopped
     env_file: [worker.env]
     volumes:
