@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented. Push collection (unsolicited SCP, SFTP and TFTP uploads, section 7.1, phases 11-13) was added on 2026-10-24.
 
 ## 1. Goals
 
@@ -11,7 +11,7 @@ Status: **Agreed** (2026-10-23). Decisions on the former open questions are reco
 5. Collector drivers and storage drivers are pluggable. New device platforms and storage backends (including an arbitrary database) are additive, not invasive.
 6. Current stacks: Python 3.14 (verified: Django 6.1.2, Celery 5.6.3, psycopg 3, djangosaml2/xmlsec, python-ldap, netmiko, scrapli, flower all install and run), Node 24, Quasar 2.35 / Vue 3.5 / vue-router 5 / Pinia 4. Docker is the only deployment target.
 
-Sizing assumptions: 6–8 collectors, 2–4 storage workers, backups from hundreds of KB up to tens of MB.
+Sizing assumptions: 6–8 collectors, 2–4 storage workers, a few receivers, backups from hundreds of KB up to tens of MB; pushed files up to 512 MiB.
 
 ## 2. Components
 
@@ -33,9 +33,14 @@ Sizing assumptions: 6–8 collectors, 2–4 storage workers, backups from hundre
   │ role=storage:   consumes storage.target.<uuid>         │
   │ always:         dv.worker.<worker_id> (control/direct) │
   └────────────────────────────────────────────────────────┘
+                             │ AMQP + Redis only
+  ┌─ receiver (deploy/receiver) — own image, host network ─┐
+  │ role=receiver: SCP/SFTP and TFTP listeners             │◄── devices push
+  │ always:         dv.worker.<worker_id>.control          │
+  └────────────────────────────────────────────────────────┘
 ```
 
-No component talks to another directly. Everything goes over AMQP or Redis.
+No component talks to another directly. Everything goes over AMQP or Redis. The one exception is inbound: devices push files to a receiver (section 7.1).
 
 ### Orchestrator processes (same image, different commands)
 
@@ -55,15 +60,18 @@ The worker has a bootstrap, registration, and control layer, plus driver registr
 ## 3. Repository layout
 
 ```
-protocol/        shared package: queue/exchange names, message schemas (pydantic), envelope crypto
+protocol/        shared package: queue/exchange names, message schemas (pydantic), envelope crypto;
+                 from phase 11 also identity, registration agent, task trust and blob staging
 orchestrator/    Django project + apps (pyproject, depends on protocol)
 worker/          Celery worker runtime + drivers (pyproject, depends on protocol)
+receiver/        push receiver: SCP/SFTP (asyncssh) and TFTP listeners, no Celery worker pool (phase 12)
 frontend/        Quasar/Vue SPA (TypeScript)
 docker/          Dockerfile (targets: orchestrator, worker, dev), web.Dockerfile, entrypoints, nginx template
 deploy/
   infra/         compose: postgres, rabbitmq, redis (+ example HA notes)
   orchestrator/  compose: web, api, events, scheduler, flower(profile)
   worker/        compose: worker (env: DV_BROKER_URL, DV_REDIS_URL, DV_TLS_CA?, DV_WORKER_NAME?)
+  receiver/      compose: receiver (same env as worker; network_mode: host)
   dev/           compose overlay: everything on one host, bind-mounted source, hot reload
 docs/            ARCHITECTURE.md, DEPLOYMENT.md (later: OPERATIONS.md, DRIVERS.md, SECURITY.md)
 CLAUDE.md
@@ -241,6 +249,17 @@ read (UI):  api → storage.read task → storage.target.<t> → blob dv:blob:re
 check (UI): api → storage.check task → storage.target.<t> → Celery result
 ```
 
+Push (section 7.1) joins this path at the store step:
+
+```
+receiver:   accept upload (auth, source IP, filename) → spool to disk → encrypt (if enabled) → stage blob
+            → push.received event → dv.orchestrator
+events:     re-check device → BackupJob(trigger=push, collected) → signed store task → storage.target.<t>
+storage:    as above → job.stored
+```
+
+**Large blobs (phase 11):** Redis caps one value at 512 MB (`proto-max-bulk-len`), and a 512 MiB push plus encryption overhead exceeds it. Blob staging moves to chunks (`dv:blob:<uuid>:<n>`, 32 MiB each, plus a manifest key holding the chunk count, size and SHA-256), written and read in a stream so neither side holds a whole backup in memory. Small backups are one chunk. Redis `maxmemory` must allow for the largest expected backups in flight (DEPLOYMENT.md).
+
 Retries: drivers raise typed errors. Transient errors (timeout, connection refused, lock held) trigger a Celery retry with backoff. Permanent errors (auth failure, unknown driver) fail the job. Each job is handled exactly once, keyed on `job_id`. Binary/text is carried as job metadata end to end, which fixes the dropped `is_binary` flag.
 
 ## 6. Data model (main changes)
@@ -248,7 +267,8 @@ Retries: drivers raise typed errors. Transient errors (timeout, connection refus
 - `Worker` (replaces `WorkerRegistration`): id, name, status (pending/approved/revoked), role, public keys, capabilities, assignment version applied/desired, last_seen.
 - `CollectionGroup`: queue `collector.group.<uuid>`, M2M workers. The UI warns when a device's driver isn't supported by every approved member.
 - `StorageTarget` (replaces `BackupLocation`): name, driver key, config (validated against the driver schema, secret fields encrypted), M2M workers, queue `storage.target.<uuid>`. Assigning a non-`shareable` driver (local fs, local git) to more than one worker is blocked.
-- `Device`: `driver` + `driver_params` (validated against the driver schema), collection_group, storage_target, credential, schedule (FK; currently missing, which is why schedules never fire), retention_policy.
+- `Device`: `driver` + `driver_params` (validated against the driver schema), collection_group, storage_target, credential, schedule (FK; currently missing, which is why schedules never fire), retention_policy. From phase 12: `ip_address` unique across all devices, and `push_mode` (off / ssh / tftp) with an optional `push_filename_pattern` (glob).
+- `Worker` (phase 12): role `receiver` and a `ReceiverSettings` record (protocol switches, ports, max file size, encrypted shared login, host key fingerprint as reported), see section 7.1.
 - `BackupJob` (replaces `DeviceBackupResult` + `StoredBackup`): one row per attempt with state, timings, logs, storage_ref, enc metadata, size, sha256.
 - `FlowerEndpoint`: name, slug, url, proxied (bool). Admin-only. Proxied endpoints are served at `/flower/<slug>/`.
 
@@ -266,11 +286,33 @@ class CollectorDriver(Protocol):
 ```
 Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a command list plus a cleanup regex). The first drivers are ported from today's: Mikrotik, plus `noop` and `binary_dummy` for tests. Cisco IOS/ASA etc. come later from your specs.
 
-Push mode (future): a driver may declare `mode="push"` with a listener (TFTP/SCP/SFTP). The orchestrator assigns listeners to collectors, and the collector maps the inbound source IP to a device via the assignment. The interface is reserved now and not built.
+Push collection is not a collector driver mode; it is a separate receiver component (section 7.1).
 
 **Storage driver** (`worker/storage/drivers/`): `store(data, name, params) → ref`, `read(ref, params) → bytes`, `delete(ref, params)`, `check(params)`, plus `Params`, `shareable`. Drivers (phase 6): filesystem and git (paths relative to the worker's `/srv/devicevault` volume, not shareable) and S3 (shareable); PostgreSQL (shareable, psycopg 3, one `bytea` row per backup in `<schema>.devicevault_backups`, with discrete connection and TLS settings). Other databases get drivers of their own rather than a generic SQLAlchemy URL, since TLS and connection settings differ for each.
 
 Drivers are discovered through Python entry points, so a new driver can ship as a separate package without editing core.
+
+### 7.1 Push collection (phases 11-13)
+
+Devices upload their configuration unprompted (for example Cisco `archive` on `write memory`) over SCP, SFTP or TFTP. Pushing sits alongside polling: a device keeps its driver and schedule and may also push.
+
+**Receiver component.** A separate image built from the `receiver/` package (`devicevault_receiver`), so collectors stay unexposed to inbound traffic and the listening process carries no collector dependencies. It is not a Celery worker: it registers like any worker (identity, signed events, approval with fingerprint check, TOFU pinning; the code shared with `worker/` moves into `protocol/` in phase 11), consumes only its control queue, and sends events. It is approved with role `receiver` on the Workers page.
+
+**Networking.** The receiver runs with `network_mode: host` (`deploy/receiver`). Bridge networking would break both requirements: Docker's userland proxy (IPv6, hairpin traffic) replaces the device's source address, which is how devices are matched, and TFTP answers from a new ephemeral port that DNAT doesn't follow without the conntrack helper. With host networking a listener's socket is bound only while its assignment enables it and is closed when disabled, so a port is open only when configured. Default ports are unprivileged (2222 for SCP/SFTP, 6969 for TFTP); ports 22 or 69 need `CAP_NET_BIND_SERVICE` or a host firewall redirect (DEPLOYMENT.md).
+
+**Settings (per receiver, Workers page).** SCP/SFTP on/off and port, TFTP on/off and port, maximum file size (default 512 MiB), and a shared SSH login: username, password and optional authorised public keys, encrypted at rest and sealed to that receiver. The receiver generates its SSH host key on first start and keeps it in its state volume next to `identity.json`; it reports the fingerprint in its events and the UI shows it so it can be pinned on devices.
+
+**Assignment.** Settings travel in the receiver's signed assignment rather than per task (there is no task), together with the vault public key and the payload-encryption switch, and the list of push-enabled devices: `{device_id, ip, push_mode, filename_pattern}`. Every receiver accepts every push-enabled device. A change to any push-enabled device, or to the receiver's settings, bumps receiver assignment versions. Sealed secrets in an assignment are re-sealed per receiver like task secrets.
+
+**Device settings.** `push_mode`: off, `ssh` (SCP or SFTP) or `tftp`. TFTP is an explicit per-device opt-in, flagged in the UI as unauthenticated (UDP source addresses can be forged); an `ssh` device's pushes over TFTP are rejected. An optional `push_filename_pattern` (glob) restricts accepted filenames. `Device.ip_address` becomes unique across all devices so a source address names exactly one device; source addresses are normalised (IPv4-mapped IPv6 → IPv4) before matching. A push-enabled device must have a storage target.
+
+**Accepting a file.** The receiver checks, in order: the SSH login (SCP/SFTP), that the source address is a push-enabled device whose `push_mode` matches the protocol, the filename pattern, and the size limit (checked while streaming; SFTP/SCP transfers and TFTP sessions also have an idle timeout). The upload is spooled to a temporary file in the state volume, then encrypted to the vault key (when enabled) and staged as a chunked blob (section 5). Each accepted file is its own backup. The receiver sends a signed `push.received` event `{device_id, source_ip, protocol, filename, blob, sha256, size, enc}`.
+
+**Orchestrator side.** The `events` process verifies the signature and that the sender is an approved receiver, re-checks the device (exists, push enabled with that protocol, IP still matches, has a storage target), creates a `BackupJob(trigger=push)` already `collected` with the filename as metadata, and sends the signed store task to the device's storage target. From there it is the normal pipeline. Push jobs are exempt from the "one active job per device" rule, so two quick pushes, or a push during a scheduled poll, don't drop a file.
+
+**Rejections.** Unknown sources, failed logins, wrong protocol, filename or size are refused at the protocol level (SSH authentication failure or SFTP/SCP error; TFTP access-violation error), and nothing is stored. The receiver sends a rate-limited signed `push.rejected` event `{source_ip, protocol, reason, filename?}`; the orchestrator audits it and the receiver's page lists recent rejected sources, which helps when onboarding a device with the wrong address.
+
+**Libraries.** `asyncssh` serves SCP and SFTP from one SSH server (upload only: no shell, exec, port forwarding, reads or listings beyond what clients need to write). TFTP is a small asyncio server for write requests only (RFC 1350 with blksize/tsize options, RFC 2347-2349), as `tftpy` is unmaintained and synchronous.
 
 ## 8. HA
 
@@ -299,7 +341,10 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 8 | `feat/aaa-rbac` | User groups, device-group grants and the permission matrix, global administrators, server-side sessions, audit extension, replaces the old RBAC (section 4.4) | yes |
 | 9 | `feat/auth-providers` | Auth provider records, group mapping and sync, identity linking, break-glass, LDAP | yes |
 | 10 | `feat/auth-oidc` | OIDC provider kind (Entra, Okta, Authentik) | yes |
-| later | — | Retention enforcement, push collection, new vendor drivers, Redis Sentinel | — |
+| 11 | `refactor/shared-agent` | Identity, registration agent, task trust and blob staging move from `worker/` into `protocol/`; chunked, streamed blob staging (section 5). No behaviour change otherwise | yes |
+| 12 | `feat/push-receiver` | `receiver/` package, `receiver` image target and `deploy/receiver`; receiver role and settings; SCP/SFTP listener; `push.received`/`push.rejected` events → BackupJob; device push settings and unique IP; UI (section 7.1) | yes |
+| 13 | `feat/push-tftp` | TFTP write-only listener and the per-device TFTP opt-in | yes |
+| later | — | Retention enforcement, new vendor drivers, Redis Sentinel | — |
 
 Each backend phase ships its own UI changes, so master never has a broken frontend.
 
@@ -329,4 +374,10 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 20 | (phase 9) External group membership is synced at login only, by mapping rules and optional auto-created external groups, tagged by source so manual membership is untouched. |
 | 21 | (phase 9) Break-glass: the bootstrap admin is a local user flagged to log in even when local authentication is disabled. |
 | 22 | (phases 9-10) LDAP uses `python-ldap` directly (django-auth-ldap is single-configuration, settings-based); OIDC uses `authlib`. SAML is out of scope. |
+| 23 | (phases 11-13) Push collection is a separate **receiver** component with its own image and role, not a collector capability: only the receiver is exposed to inbound traffic, and it carries no collector dependencies. Shared worker code moves to `protocol/` rather than the receiver depending on the worker package. |
+| 24 | (phase 12) Receivers use **host networking**: bridge networking loses the source address (userland proxy, IPv6) and breaks TFTP's ephemeral reply ports, and only a socket bound at runtime keeps a port closed until it is configured. |
+| 25 | (phase 12) Devices are matched on **source address only**, so `Device.ip_address` is unique across all devices. Every receiver accepts every push-enabled device. SCP/SFTP use one shared login per receiver as well as the address check; TFTP is unauthenticated and an explicit per-device opt-in. |
+| 26 | (phase 12) Receiver settings, the push-enabled device list, the vault key and the encryption switch travel in the receiver's **assignment**, an exception to decision 10's queues-only assignments, since a receiver receives no tasks to carry them. |
+| 27 | (phase 12) Pushing is a per-device setting alongside polling, not a backup method. Each accepted file is its own `BackupJob(trigger=push)`, exempt from the one-active-job rule. Rejected pushes are refused at the protocol level and reported (audited, shown per receiver), never quarantined. |
+| 28 | (phase 11) Pushed files may be up to 512 MiB, beyond Redis's 512 MB value cap with encryption overhead, so blobs are staged in 32 MiB chunks and streamed. |
 | — | Retention enforcement: in scope, designed in a later phase. |
