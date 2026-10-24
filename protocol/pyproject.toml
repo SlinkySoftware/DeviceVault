@@ -1,12 +1,21 @@
 [project]
 name = "devicevault-protocol"
 version = "0.1.0"
-description = "Contracts shared by the DeviceVault orchestrator and workers"
+description = "Contracts and runtime shared by the DeviceVault orchestrator, workers and receivers"
 requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
     "celery>=5.6.3,<5.7",
     "cryptography>=46",
+    "kombu>=5.6.2,<5.7",
+    "python-json-logger>=4",
+    "redis>=6.4,<7",
+]
+
+[dependency-groups]
+dev = [
+    "fakeredis[lua]>=2.32",
+    "pytest>=9",
 ]
 
 [build-system]

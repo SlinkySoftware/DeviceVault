@@ -6,6 +6,7 @@ make a worker write elsewhere.
 
 import gzip
 import os
+import shutil
 import threading
 from pathlib import Path
 
@@ -64,16 +65,16 @@ class FilesystemDriver(StorageDriver):
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + '.part')
         with gzip.open(tmp, 'wb') if params.compress else open(tmp, 'wb') as handle:
-            handle.write(data)
+            shutil.copyfileobj(data, handle)
         os.replace(tmp, path)
         return ref
 
-    def read(self, ref, params):
+    def read(self, ref, params, sink):
         path = _inside(_base(params), ref)
         if not path.is_file():
             raise StorageError(f'backup not found: {ref}')
         with gzip.open(path, 'rb') if ref.endswith(_GZ_SUFFIX) else open(path, 'rb') as handle:
-            return handle.read()
+            shutil.copyfileobj(handle, sink)
 
     def delete(self, ref, params):
         _inside(_base(params), ref).unlink(missing_ok=True)
@@ -113,13 +114,14 @@ class GitDriver(StorageDriver):
         relative = f'{name.device_key}{name.extension}'
         with self._lock:
             repo = self._repo(params)
-            _inside(_base(params), relative).write_bytes(data)
+            with open(_inside(_base(params), relative), 'wb') as handle:
+                shutil.copyfileobj(data, handle)
             repo.index.add([relative])
             message = f'{name.device_key}: backup {name.timestamp} (job {name.job_id})'
             commit = repo.index.commit(message, author=_AUTHOR, committer=_AUTHOR)
         return f'{params.branch}:{relative}@{commit.hexsha}'
 
-    def read(self, ref, params):
+    def read(self, ref, params, sink):
         try:
             location, sha = ref.rsplit('@', 1)
             _branch, relative = location.split(':', 1)
@@ -128,7 +130,7 @@ class GitDriver(StorageDriver):
         _inside(_base(params), relative)
         try:
             with Repo(_base(params)) as repo:
-                return (repo.commit(sha).tree / relative).data_stream.read()
+                shutil.copyfileobj((repo.commit(sha).tree / relative).data_stream, sink)
         except (ValueError, KeyError, GitError) as exc:
             raise StorageError(f'backup not found in git: {ref}') from exc
 

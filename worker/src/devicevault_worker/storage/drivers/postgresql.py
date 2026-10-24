@@ -176,18 +176,18 @@ class PostgresDriver(StorageDriver):
                     'INSERT INTO {} (ref, content) VALUES (%s, %s) '
                     'ON CONFLICT (ref) DO UPDATE SET content = EXCLUDED.content, stored_at = now()'
                 ).format(self.table(params)),
-                [ref, data],
+                [ref, data.read()],  # bytea: one value, so the whole backup is in memory here
             )
         return ref
 
-    def read(self, ref, params):
+    def read(self, ref, params, sink):
         with self.connect(params, 'read') as connection:
             row = connection.execute(
                 sql.SQL('SELECT content FROM {} WHERE ref = %s').format(self.table(params)), [ref]
             ).fetchone()
         if row is None:
             raise StorageError(f'backup not found: {ref}')
-        return bytes(row[0])
+        sink.write(row[0])
 
     def delete(self, ref, params):
         with self.connect(params, 'delete') as connection:

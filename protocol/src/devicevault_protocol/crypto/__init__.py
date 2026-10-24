@@ -19,7 +19,7 @@ License: GPLv3+
 """
 
 from devicevault_protocol.crypto.ecies import seal, unseal
-from devicevault_protocol.crypto.engine import decrypt_backup, encrypt_backup
+from devicevault_protocol.crypto.engine import decrypt_backup, encrypt_backup, encrypt_stream
 from devicevault_protocol.crypto.header import HEADER_MAGIC, EncryptionHeader, is_encrypted
 from devicevault_protocol.crypto.providers import KeyProvider, VaultKeyRing, VaultPublicKey
 
@@ -31,6 +31,7 @@ __all__ = [
     'VaultPublicKey',
     'decrypt_backup',
     'encrypt_backup',
+    'encrypt_stream',
     'is_encrypted',
     'seal',
     'unseal',

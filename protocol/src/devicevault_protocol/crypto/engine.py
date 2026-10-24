@@ -23,10 +23,12 @@ Copyright (C) 2026, Slinky Software
 License: GPLv3+
 """
 
+import base64
+import io
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, BinaryIO
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -68,31 +70,48 @@ def _zeroize(buf: bytearray) -> None:
         buf[i] = 0
 
 
+def _read_full(source: BinaryIO, size: int) -> bytes:
+    """Up to *size* bytes, short only at the end: decryption relies on every chunk but the last being full."""
+    parts = []
+    remaining = size
+    while remaining:
+        part = source.read(remaining)
+        if not part:
+            break
+        parts.append(part)
+        remaining -= len(part)
+    return b''.join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def encrypt_backup(
-    plaintext: bytes,
+def encrypt_stream(
+    source: BinaryIO,
+    sink: BinaryIO,
     key_provider: KeyProvider,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     aad_fields: dict[str, Any] | None = None,
-) -> tuple[bytes, dict[str, Any]]:
-    """Encrypt *plaintext* using envelope encryption (AES-256-GCM).
+) -> dict[str, Any]:
+    """Encrypt *source* into *sink* using envelope encryption (AES-256-GCM).
+
+    Reads and writes one chunk at a time, so memory use does not depend on
+    the backup's size. The output is the same object ``encrypt_backup``
+    returns (header + chunks).
 
     Args:
-        plaintext: Raw backup bytes to encrypt.
+        source: Binary file with the plaintext, read from its current position.
+        sink: Binary file the encrypted object is written to.
         key_provider: Master key provider for DEK wrapping.
         chunk_size: Plaintext bytes per chunk (default 1 MiB).
         aad_fields: Extra fields to include in AAD (backup_id, device_id, etc.).
 
     Returns:
-        (ciphertext_blob, metadata) where *ciphertext_blob* is the complete
-        encrypted object (header + chunks) and *metadata* is a dict with
-        ``enc_version``, ``cipher``, ``kid``, and ``edk`` (base64) suitable
-        for storing in the database.
+        A dict with ``enc_version``, ``cipher``, ``kid``, and ``edk``
+        (base64) suitable for storing in the database.
 
     Raises:
         EncryptionError: On any encryption failure.
@@ -124,46 +143,33 @@ def encrypt_backup(
             edk=edk,
             aad=aad_dict,
         )
-        header_bytes = header.to_bytes()
+        sink.write(header.to_bytes())
 
-        # Chunk and encrypt
+        # Chunk and encrypt; empty plaintext still gets one (empty) chunk
         aesgcm = AESGCM(bytes(dek))
-        chunks = []
-        offset = 0
         chunk_index = 0
+        plaintext_size = 0
 
-        while offset < len(plaintext):
+        while True:
+            chunk_data = _read_full(source, chunk_size)
+            if not chunk_data and chunk_index:
+                break
             if chunk_index >= MAX_CHUNK_COUNT:
                 raise ChunkLimitExceededError(
                     f'Backup exceeds maximum {MAX_CHUNK_COUNT} chunks (chunk_size={chunk_size})'
                 )
 
-            end = min(offset + chunk_size, len(plaintext))
-            chunk_data = plaintext[offset:end]
-
             # Unique random nonce per chunk (96-bit, CSPRNG)
             nonce = os.urandom(GCM_NONCE_BYTES)
 
-            # Encrypt with AAD
+            # Encrypt with AAD; ct includes the 16-byte tag appended by cryptography library
             ct = aesgcm.encrypt(nonce, chunk_data, aad_bytes)
+            sink.write(nonce + ct)
 
-            # ct includes the 16-byte tag appended by cryptography library
-            chunks.append(nonce + ct)
-
-            offset = end
+            plaintext_size += len(chunk_data)
             chunk_index += 1
-
-        # Handle empty plaintext (zero chunks)
-        if not chunks and len(plaintext) == 0:
-            nonce = os.urandom(GCM_NONCE_BYTES)
-            ct = aesgcm.encrypt(nonce, b'', aad_bytes)
-            chunks.append(nonce + ct)
-
-        # Assemble final blob
-        blob = header_bytes + b''.join(chunks)
-
-        # Metadata for database storage
-        import base64
+            if not chunk_data:
+                break
 
         metadata = {
             'enc_version': ENC_VERSION,
@@ -172,15 +178,9 @@ def encrypt_backup(
             'edk': base64.b64encode(edk).decode('ascii'),
         }
 
-        logger.debug(
-            'Encrypted backup: %d bytes -> %d bytes (%d chunks, kid=%s)',
-            len(plaintext),
-            len(blob),
-            chunk_index or 1,
-            kid,
-        )
+        logger.debug('Encrypted backup: %d bytes (%d chunks, kid=%s)', plaintext_size, chunk_index, kid)
 
-        return bytes(blob), metadata
+        return metadata
 
     except EncryptionError, ChunkLimitExceededError:
         raise
@@ -189,6 +189,24 @@ def encrypt_backup(
     finally:
         # Zeroize plaintext DEK from memory
         _zeroize(dek)
+
+
+def encrypt_backup(
+    plaintext: bytes,
+    key_provider: KeyProvider,
+    *,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    aad_fields: dict[str, Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Encrypt *plaintext* in memory; see ``encrypt_stream``.
+
+    Returns:
+        (ciphertext_blob, metadata) where *ciphertext_blob* is the complete
+        encrypted object (header + chunks).
+    """
+    sink = io.BytesIO()
+    metadata = encrypt_stream(io.BytesIO(plaintext), sink, key_provider, chunk_size=chunk_size, aad_fields=aad_fields)
+    return sink.getvalue(), metadata
 
 
 def decrypt_backup(

@@ -473,12 +473,30 @@ source = { editable = "protocol" }
 dependencies = [
     { name = "celery" },
     { name = "cryptography" },
+    { name = "kombu" },
+    { name = "python-json-logger" },
+    { name = "redis" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "celery", specifier = ">=5.6.3,<5.7" },
     { name = "cryptography", specifier = ">=46" },
+    { name = "kombu", specifier = ">=5.6.2,<5.7" },
+    { name = "python-json-logger", specifier = ">=4" },
+    { name = "redis", specifier = ">=6.4,<7" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32" },
+    { name = "pytest", specifier = ">=9" },
 ]
 
 [[package]]
@@ -498,6 +516,12 @@ dependencies = [
     { name = "python-json-logger" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.40" },
@@ -510,6 +534,12 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6,<3.4" },
     { name = "pydantic", specifier = ">=2.14,<3" },
     { name = "python-json-logger", specifier = ">=4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32" },
+    { name = "pytest", specifier = ">=9" },
 ]
 
 [[package]]

@@ -1,9 +1,12 @@
 import hashlib
+import io
 import uuid
 
+import fakeredis
 import pytest
 
-from devicevault_protocol import signing
+from devicevault_protocol import blobs, signing
+from devicevault_protocol import identity as identity_store
 from devicevault_protocol.jobs import (
     EVENT_COLLECTED,
     EVENT_FAILED,
@@ -15,35 +18,9 @@ from devicevault_protocol.jobs import (
 )
 from devicevault_protocol.names import STORE_TASK
 from devicevault_protocol.tasks import sign_task
-from devicevault_worker import identity as identity_store
 from devicevault_worker.drivers.base import TransientError
 
 ORCHESTRATOR = signing.generate_signing_key()
-
-
-class FakeRedis:
-    def __init__(self):
-        self.data = {}
-
-    def set(self, key, value, ex=None, nx=False):
-        if nx and key in self.data:
-            return None
-        self.data[key] = value.encode() if isinstance(value, str) else value
-        return True
-
-    def expire(self, key, seconds):
-        return key in self.data
-
-    def eval(self, script, numkeys, key, value):
-        # Only the device lock's compare-and-delete is used.
-        if self.data.get(key) == value.encode():
-            del self.data[key]
-
-    def get(self, key):
-        return self.data.get(key)
-
-    def delete(self, key):
-        self.data.pop(key, None)
 
 
 class Sent:
@@ -71,14 +48,15 @@ class Sent:
 def pipeline(monkeypatch, tmp_path):
     """Worker modules wired to a fake Redis and broker, trusting ORCHESTRATOR."""
     from devicevault_worker import app as app_module
-    from devicevault_worker import blobs, collect
+    from devicevault_worker import collect
+    from devicevault_worker.storage import tasks
 
     monkeypatch.setenv('DV_STATE_DIR', str(tmp_path))
     identity_store.load_or_create().pin_orchestrator(signing.public_key_to_b64(ORCHESTRATOR))
-    redis = FakeRedis()
+    redis = fakeredis.FakeRedis()
     sent = Sent()
-    monkeypatch.setattr(blobs, 'redis_client', redis)
     monkeypatch.setattr(collect, 'redis_client', redis)
+    monkeypatch.setattr(tasks, 'redis_client', redis)
     monkeypatch.setattr(app_module.app, 'send_task', sent)
     return redis, sent
 
@@ -115,7 +93,7 @@ def test_collected_backup_is_staged_and_handed_to_storage(pipeline, tmp_path):
     events = sent.events()
     assert [event for event, _ in events] == [EVENT_STARTED, EVENT_COLLECTED]
     collected = events[1][1]
-    staged = redis.get(blob_key(job_id))
+    staged = blobs.get(redis, blob_key(job_id))
     assert b'edge-01' in staged
     assert collected['sha256'] == hashlib.sha256(staged).hexdigest()
     assert collected['is_binary'] is False and collected['encrypted'] is False
@@ -203,7 +181,9 @@ def read_back(storage, ref):
     from devicevault_worker.storage.drivers import get_driver
 
     driver = get_driver(storage)
-    return driver().read(ref, driver.Params(path='store'))
+    sink = io.BytesIO()
+    driver().read(ref, driver.Params(path='store'), sink)
+    return sink.getvalue()
 
 
 def volume_path():
@@ -228,14 +208,14 @@ def test_stored_backups_read_back_byte_for_byte(pipeline, tmp_path, storage):
     redis, sent = pipeline
     job_id, envelope = collect_job(tmp_path, storage=storage)
     collect.run(envelope)
-    staged = redis.get(blob_key(job_id))
+    staged = blobs.get(redis, blob_key(job_id))
 
     events = run_store(sent)
 
     assert [event for event, _ in events] == [EVENT_STARTED, EVENT_STORED]
     stored = events[1][1]
     assert stored['sha256'] == hashlib.sha256(staged).hexdigest()
-    assert redis.get(blob_key(job_id)) is None
+    assert blobs.get(redis, blob_key(job_id)) is None
     assert read_back(storage, stored['storage_ref']) == staged
 
 
@@ -245,7 +225,7 @@ def test_tampered_staged_backups_are_not_stored(pipeline, tmp_path):
     redis, sent = pipeline
     job_id, envelope = collect_job(tmp_path)
     collect.run(envelope)
-    redis.set(blob_key(job_id), b'something else')
+    blobs.put(redis, blob_key(job_id), b'something else', 60)
 
     events = run_store(sent)
 
@@ -260,7 +240,7 @@ def test_expired_staged_backups_fail(pipeline, tmp_path):
     redis, sent = pipeline
     job_id, envelope = collect_job(tmp_path)
     collect.run(envelope)
-    redis.delete(blob_key(job_id))
+    blobs.delete(redis, blob_key(job_id))
 
     events = run_store(sent)
 
@@ -281,7 +261,7 @@ def test_backups_are_encrypted_to_the_vault_before_staging(pipeline, tmp_path):
     job_id, envelope = collect_job(tmp_path, params={'hostname': 'edge-01'}, vault=vault)
 
     collect.run(envelope)
-    staged = redis.get(blob_key(job_id))
+    staged = blobs.get(redis, blob_key(job_id))
     stored = run_store(sent)[-1][1]
 
     assert is_encrypted(staged) and b'edge-01' not in staged
