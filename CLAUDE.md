@@ -10,7 +10,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   `make frontend-build`, `make lock`, `make dev-up`.
   For ad-hoc commands, use the dev image (`make dev-image` builds it):
   `docker run --rm -v "$PWD":/workspace -u "$(id -u):$(id -g)" -e HOME=/tmp -w /workspace/orchestrator devicevault-dev <cmd>`.
-- **Dependencies**: edit the package's `pyproject.toml` (`protocol/`, `worker/` or `orchestrator/`), then `make lock`. `uv.lock` is committed.
+- **Dependencies**: edit the package's `pyproject.toml` (`protocol/`, `worker/`, `receiver/` or `orchestrator/`), then `make lock`. `uv.lock` is committed.
   Frontend deps are pinned in `frontend/package.json` with `package-lock.json` committed.
 - **No backward compatibility required.** Nothing is deployed. Change models freely, but
   keep migrations generated (`makemigrations`), and the test suite guards against drift.
@@ -27,18 +27,24 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
   storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `agent`
   (applies assignments as Celery queue consumers). Must not import Django (a test enforces it).
+- `receiver/` (`devicevault_receiver`): the push receiver, its own image. Not a Celery worker: an
+  asyncio loop (`main`) running the listeners (`ssh`: asyncssh SCP/SFTP, write-only), `agent`
+  (applies the assignment's `receiver` section, `config`), `ingest` (spool, encrypt, stage, report)
+  and `events` (signed `push.*` events, rate-limited refusals). Must not import Django.
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
   `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups`, `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
-  `policies`, `storage` (storage targets; `storage/service.py` sends their tasks). Settings
+  `policies`, `push` (receiver settings and refusals; `service.py` builds receiver assignments and
+  re-sends them when push-enabled devices change, `events.py` turns pushed files into jobs), `storage`
+  (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
   registry (events, approval, assignments, collector and storage driver catalogues);
   `core/signing.py` holds the signing key, `core/keys.py` the data and vault keys, and `core/installation.py`
   the one-database-per-bus claim `migrate` makes. The orchestrator
-  must not import the worker package.
+  must not import the worker or receiver packages.
 - `frontend/`: Quasar 2 / Vue 3 SPA in TypeScript. Talks to same-origin `/api` (nginx in
   production, the Quasar dev proxy in development). `src/api/` (axios client,
   `types.ts` DTOs, `endpoints.ts` typed calls), `src/stores/` (Pinia: auth with `can(flag, group)`,
@@ -46,10 +52,10 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   `useNotify`, `usePolling`), `src/components/`, `src/pages/` (admin pages under
   `pages/admin/`), `src/utils/` (datetime, diff, grants, rules...). Original artwork lives in
   `frontend/branding/`; `public/` holds only web-sized assets.
-- `docker/`: `Dockerfile` (targets `orchestrator`, `worker`, `dev`), `web.Dockerfile`,
-  entrypoints (`dv-orchestrator <role>`, `dv-worker`).
-- `deploy/`: Compose stacks `infra`, `orchestrator`, `worker`, and `dev` (everything on
-  one host, source bind-mounted).
+- `docker/`: `Dockerfile` (targets `orchestrator`, `worker`, `receiver`, `dev`), `web.Dockerfile`,
+  entrypoints (`dv-orchestrator <role>`, `dv-worker`, `dv-receiver`).
+- `deploy/`: Compose stacks `infra`, `orchestrator`, `worker`, `receiver` (host networking), and `dev`
+  (everything on one host, source bind-mounted).
 
 ## Conventions
 
@@ -68,8 +74,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   pages use `useCrud` + `FormDialog` + `PageCard`; show API errors with
   `useNotify().error(err, fallback)`. Never render untrusted text with `v-html`.
   Tests are Vitest specs next to the code (`*.spec.ts`).
-- Workers must not import Django. The orchestrator owns all database access; workers
-  communicate only through RabbitMQ and Redis.
+- Workers and receivers must not import Django. The orchestrator owns all database access; workers
+  and receivers communicate only through RabbitMQ and Redis.
 - Everything the orchestrator sends a worker is signed: wrap task parameters with
   `core.signing.sign_task(...)` and have the worker task call `verified_payload(...)`
   first. Never add an unsigned task or a worker-side config setting; workers get

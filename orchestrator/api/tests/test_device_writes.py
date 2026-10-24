@@ -81,7 +81,11 @@ def test_group_admin_creates_devices_only_in_their_group(refs, make_user, client
     client = client_for(make_user('operator', grants={refs['core']: ['admin'], refs['edge']: ['view']}))
 
     allowed = client.post('/api/devices/', _payload(refs), format='json')
-    denied = client.post('/api/devices/', _payload(refs, name='edge-02', device_group=refs['edge'].id), format='json')
+    denied = client.post(
+        '/api/devices/',
+        _payload(refs, name='edge-02', ip_address='192.0.2.11', device_group=refs['edge'].id),
+        format='json',
+    )
 
     assert allowed.status_code == 201, allowed.content
     assert denied.status_code == 403
@@ -119,7 +123,7 @@ def test_driver_params_are_validated_against_the_driver_schema(refs, worker_keys
     )
     bad = staff.post(
         '/api/devices/',
-        _payload(refs, name='x', backup_method='ssh_thing', driver_params={'port': 0, 'v': 1}),
+        _payload(refs, name='x', ip_address='192.0.2.12', backup_method='ssh_thing', driver_params={'port': 0, 'v': 1}),
         format='json',
     )
 

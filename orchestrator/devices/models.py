@@ -26,6 +26,10 @@ from django.db import models
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 
+from devicevault_protocol.push import PUSH_OFF, PUSH_SSH
+
+PUSH_MODE_CHOICES = [(PUSH_OFF, 'Off'), (PUSH_SSH, 'SCP or SFTP')]
+
 # ===== Collection Group Models =====
 
 
@@ -125,10 +129,15 @@ class Device(models.Model):
     the schema it advertises). Backups run on ``schedule`` or on demand, on the
     collectors of ``collection_group``, and are written to ``backup_location``.
     ``last_backup_time``/``last_backup_status`` reflect the latest finished job.
+    With ``push_mode`` set the device may also upload backups to the receivers,
+    which match it by ``ip_address`` (ARCHITECTURE.md 7.1).
     """
 
     name = models.CharField(max_length=128, help_text='Device hostname or identifier')
-    ip_address = models.GenericIPAddressField(help_text='IPv4 or IPv6 address the collector connects to')
+    # Unique: receivers match pushed files to devices by source address alone.
+    ip_address = models.GenericIPAddressField(
+        unique=True, unpack_ipv4=True, help_text='IPv4 or IPv6 address the collector connects to (and pushes come from)'
+    )
     dns_name = models.CharField(max_length=128, blank=True, help_text='FQDN for DNS resolution (optional)')
     device_type = models.ForeignKey(
         DeviceType, on_delete=models.PROTECT, help_text='Type of device (Router, Switch, etc.)'
@@ -136,7 +145,9 @@ class Device(models.Model):
     manufacturer = models.ForeignKey(
         Manufacturer, on_delete=models.PROTECT, null=True, blank=True, help_text='Hardware manufacturer (optional)'
     )
-    backup_method = models.CharField(max_length=128, default='noop', help_text='Collector driver key')
+    backup_method = models.CharField(
+        max_length=128, default='noop', blank=True, help_text='Collector driver key (empty: not polled, push only)'
+    )
     driver_params = models.JSONField(default=dict, blank=True, help_text='Per-device settings for the driver')
     device_group = models.ForeignKey(
         'DeviceGroup',
@@ -162,6 +173,15 @@ class Device(models.Model):
         help_text='When to back up automatically (none: on demand only)',
     )
     enabled = models.BooleanField(default=True, help_text='Enable/disable this device for backups')
+    push_mode = models.CharField(
+        max_length=8,
+        choices=PUSH_MODE_CHOICES,
+        default=PUSH_OFF,
+        help_text='Whether the device uploads its own backups to the receivers, and how',
+    )
+    push_filename_pattern = models.CharField(
+        max_length=255, blank=True, help_text='Only accept pushed files whose name matches this glob (e.g. *-confg*)'
+    )
     last_backup_time = models.DateTimeField(null=True, blank=True, help_text='When the latest backup job finished')
     last_backup_status = models.CharField(max_length=32, blank=True, help_text='success or failure')
     retention_policy = models.ForeignKey(

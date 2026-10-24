@@ -15,7 +15,7 @@ PY = $(DOCKER_RUN) -w /workspace $(DEV_IMAGE)
 NODE = $(DOCKER_RUN) -w /workspace/frontend $(NODE_IMAGE)
 DEV_COMPOSE = docker compose -f deploy/dev/compose.yaml
 
-PY_PACKAGES = protocol worker orchestrator
+PY_PACKAGES = protocol worker receiver orchestrator
 
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
@@ -63,6 +63,7 @@ frontend-build: frontend-install
 images:
 	docker build -f docker/Dockerfile --target orchestrator -t devicevault-orchestrator:$(IMAGE_TAG) .
 	docker build -f docker/Dockerfile --target worker -t devicevault-worker:$(IMAGE_TAG) .
+	docker build -f docker/Dockerfile --target receiver -t devicevault-receiver:$(IMAGE_TAG) .
 	docker build -f docker/web.Dockerfile -t devicevault-web:$(IMAGE_TAG) .
 
 dev-up: dev-image
@@ -88,3 +89,4 @@ dev-seed:
 dev-approve:
 	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker 'collector-*' --role collector --all-groups
 	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker storage-1 --role storage --all-targets
+	$(DEV_COMPOSE) exec api dv-orchestrator manage approve_worker receiver-1 --role receiver

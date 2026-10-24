@@ -18,6 +18,7 @@ from devicevault_protocol import signing
 from devicevault_protocol.registration import (
     ASSIGNMENT,
     ROLE_COLLECTOR,
+    ROLE_RECEIVER,
     ROLE_STORAGE,
     STATUS_APPROVED,
     STATUS_PENDING,
@@ -41,7 +42,7 @@ class EventRejected(Exception):
 
 def assignment_payload(worker: Worker) -> dict[str, Any]:
     approved = worker.status == STATUS_APPROVED
-    return {
+    payload = {
         'type': ASSIGNMENT,
         'worker_id': str(worker.id),
         'version': worker.desired_version,
@@ -50,6 +51,11 @@ def assignment_payload(worker: Worker) -> dict[str, Any]:
         'queues': worker.assigned_queues(),
         'orchestrator_key': public_key(),
     }
+    if approved and worker.role == ROLE_RECEIVER:
+        from push.service import receiver_assignment
+
+        payload['receiver'] = receiver_assignment(worker)
+    return payload
 
 
 def publish_control(worker_id: str, envelope: dict[str, Any]) -> None:
@@ -97,6 +103,10 @@ def update_assignment(worker: Worker, **changes: Any) -> Worker:
 
 def approve(worker: Worker, *, role: str, user=None, collection_groups=None, storage_targets=None) -> Worker:
     """Approve ``worker`` with a role. Check storage targets with ``approval_target_problems`` first."""
+    if role == ROLE_RECEIVER:
+        from push.service import settings_for
+
+        settings_for(worker)  # listens for nothing until an administrator enables a protocol
     return update_assignment(
         worker,
         status=STATUS_APPROVED,
@@ -203,6 +213,7 @@ def handle_event(envelope: Any) -> Worker:
         'capabilities': payload.get('capabilities') if isinstance(payload.get('capabilities'), dict) else {},
         'applied_version': max(0, int(payload.get('applied_version') or 0)),
         'applied_queues': [str(q) for q in payload.get('queues') or []],
+        'runtime': {'receiver': payload['receiver']} if isinstance(payload.get('receiver'), dict) else {},
         'pinned_orchestrator_key': str(payload.get('orchestrator_key') or '')[:64],
         'last_seen_at': timezone.now(),
     }
@@ -236,6 +247,11 @@ def handle_event(envelope: Any) -> Worker:
         worker.refresh_from_db()
     if worker.applied_version != worker.desired_version:
         push_assignment(worker)
+    elif worker.role == ROLE_RECEIVER:
+        from push.service import needs_update
+
+        if needs_update(worker):
+            update_assignment(worker)
     return worker
 
 

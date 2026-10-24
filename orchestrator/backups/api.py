@@ -36,6 +36,7 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'trigger',
             'requested_by_username',
             'driver',
+            'source_filename',
             'is_binary',
             'encrypted',
             'size_bytes',

@@ -1,0 +1,28 @@
+[project]
+name = "devicevault-receiver"
+version = "0.1.0"
+description = "DeviceVault push receiver: accepts backups devices upload over SCP, SFTP and TFTP"
+requires-python = ">=3.14,<3.15"
+license = "GPL-3.0-or-later"
+dependencies = [
+    "asyncssh>=2.21,<3",
+    "celery>=5.6.3,<5.7",
+    "devicevault-protocol",
+    "pydantic>=2.14,<3",
+]
+
+[dependency-groups]
+dev = [
+    "fakeredis[lua]>=2.32",
+    "pytest>=9",
+]
+
+[tool.uv.sources]
+devicevault-protocol = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"

@@ -46,6 +46,9 @@ import type {
   UserUpdate,
   OrchestratorIdentity,
   Page,
+  PushRejection,
+  ReceiverSettings,
+  ReceiverSettingsWrite,
   ProviderTestResult,
   Worker,
   WorkerAssignment,
@@ -229,6 +232,10 @@ export const workersApi = {
   update: async (id: string, body: Partial<WorkerAssignment> & { name?: string }) =>
     (await http.patch<Worker>(`/workers/${id}/`, body)).data,
   revoke: async (id: string) => (await http.post<Worker>(`/workers/${id}/revoke/`)).data,
+  receiverSettings: async (id: string) => (await http.get<ReceiverSettings>(`/workers/${id}/receiver/`)).data,
+  updateReceiverSettings: async (id: string, body: ReceiverSettingsWrite) =>
+    (await http.patch<ReceiverSettings>(`/workers/${id}/receiver/`, body)).data,
+  rejections: async (id: string) => (await http.get<PushRejection[]>(`/workers/${id}/rejections/`)).data,
   forget: async (id: string) => {
     await http.delete(`/workers/${id}/`)
   },

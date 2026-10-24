@@ -17,8 +17,10 @@ signed envelope (orchestrator key) whose payload is::
 
     {"type": "assignment", "worker_id": "<uuid>", "version": 3,
      "status": "pending" | "approved" | "revoked",
-     "role": "collector" | "storage" | "", "queues": ["collector.group.dmz" | "storage.target.<uuid>"],
-     "orchestrator_key": "<b64 Ed25519 public>"}
+     "role": "collector" | "storage" | "receiver" | "",
+     "queues": ["collector.group.dmz" | "storage.target.<uuid>"],
+     "orchestrator_key": "<b64 Ed25519 public>",
+     "receiver": {...}}                    # receivers only, see ``push``
 
 The worker pins ``orchestrator_key`` on the first assignment it accepts
 (trust on first use) and rejects any later key.
@@ -39,7 +41,8 @@ STATUS_REVOKED = 'revoked'
 
 ROLE_COLLECTOR = 'collector'
 ROLE_STORAGE = 'storage'
-ROLES = (ROLE_COLLECTOR, ROLE_STORAGE)
+ROLE_RECEIVER = 'receiver'
+ROLES = (ROLE_COLLECTOR, ROLE_STORAGE, ROLE_RECEIVER)
 
 # Stale events are useless (a newer heartbeat follows), so they expire in the queue.
 EVENT_EXPIRES_SECONDS = 120
