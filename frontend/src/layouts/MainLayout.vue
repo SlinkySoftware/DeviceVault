@@ -88,7 +88,11 @@ const adminSections = computed(() => adminSectionsFor(auth.isGlobalAdmin, auth.a
 const onAdminRoute = computed(() => route.path.startsWith('/vaultadmin/'))
 
 async function logout(): Promise<void> {
-  await auth.logout()
+  const idpLogout = await auth.logout()
+  if (idpLogout) {
+    window.location.assign(idpLogout)
+    return
+  }
   notify.info('Logged out')
   await router.push({ name: 'login' })
 }

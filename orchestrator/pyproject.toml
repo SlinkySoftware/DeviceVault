@@ -5,6 +5,7 @@ description = "DeviceVault orchestrator: API, scheduling and result processing"
 requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
+    "authlib>=1.6",
     "celery[redis]>=5.6.3,<5.7",
     "cronsim>=2.6",
     "devicevault-protocol",
@@ -12,11 +13,13 @@ dependencies = [
     "djangorestframework>=3.18.3,<3.19",
     "flower>=2.2,<2.3",
     "gunicorn>=23",
+    "joserfc>=1.7",
     "jsonschema>=4.25",
     "kombu>=5.6.2,<5.7",
     "psycopg[binary]>=3.3.6,<3.4",
     "pydantic>=2.14,<3",
     "python-ldap>=3.4.5",
+    "requests>=2.32",
     "whitenoise>=6.11",
 ]
 

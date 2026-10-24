@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-9 are implemented, phase 10 is **proposed**.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented.
 
 ## 1. Goals
 
@@ -114,9 +114,9 @@ Orchestrator secrets (Django secret, master key, vault private keys, signing key
 
 ### 4.4 Authentication, authorization and audit (phases 8-10)
 
-Status: phases 8-9 **implemented** (2026-10-24); phase 10 **proposed**. Replaces the role-based device-group RBAC and the staff/superuser admin check.
+Status: phases 8-10 **implemented** (2026-10-24). Replaces the role-based device-group RBAC and the staff/superuser admin check.
 
-Phase 9 notes: `login_group` is the provider's group name (matched like mapping rules) rather than a user group, so it works before any group exists. Provider kinds live in `accounts/providers/` (a `ProviderKind` with a pydantic `Config`); their schemas drive the UI form as storage drivers' do. A provider's slug tags the memberships it adds and is fixed once created. A provider that is unreachable is skipped (and named in the failed sign-in's audit entry); a user the provider vouches for but its rules refuse gets a distinct 403. Phase 8 notes: contents, downloads and diffs are separate endpoints (`backups/<id>/content/`, `download/`, `compare/?a=&b=`), so each is checked and audited on its own. Credential data is write-only for everyone; a key sent as null keeps its stored value. Shared reference data that is not secret (types, manufacturers, schedules, retention policies) is readable in full; collection groups and storage targets are a summary for anyone but global admins. Sign-in failures are counted from the audit log, so throttling is shared by every node.
+Phase 10 notes: ID tokens are validated with `joserfc` (authlib 1.9 deprecated `authlib.jose` in its favour); authlib provides the PKCE challenge and token generation. Pending sign-ins (state, nonce, verifier, return path) live in the server-side session for 10 minutes, at most five per browser. Discovery and JWKS are cached for an hour and the JWKS refetched once on a signature failure (key rotation). Claims the ID token lacks come from userinfo when its `sub` matches. Phase 9 notes: `login_group` is the provider's group name (matched like mapping rules) rather than a user group, so it works before any group exists. Provider kinds live in `accounts/providers/` (a `ProviderKind` with a pydantic `Config`); their schemas drive the UI form as storage drivers' do. A provider's slug tags the memberships it adds and is fixed once created. A provider that is unreachable is skipped (and named in the failed sign-in's audit entry); a user the provider vouches for but its rules refuse gets a distinct 403. Phase 8 notes: contents, downloads and diffs are separate endpoints (`backups/<id>/content/`, `download/`, `compare/?a=&b=`), so each is checked and audited on its own. Credential data is write-only for everyone; a key sent as null keeps its stored value. Shared reference data that is not secret (types, manufacturers, schedules, retention policies) is readable in full; collection groups and storage targets are a summary for anyone but global admins. Sign-in failures are counted from the audit log, so throttling is shared by every node.
 
 #### Concepts
 

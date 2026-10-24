@@ -21,7 +21,7 @@ from django.urls import include, path
 from rest_framework import routers
 
 from accounts import api as accounts_api
-from accounts import provider_api
+from accounts import oidc_views, provider_api
 from api import views
 from audit import api as audit_api
 from backups import api as backup_api
@@ -62,6 +62,8 @@ urlpatterns = [
     path('api/auth/csrf/', accounts_api.CsrfView.as_view()),
     path('api/auth/login/', accounts_api.LoginView.as_view()),
     path('api/auth/logout/', accounts_api.LogoutView.as_view()),
+    path('api/auth/oidc/<slug:slug>/login/', oidc_views.OidcLoginView.as_view()),
+    path('api/auth/oidc/<slug:slug>/callback/', oidc_views.OidcCallbackView.as_view()),
     path('api/auth/user/', accounts_api.CurrentUserView.as_view()),
     path('api/auth/change-password/', accounts_api.ChangePasswordView.as_view()),
     path('api/user/preferences/', views.UserPreferencesView.as_view()),

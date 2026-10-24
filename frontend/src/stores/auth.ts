@@ -51,13 +51,16 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
   }
 
-  async function logout(): Promise<void> {
+  /** Signs out; returns the identity provider's sign-out URL to visit, if the session came from one that asks. */
+  async function logout(): Promise<string | null> {
+    let redirect: string | null = null
     try {
-      await authApi.logout()
+      redirect = (await authApi.logout()).redirect ?? null
     } catch {
       // The session may already have ended; the local state is cleared regardless.
     }
     clear()
+    return redirect
   }
 
   return {

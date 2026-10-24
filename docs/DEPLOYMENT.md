@@ -75,6 +75,19 @@ for unmapped ones); memberships added by hand are kept. Provider secrets are
 encrypted at rest and write-only. Use **Test** to check the settings and look a
 user and their groups up.
 
+An **OpenID Connect** provider (Entra ID, Okta, Authentik, Keycloak...) appears as
+a "Sign in with ..." button on the login page. Register DeviceVault at the IdP as
+a web application using Authorization Code with PKCE, with the redirect URI the
+provider form shows (`https://<host>/api/auth/oidc/<slug>/callback/`), and give
+the provider the IdP's discovery URL, client id and secret. The orchestrator
+must reach the IdP's discovery, JWKS, token and userinfo endpoints. Users link
+by the `sub` claim; groups come from the groups claim (default `groups`) and map
+onto user groups like LDAP groups. Entra ID omits the groups claim for users in
+more than about 200 groups (an "overage", logged as `oidc_groups_overage`), so
+configure the app registration to emit only groups assigned to the application.
+With **Sign out at the IdP** on, signing out of DeviceVault also ends the IdP
+session (register `https://<host>/login` as a post-logout redirect URI).
+
 With `DV_LOCAL_AUTH_ENABLED=false`, only **break-glass** local users can sign in
 with a local password. The bootstrap admin is one; global admins can flag other
 local users on the Users page. Keep at least one, in case the directory is unreachable.

@@ -346,7 +346,8 @@ def test_the_test_action_reports_the_directory_view_of_a_user(admin_client, dire
 
 
 def test_kinds_publish_their_settings_schema(admin_client):
-    [kind] = admin_client.get('/api/auth-provider-kinds/').json()
+    kinds = {kind['key']: kind for kind in admin_client.get('/api/auth-provider-kinds/').json()}
+    kind = kinds['ldap']
 
     assert kind['key'] == 'ldap' and kind['password_login']
     assert kind['params_schema']['properties']['bind_password']['anyOf'][0]['writeOnly'] is True
