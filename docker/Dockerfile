@@ -79,7 +79,7 @@ USER devicevault
 VOLUME ["/var/lib/devicevault"]
 ENTRYPOINT ["dv-worker"]
 
-# --- Receiver: accepts backups devices push (SCP/SFTP), no Django or Celery pool -
+# --- Receiver: accepts backups devices push (SCP/SFTP, TFTP), no Django or Celery pool
 FROM base AS receiver
 COPY --from=build-receiver /opt/venv /opt/venv
 COPY docker/receiver-entrypoint.sh /usr/local/bin/dv-receiver

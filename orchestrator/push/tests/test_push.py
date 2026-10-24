@@ -58,6 +58,7 @@ def test_a_receiver_is_told_its_settings_and_the_devices_that_push(
         {'id': setup['device'].pk, 'ip': '192.0.2.10', 'push_mode': 'ssh', 'filename_pattern': '*-confg'}
     ]
     assert section['max_file_size'] == 512 * 1024 * 1024 and section['encryption'] is None
+    assert section['tftp'] == {'enabled': False, 'port': 6969}
 
 
 def test_with_payload_encryption_the_password_is_sealed_to_the_receiver(settings, receiver, published, worker_keys):
@@ -237,3 +238,24 @@ def test_rejections_are_recorded_audited_and_pruned(receiver, monkeypatch):
     audit = AuditLog.objects.filter(action='push.rejected')
     assert audit.count() == 6
     assert audit.first().outcome == AuditLog.DENIED and audit.first().actor_name == 'receiver-1'
+
+
+def test_tftp_pushes_need_a_tftp_device(setup, receiver, broker, django_capture_on_commit_callbacks):
+    keys_, worker = receiver
+    enable_push(setup['device'], push_mode='tftp')
+    _, envelope = received(keys_, setup['device'])  # claims ssh
+    assert handle_push_event(envelope) is None
+    assert PushRejection.objects.get(worker=worker).detail == 'the device does not push over ssh'
+
+    job_id = str(uuid.uuid4())
+    details = {
+        'job_id': job_id,
+        'device_id': setup['device'].pk,
+        'source_ip': '192.0.2.10',
+        'filename': 'edge-confg',
+        'blob': {'key': blob_key(job_id), 'sha256': SHA, 'size': 12},
+    }
+    with django_capture_on_commit_callbacks(execute=True):
+        job = handle_push_event(push_event(keys_, EVENT_RECEIVED, **{**details, 'protocol': 'tftp'}))
+
+    assert job.driver == 'push:tftp' and len(broker.sent) == 1

@@ -15,6 +15,7 @@ from .config import ReceiverConfig
 from .events import Events
 from .ingest import Ingestor
 from .ssh import SshListener
+from .tftp import TftpListener
 
 logger = get_logger('devicevault.receiver')
 
@@ -31,6 +32,7 @@ class Receiver:
         self.config = ReceiverConfig()
         self.authorized_keys: asyncssh.SSHAuthorizedKeys | None = None
         self.ssh = SshListener(self)
+        self.tftp = TftpListener(self)
         self._pool = ThreadPoolExecutor(max_workers=INGEST_THREADS, thread_name_prefix='ingest')
 
     async def apply(self, config: ReceiverConfig) -> None:
@@ -43,6 +45,7 @@ class Receiver:
                 logger.error('authorized_keys_invalid', extra={'error': str(exc)})
         self.config = config
         await self.ssh.configure()
+        await self.tftp.configure()
 
     async def ingest(self, **kwargs: Any) -> str:
         loop = asyncio.get_running_loop()
@@ -56,9 +59,10 @@ class Receiver:
             'host_key_fingerprint': hostkey.fingerprint(self.host_key),
             'vault_kid': self.config.encryption.kid if self.config.encryption else None,
             'devices': len(self.config.devices),
-            'listeners': {'ssh': self.ssh.status()},
+            'listeners': {'ssh': self.ssh.status(), 'tftp': self.tftp.status()},
         }
 
     async def close(self) -> None:
         await self.ssh.stop()
+        await self.tftp.stop()
         self._pool.shutdown(wait=True, cancel_futures=False)

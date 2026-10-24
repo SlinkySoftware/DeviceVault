@@ -61,6 +61,23 @@
           A device must also be set to push over SCP/SFTP, and connect from its own IP address.
         </div>
       </template>
+
+      <q-separator />
+      <q-toggle v-model="form.tftp_enabled" label="Accept TFTP uploads" />
+      <template v-if="form.tftp_enabled">
+        <q-input
+          v-model.number="form.tftp_port"
+          type="number"
+          outlined
+          label="TFTP port (UDP)"
+          hint="69 is the standard port; ports below 1024 need extra host setup (see DEPLOYMENT.md)"
+          :rules="[(v: number) => (Number.isInteger(v) && v >= 1 && v <= 65535) || 'A port from 1 to 65535']"
+        />
+        <q-banner dense rounded class="bg-warning text-black">
+          TFTP has no login: only devices explicitly set to push over TFTP are accepted, by their address alone,
+          which can be forged on networks that do not filter spoofed traffic.
+        </q-banner>
+      </template>
     </template>
   </FormDialog>
 </template>
@@ -108,6 +125,8 @@ function blank(): ReceiverSettingsWrite {
     ssh_port: 2222,
     ssh_username: 'devicevault',
     ssh_authorized_keys: '',
+    tftp_enabled: false,
+    tftp_port: 6969,
   }
 }
 
@@ -126,6 +145,8 @@ watch(open, async (isOpen) => {
       ssh_port: current.ssh_port,
       ssh_username: current.ssh_username,
       ssh_authorized_keys: current.ssh_authorized_keys,
+      tftp_enabled: current.tftp_enabled,
+      tftp_port: current.tftp_port,
     }
   } catch (error) {
     notify.error(error, 'Failed to load the receiver settings')

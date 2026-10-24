@@ -77,7 +77,7 @@ def test_assignments_configure_the_receiver(agent):
     report = agent.report()['receiver']
     assert (report['vault_kid'], report['devices']) == ('v1', 1)
     assert report['host_key_fingerprint'].startswith('SHA256:')
-    assert agent.event_payload()['capabilities']['receiver']['protocols'] == ['ssh']
+    assert agent.event_payload()['capabilities']['receiver']['protocols'] == ['ssh', 'tftp']
 
     agent.handle_assignment(assignment(identity, 2, status=STATUS_REVOKED, receiver=section))
     assert agent.receiver.config.devices == ()

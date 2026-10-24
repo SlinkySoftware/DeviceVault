@@ -68,6 +68,8 @@ class ReceiverSettingsSerializer(serializers.ModelSerializer):
             'ssh_password',
             'ssh_password_set',
             'ssh_authorized_keys',
+            'tftp_enabled',
+            'tftp_port',
             'updated_at',
         ]
         read_only_fields = ['updated_at']

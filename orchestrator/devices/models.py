@@ -26,9 +26,9 @@ from django.db import models
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
 
-from devicevault_protocol.push import PUSH_OFF, PUSH_SSH
+from devicevault_protocol.push import PUSH_OFF, PUSH_SSH, PUSH_TFTP
 
-PUSH_MODE_CHOICES = [(PUSH_OFF, 'Off'), (PUSH_SSH, 'SCP or SFTP')]
+PUSH_MODE_CHOICES = [(PUSH_OFF, 'Off'), (PUSH_SSH, 'SCP or SFTP'), (PUSH_TFTP, 'TFTP (unauthenticated)')]
 
 # ===== Collection Group Models =====
 

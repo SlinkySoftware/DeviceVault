@@ -31,6 +31,7 @@ describe('formatDuration', () => {
 describe('push protocols', () => {
   it('names SSH uploads by what devices know them as', () => {
     expect(pushProtocolLabel('ssh')).toBe('SCP/SFTP')
+    expect(pushProtocolLabel('tftp')).toBe('TFTP')
     expect(pushProtocolLabel('ftp')).toBe('FTP')
   })
 })

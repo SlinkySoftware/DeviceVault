@@ -286,6 +286,7 @@ const selectedMethod = computed(() => backupMethods.value.find((method) => metho
 const PUSH_MODES: { label: string; value: PushMode }[] = [
   { label: 'No', value: 'off' },
   { label: 'Yes, over SCP or SFTP', value: 'ssh' },
+  { label: 'Yes, over TFTP (no login: matched by address only)', value: 'tftp' },
 ]
 const pushing = computed(() => form.value.push_mode !== 'off')
 // A device that pushes need not be polled at all.

@@ -50,6 +50,7 @@ def receiver_assignment(worker: Worker) -> dict[str, Any]:
         'bind_address': settings.bind_address or '',
         'max_file_size': settings.max_file_size,
         'ssh': ssh,
+        'tftp': {'enabled': settings.tftp_enabled, 'port': settings.tftp_port},
         'devices': push_devices(),
         'encryption': keys.vault_public(),
     }
