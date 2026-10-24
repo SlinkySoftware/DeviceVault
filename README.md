@@ -1,58 +1,113 @@
 # DeviceVault
 
-DeviceVault collects and versions configuration backups from network devices. A central
-orchestrator schedules work, collectors connect to devices (for example over SSH to run
-`show running-config`), and storage workers persist the results. Components talk to each
-other only through RabbitMQ and Redis.
+DeviceVault collects, versions and protects configuration backups from network devices. It
+polls devices on a schedule (or on demand) and accepts files that devices push to it, stores
+every backup on the storage targets you choose, and lets you view, download and compare
+them. Access is controlled per device group, with local, LDAP and OIDC sign-in, and every
+security-relevant action is audited.
 
-> **Status:** pre-release and under active restructuring. The target design and the
-> phased delivery plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). This README
-> describes what works today. Ideas for what comes next, ranked into quick wins and larger
-> changes, are in [docs/ROADMAP.md](docs/ROADMAP.md).
+The platform is split into independently deployed parts that talk to each other only through
+RabbitMQ and Redis: an **orchestrator** (API, web UI, scheduler), **workers** (collectors
+and storage workers) and optional **receivers** (the only component that accepts connections
+from devices). The design and its decisions are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md);
+ideas for what comes next are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## What works today
+## Features
 
-- Device inventory with device types, manufacturers, device groups and collection groups
-- Device-group RBAC (per-group roles for users and auth groups), enforced by the API;
-  configuration and user management are administrator-only
-- Backup jobs, on demand ("backup now") or on schedules (daily, weekly, monthly, cron) in the
-  display timezone, tracked from request to storage with retries, timeouts and per-job logs
-- Collector drivers: `cisco_ios` and `mikrotik_ssh_export` (SSH via Netmiko), plus `demo_config`,
-  `noop` and `binary_dummy` for testing. Per-device driver settings come from each driver's
-  schema (form in the UI, validated by the API); more drivers can be installed as
-  `devicevault.collectors` entry points
-- Storage targets, each served by chosen storage workers: local filesystem, git (one commit
-  per backup), S3 and S3-compatible buckets, or PostgreSQL databases (both shared by several
-  workers); settings from the
-  driver's schema, with a Test button. More drivers can be installed as `devicevault.storage`
-  entry points
-- Payload encryption (`DV_PAYLOAD_ENCRYPTION`): collectors encrypt backups to the
-  orchestrator's vault key, and credentials are sealed to each collector, so RabbitMQ, Redis
-  and storage workers only see ciphertext; credentials are also encrypted in the database
-- Backup viewing, download and side-by-side comparison
-- Dashboard statistics and audit log
-- Zero-configuration workers: they register themselves, an admin approves them with a
-  role and assignment, and everything sent to them is signed by the orchestrator
-- Local authentication
+### Collecting backups
 
-Not yet implemented (see the plan): scheduled backups, retention enforcement, push collection, external authentication (LDAP/SAML/Entra ID).
+- **Polling** over SSH: on demand ("backup now") or on schedules (daily, weekly, monthly or
+  cron) in the display timezone. Jobs are tracked from request to storage with retries,
+  timeouts and per-job logs.
+- **Push collection**: devices upload their configuration unprompted over **SCP, SFTP or
+  TFTP** to a receiver (for example Cisco `archive` on `write memory`). Devices are matched by
+  source address, with an optional filename pattern; uploads up to 512 MiB; rejected
+  uploads are refused at the protocol level, audited and listed per receiver. TFTP is an
+  explicit per-device opt-in because it is unauthenticated.
+- **Collector drivers**: `cisco_ios` and `mikrotik_ssh_export` (SSH via Netmiko), plus
+  `demo_config`, `noop` and `binary_dummy` for testing. Per-device settings come from each
+  driver's schema (a form in the UI, validated by the API). Install more drivers as
+  `devicevault.collectors` entry points.
+
+### Storing and viewing backups
+
+- **Storage targets**, each served by the workers you assign: local filesystem, git (one
+  commit per backup), S3 and S3-compatible buckets, or PostgreSQL. Settings come from the
+  driver's schema, with a Test button. Install more drivers as `devicevault.storage` entry
+  points.
+- Backup viewing, download and side-by-side comparison.
+- Dashboard statistics and a searchable audit log.
+
+### Security
+
+- **Authentication**: local accounts, LDAP and OIDC (Entra ID, Okta, Authentik and
+  others). Several identity providers can coexist; identities link on an immutable subject,
+  and external group membership is synced at login. A break-glass local administrator
+  survives a misconfigured provider. Server-side sessions with idle and absolute timeouts.
+- **Authorization**: user groups with per-device-group grants (view, backup now, view
+  contents, download, admin) and global administrators, enforced by the API; hidden
+  objects return 404.
+- **Signed control plane**: everything the orchestrator sends a worker or receiver is
+  signed, and workers pin the orchestrator's key on first contact.
+- **Payload encryption** (`DV_PAYLOAD_ENCRYPTION`): collectors and receivers encrypt backups
+  to the orchestrator's vault key and credentials are sealed to each recipient, so RabbitMQ,
+  Redis and storage workers only see ciphertext. Credentials and provider secrets are also
+  encrypted in the database.
+- **Audit log** of sign-ins, grants, approvals, backups, reads and refused pushes.
+
+### Operations
+
+- **Zero-configuration workers and receivers**: they register themselves, an administrator
+  approves them (checking their fingerprint) and assigns a role, and they receive all
+  configuration from the orchestrator.
+- **High availability**: two active orchestrator nodes with a leader-elected scheduler,
+  PostgreSQL and a load balancer in front (SQLite is single-node and enforced).
+- **Monitoring**: Flower endpoints stored in the UI and proxied behind the same
+  authentication.
+- Docker is the only deployment target: four images and four independent Compose stacks.
+
+### Known gaps
+
+Retention policies are stored but not yet enforced, and Redis Sentinel is not supported.
+Both are scheduled work; see [docs/ROADMAP.md](docs/ROADMAP.md) and the limitations in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Architecture at a glance
+
+```
+ infra:         PostgreSQL | SQLite     RabbitMQ     Redis
+ orchestrator:  web (nginx + SPA) · api · events · scheduler · flower (optional)
+ workers:       collectors (poll devices) · storage workers (write targets)
+ receivers:     SCP/SFTP and TFTP listeners (devices push to them)
+```
+
+Backup content travels collector (or receiver) → Redis → storage worker, and a job is
+stored only when both sides report the same SHA-256.
 
 ## Technology
 
 | Layer | Stack |
 |---|---|
 | Orchestrator | Python 3.14, Django 6.1, Django REST Framework |
-| Workers | Celery 5.6 on RabbitMQ, Redis for locks and results |
+| Workers | Celery 5.6 on RabbitMQ, Redis for locks, results and staged blobs |
+| Receivers | asyncio, asyncssh (SCP/SFTP), a write-only TFTP server |
 | Frontend | Vue 3.5, Quasar 2, TypeScript, Pinia, Vitest, Node 24 |
 | Database | SQLite (single node) or PostgreSQL |
 | Tooling | uv, ruff, pytest, Docker |
+
+## Deployment
+
+Four independent stacks (infra, orchestrator, workers, receivers) built from four images.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for building images, configuration, users and
+access, storage targets, push receivers, Flower, high availability and the configuration
+reference.
 
 ## Development
 
 Requirements: Docker (with Compose) and `make`. Everything else runs in containers.
 
 ```bash
-make dev-up        # start the dev stack: infra, orchestrator, 2 collectors, 1 storage worker, flower, frontend
+make dev-up        # start the dev stack: infra, orchestrator, collectors, storage worker, receiver, flower, frontend
 make dev-seed      # load demo data and approve the dev workers
 make dev-ps        # container status
 make dev-logs      # tail all logs (SERVICE=api for one)
@@ -75,30 +130,31 @@ Ports can be moved with `DV_DEV_WEB_PORT`, `DV_DEV_API_PORT`, `DV_DEV_FLOWER_POR
 ```bash
 make lint            # ruff lint + format check
 make fmt             # apply ruff fixes and formatting
-make test            # pytest for protocol, worker and orchestrator
+make test            # pytest for protocol, worker, receiver and orchestrator
 make frontend-lint   # ESLint + vue-tsc type check
 make frontend-test   # Vitest unit tests
 make frontend-build  # production build of the SPA
 make check           # all of the above
 make lock            # refresh uv.lock after editing a pyproject.toml
-make images          # build the orchestrator, worker and web images
+make images          # build the orchestrator, worker, receiver and web images
 ```
 
-## Deployment
-
-Three independent stacks (infra, orchestrator, workers). See
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Contributors and coding agents should read [CLAUDE.md](CLAUDE.md) for the ground rules and
+conventions.
 
 ## Repository layout
 
 ```
-protocol/       Shared contracts: env config, queue/task names, Celery factory, crypto (no Django)
-worker/         Collection and storage worker: Celery tasks, collector and storage drivers (no Django)
-orchestrator/   Django project: API, worker events, result consumers
+protocol/       Shared contracts and runtime: env config, queue/task names, job protocol, Celery factory,
+                crypto, worker identity, registration agent, task trust, blob staging (no Django)
+worker/         Collector and storage worker: Celery tasks, collector and storage drivers (no Django)
+receiver/       Push receiver: SCP/SFTP and TFTP listeners, ingest and events (no Django)
+orchestrator/   Django project: API, accounts and auth providers, backups, devices, storage, push,
+                monitoring, audit, scheduler and event handling
 frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints
-deploy/         Compose stacks: infra, orchestrator, worker, dev
-docs/           Architecture, delivery plan, roadmap and deployment guide
+deploy/         Compose stacks: infra, orchestrator, worker, receiver, dev
+docs/           Architecture and delivery plan, roadmap, deployment guide
 Makefile        Single entry point for development and CI
 ```
 

@@ -12,7 +12,7 @@ receivers accept connections from devices.
 | Worker | `deploy/worker` | one collector or storage worker per Compose project |
 | Receiver | `deploy/receiver` | one push receiver (devices upload backups to it) per host, optional |
 
-> **Status:** pre-release. See [ARCHITECTURE.md](ARCHITECTURE.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## 1. Build the images
 
@@ -434,7 +434,7 @@ secrets). The file takes precedence.
 
 Everything else (protocols, ports, login, size limit) is set per receiver in the UI.
 
-## Known limitations (pre-release)
+## Known limitations
 
 - TLS to RabbitMQ and Redis works through `amqps://` and `rediss://` URLs, but
   the infra stack doesn't configure TLS itself yet.
