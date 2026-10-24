@@ -8,6 +8,9 @@ import type {
   AuditEntry,
   AuditQuery,
   AuthConfig,
+  AuthProvider,
+  AuthProviderKind,
+  AuthProviderWrite,
   BackupComparison,
   BackupJob,
   BackupMethod,
@@ -43,6 +46,7 @@ import type {
   UserUpdate,
   OrchestratorIdentity,
   Page,
+  ProviderTestResult,
   Worker,
   WorkerAssignment,
 } from './types'
@@ -169,6 +173,19 @@ const userGroups = resource<UserGroup, UserGroupWrite>('/user-groups/')
 
 // Groups are edited with PATCH, so members and grants are replaced explicitly.
 export const userGroupsApi = { ...userGroups, update: (id: Key, body: UserGroupWrite) => userGroups.patch(id, body) }
+
+const authProviders = resource<AuthProvider, AuthProviderWrite>('/auth-providers/')
+
+export const authProvidersApi = {
+  ...authProviders,
+  update: (id: Key, body: AuthProviderWrite) => authProviders.patch(id, body),
+  test: async (id: Id, username: string) =>
+    (await http.post<ProviderTestResult>(`/auth-providers/${id}/test/`, { username })).data,
+}
+
+export const authProviderKindsApi = {
+  list: async () => (await http.get<AuthProviderKind[]>('/auth-provider-kinds/')).data,
+}
 
 export const auditLogApi = {
   list: async (query: AuditQuery) => (await http.get<Page<AuditEntry>>('/audit-logs/', { params: query })).data,

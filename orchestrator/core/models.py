@@ -65,6 +65,9 @@ class UserProfile(models.Model):
         User, on_delete=models.CASCADE, related_name='profile', help_text='Associated user account'
     )
     theme = models.CharField(max_length=10, choices=THEME_CHOICES, default='dark', help_text='UI theme preference')
+    break_glass = models.BooleanField(
+        default=False, help_text='A local user who may sign in even when local authentication is disabled'
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text='Profile creation timestamp')
     updated_at = models.DateTimeField(auto_now=True, help_text='Last modification timestamp')
 

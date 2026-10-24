@@ -18,6 +18,7 @@ const USER: CurrentUser = {
   first_name: '',
   last_name: '',
   source: 'local',
+  providers: [],
   editable: true,
   is_global_admin: false,
   grants: { '3': ['view', 'backup_now'], '4': ['view', 'backup_now', 'view_contents', 'download', 'admin'] },

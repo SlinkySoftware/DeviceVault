@@ -291,10 +291,14 @@ export interface User {
   last_name: string
   is_active: boolean
   source: UserSource
+  /** Names of the identity providers the user signs in with. */
+  providers: string[]
   /** User groups (ids) the user is a member of. */
   groups: Id[]
   group_names: string[]
   is_global_admin: boolean
+  /** A local user who may sign in even when local authentication is disabled. */
+  break_glass: boolean
   last_login: IsoDateTime | null
   date_joined: IsoDateTime
 }
@@ -307,9 +311,10 @@ export interface UserCreate {
   password: string
   is_active: boolean
   groups: Id[]
+  break_glass: boolean
 }
 
-export type UserUpdate = Pick<User, 'email' | 'first_name' | 'last_name' | 'is_active' | 'groups'>
+export type UserUpdate = Pick<User, 'email' | 'first_name' | 'last_name' | 'is_active' | 'groups' | 'break_glass'>
 
 export type UserDetails = Pick<User, 'email' | 'first_name' | 'last_name'>
 
@@ -321,6 +326,7 @@ export interface CurrentUser {
   first_name: string
   last_name: string
   source: UserSource
+  providers: string[]
   /** False for users managed by an external identity provider. */
   editable: boolean
   is_global_admin: boolean
@@ -343,6 +349,9 @@ export interface UserGroup {
   /** The built-in Administrators group: cannot be deleted or lose its flag. */
   is_builtin: boolean
   source: 'internal' | 'external'
+  /** External groups: the provider that fills them, and its name for the group. */
+  provider_name: string | null
+  external_id: string
   members: Id[]
   member_names: string[]
   grants: Grant[]
@@ -382,9 +391,77 @@ export interface AuditQuery {
   until?: string | undefined
 }
 
+export interface LoginProvider {
+  slug: string
+  name: string
+  kind: string
+  /** Signs in with the login form (LDAP) rather than a redirect (OIDC). */
+  password_login: boolean
+}
+
 export interface AuthConfig {
-  providers: string[]
+  providers: LoginProvider[]
   local_enabled: boolean
+}
+
+export interface AuthProviderKind {
+  key: string
+  name: string
+  password_login: boolean
+  params_schema: JsonSchema | null
+}
+
+export interface MappingRule {
+  external_group: string
+  user_group: Id
+  user_group_name?: string
+}
+
+export interface AuthProvider {
+  id: Id
+  slug: string
+  name: string
+  kind: string
+  kind_name: string
+  enabled: boolean
+  order: number
+  /** Settings; secret settings come back as null (see secrets_set). */
+  config: JsonObject
+  secrets_set: string[]
+  auto_create_users: boolean
+  auto_create_groups: boolean
+  /** If set, only members of this provider group may sign in. */
+  login_group: string
+  mapping_rules: MappingRule[]
+  user_count: number
+  /** Where the IdP sends users back (redirect providers only). */
+  redirect_uri?: string
+  created_at: IsoDateTime
+  updated_at: IsoDateTime
+}
+
+export type AuthProviderWrite = Pick<
+  AuthProvider,
+  | 'slug'
+  | 'name'
+  | 'kind'
+  | 'enabled'
+  | 'order'
+  | 'config'
+  | 'auto_create_users'
+  | 'auto_create_groups'
+  | 'login_group'
+  | 'mapping_rules'
+>
+
+export interface ProviderTestResult {
+  ok: boolean
+  error?: string
+  server?: string
+  bound_as?: string
+  /** With a username: what the provider says about that user (null: not found). */
+  user?: { dn?: string; subject: string; username: string; email: string; name: string; groups: string[] } | null
+  [key: string]: unknown
 }
 
 export interface LoginResponse {

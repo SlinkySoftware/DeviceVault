@@ -35,9 +35,13 @@
         <q-td :props="props">
           <q-badge :color="props.row.is_active ? 'positive' : 'grey'">{{ props.row.is_active ? 'Active' : 'Disabled' }}</q-badge>
           <q-badge :color="props.row.source === 'local' ? 'blue-grey' : 'blue'" class="q-ml-xs">
-            {{ props.row.source === 'local' ? 'Local' : 'External' }}
+            {{ props.row.source === 'local' ? 'Local' : props.row.providers.join(', ') || 'External' }}
           </q-badge>
           <q-badge v-if="props.row.is_global_admin" color="purple" class="q-ml-xs">Global admin</q-badge>
+          <q-badge v-if="props.row.break_glass" color="deep-orange" class="q-ml-xs">
+            Break-glass
+            <q-tooltip>Can sign in even when local authentication is disabled</q-tooltip>
+          </q-badge>
         </q-td>
       </template>
       <template #body-cell-groups="props">
@@ -131,6 +135,11 @@
         label="Can sign in"
         :disable="editing?.id === auth.user?.id"
       />
+      <q-toggle
+        v-if="!editingExternal"
+        v-model="crud.form.value.break_glass"
+        label="Break-glass: may sign in even when local authentication is disabled"
+      />
     </FormDialog>
 
     <FormDialog
@@ -194,8 +203,10 @@ const crud = useCrud<User, UserCreate>({
     create: usersApi.create,
     remove: usersApi.remove,
     update: (id, form) => {
-      const { email, first_name, last_name, is_active, groups } = form
-      return usersApi.update(Number(id), { email, first_name, last_name, is_active, groups })
+      const { email, first_name, last_name, is_active, groups, break_glass } = form
+      // External users' profiles come from their provider.
+      const profile = editing.value?.source === 'external' ? {} : { email, first_name, last_name, break_glass }
+      return usersApi.update(Number(id), { ...profile, is_active, groups })
     },
   },
   noun: 'user',
@@ -203,7 +214,16 @@ const crud = useCrud<User, UserCreate>({
   emptyForm: () => {
     editing.value = null
     confirmPassword.value = ''
-    return { username: '', email: '', first_name: '', last_name: '', password: '', is_active: true, groups: [] }
+    return {
+      username: '',
+      email: '',
+      first_name: '',
+      last_name: '',
+      password: '',
+      is_active: true,
+      groups: [],
+      break_glass: false,
+    }
   },
   toForm: (user) => {
     editing.value = user

@@ -28,8 +28,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
-  `access.py` decides every authorization; `sessions.py` timeouts; `api.py` sign-in, users and
-  user groups), `api`, `audit` (`log.record(...)`), `backups`, `core`, `credentials`, `devices`,
+  `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
+  identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`, LDAP);
+  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups`, `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `storage` (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker

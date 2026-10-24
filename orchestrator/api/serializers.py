@@ -448,3 +448,12 @@ def driver_param_errors(params: dict, schema: dict) -> list[str]:
         f'{".".join(str(part) for part in error.absolute_path) or "parameters"}: {error.message}'
         for error in sorted(validator.iter_errors(params), key=lambda error: list(error.absolute_path))
     ]
+
+
+def secret_fields(schema: dict | None) -> set[str]:
+    """Settings a schema marks secret (``writeOnly``, e.g. pydantic ``SecretStr``)."""
+
+    def secret(prop: dict) -> bool:
+        return bool(prop.get('writeOnly')) or any(secret(option) for option in prop.get('anyOf', []))
+
+    return {name for name, prop in ((schema or {}).get('properties') or {}).items() if secret(prop)}
