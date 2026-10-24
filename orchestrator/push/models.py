@@ -4,7 +4,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from core.fields import EncryptedJSONField
-from devicevault_protocol.push import DEFAULT_MAX_FILE_SIZE, DEFAULT_SSH_PORT, PROTOCOLS, REASONS
+from devicevault_protocol.push import DEFAULT_MAX_FILE_SIZE, DEFAULT_SSH_PORT, DEFAULT_TFTP_PORT, PROTOCOLS, REASONS
 
 PORT_VALIDATORS = [MinValueValidator(1), MaxValueValidator(65535)]
 
@@ -26,6 +26,10 @@ class ReceiverSettings(models.Model):
     ssh_username = models.CharField(max_length=64, default='devicevault', help_text='Login devices use')
     ssh_secret = EncryptedJSONField(default=dict, blank=True, help_text='{"password": ...} (encrypted at rest)')
     ssh_authorized_keys = models.TextField(blank=True, help_text='Public keys devices may log in with, one per line')
+    tftp_enabled = models.BooleanField(
+        default=False, help_text='Accept TFTP uploads (unauthenticated) from devices set to push over TFTP'
+    )
+    tftp_port = models.PositiveIntegerField(default=DEFAULT_TFTP_PORT, validators=PORT_VALIDATORS)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

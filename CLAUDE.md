@@ -28,7 +28,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `agent`
   (applies assignments as Celery queue consumers). Must not import Django (a test enforces it).
 - `receiver/` (`devicevault_receiver`): the push receiver, its own image. Not a Celery worker: an
-  asyncio loop (`main`) running the listeners (`ssh`: asyncssh SCP/SFTP, write-only), `agent`
+  asyncio loop (`main`) running the listeners (`ssh`: asyncssh SCP/SFTP; `tftp`: write requests; both
+  upload-only), `agent`
   (applies the assignment's `receiver` section, `config`), `ingest` (spool, encrypt, stage, report)
   and `events` (signed `push.*` events, rate-limited refusals). Must not import Django.
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for

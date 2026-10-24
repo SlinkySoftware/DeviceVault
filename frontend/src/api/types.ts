@@ -540,8 +540,8 @@ export interface WorkerAssignment {
 // --- Push collection -----------------------------------------------------------------
 
 /** How a device uploads its own backups to the receivers. */
-export type PushMode = 'off' | 'ssh'
-export type PushProtocol = 'ssh'
+export type PushMode = 'off' | 'ssh' | 'tftp'
+export type PushProtocol = 'ssh' | 'tftp'
 
 export interface ListenerStatus {
   enabled: boolean
@@ -557,7 +557,7 @@ export interface ReceiverRuntime {
   vault_kid: string | null
   /** Push-enabled devices it accepts. */
   devices: number
-  listeners: { ssh?: ListenerStatus }
+  listeners: { ssh?: ListenerStatus; tftp?: ListenerStatus }
 }
 
 /** One receiver's settings; the password is write-only. */
@@ -570,6 +570,8 @@ export interface ReceiverSettings {
   ssh_username: string
   ssh_password_set: boolean
   ssh_authorized_keys: string
+  tftp_enabled: boolean
+  tftp_port: number
   updated_at: IsoDateTime
 }
 
@@ -582,6 +584,8 @@ export interface ReceiverSettingsWrite {
   /** Omit to keep the current password; empty removes it. */
   ssh_password?: string
   ssh_authorized_keys: string
+  tftp_enabled: boolean
+  tftp_port: number
 }
 
 export type PushRejectionReason =

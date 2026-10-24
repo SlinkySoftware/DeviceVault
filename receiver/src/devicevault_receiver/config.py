@@ -6,7 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from devicevault_protocol.crypto import unseal
 from devicevault_protocol.identity import Identity
-from devicevault_protocol.push import DEFAULT_MAX_FILE_SIZE, DEFAULT_SSH_PORT, PUSH_OFF, normalise_address
+from devicevault_protocol.push import (
+    DEFAULT_MAX_FILE_SIZE,
+    DEFAULT_SSH_PORT,
+    DEFAULT_TFTP_PORT,
+    PUSH_OFF,
+    normalise_address,
+)
 
 
 class _Model(BaseModel):
@@ -19,6 +25,11 @@ class SshSettings(_Model):
     username: str = ''
     password: str = ''
     authorized_keys: str = ''
+
+
+class TftpSettings(_Model):
+    enabled: bool = False
+    port: int = Field(DEFAULT_TFTP_PORT, ge=1, le=65535)
 
 
 class Device(_Model):
@@ -39,6 +50,7 @@ class ReceiverConfig(_Model):
     bind_address: str = ''
     max_file_size: int = Field(DEFAULT_MAX_FILE_SIZE, ge=1)
     ssh: SshSettings = SshSettings()
+    tftp: TftpSettings = TftpSettings()
     devices: tuple[Device, ...] = ()
     encryption: VaultKey | None = None
     _by_address: dict[str, Device] = PrivateAttr(default_factory=dict)

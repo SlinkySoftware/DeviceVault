@@ -28,6 +28,7 @@ def test_receiver_settings_round_trip_with_a_write_only_password(receiver, admin
     body = admin_client.get(url(worker)).json()
     assert 'ssh_password' not in body and body['ssh_password_set'] is True
     assert (body['ssh_port'], body['ssh_username'], body['max_file_size']) == (2022, 'dev', 4096)
+    assert (body['tftp_enabled'], body['tftp_port']) == (False, 6969)
     assert settings_for(worker).ssh_password == 's3cret'
     assert len(published) == before + 1  # the receiver got a new assignment
     entry = AuditLog.objects.get(action='receiver.update')
@@ -38,6 +39,9 @@ def test_receiver_settings_round_trip_with_a_write_only_password(receiver, admin
     assert settings_for(worker).ssh_password == 's3cret'
     resp = admin_client.patch(url(worker), {'ssh_enabled': False, 'ssh_password': ''}, format='json')
     assert resp.status_code == 200 and settings_for(worker).ssh_password == ''
+    # TFTP needs no login.
+    resp = admin_client.patch(url(worker), {'tftp_enabled': True, 'tftp_port': 69}, format='json')
+    assert resp.status_code == 200 and resp.json()['tftp_port'] == 69
 
 
 def test_ssh_needs_a_password_or_keys(receiver, admin_client):
@@ -130,6 +134,8 @@ def test_device_push_settings(setup, admin_client):
     resp = post(push_mode='ssh', push_filename_pattern='*-confg', backup_method='')
     assert resp.status_code == 201, resp.content
     assert (resp.json()['push_mode'], resp.json()['backup_method']) == ('ssh', '')
+    assert post(ip_address='192.0.2.23', push_mode='tftp').status_code == 201
+    assert 'push_mode' in post(ip_address='192.0.2.24', push_mode='ftp').json()
 
     assert 'backup_method' in post(ip_address='192.0.2.21', backup_method='').json()
     assert 'storage_target' in post(ip_address='192.0.2.22', push_mode='ssh', storage_target=None).json()

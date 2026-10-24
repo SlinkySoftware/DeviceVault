@@ -111,6 +111,7 @@ services:
       - receiver-1-state:/var/lib/devicevault
     ports:
       - "${DV_DEV_SSH_PORT:-2222}:2222"
+      - "${DV_DEV_TFTP_PORT:-6969}:6969/udp"
 
   frontend:
     image: node:24-alpine

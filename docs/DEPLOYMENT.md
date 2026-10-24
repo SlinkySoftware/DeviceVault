@@ -201,7 +201,8 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
 Devices can also upload their configuration themselves, for example a Cisco
 `archive` that copies the configuration on every `write memory`. They upload to
 a **receiver**: its own image (`devicevault-receiver`) and stack, registered and
-approved like a worker, that accepts SCP and SFTP uploads. Devices are matched by
+approved like a worker, that accepts SCP and SFTP uploads, and TFTP uploads where
+you allow them. Devices are matched by
 their **source address** (every device's IP address is unique), so pushing works
 alongside polling: a device can do both, or only push (backup method *None*).
 
@@ -222,9 +223,10 @@ the host so that only device networks reach the listening ports.
 2. Open its **Receiver settings**: enable SCP/SFTP, the port (default 2222), the
    username devices log in with and a password and/or authorised public keys, the
    largest file accepted (default 512 MiB) and optionally the address to listen on.
+   Enable **TFTP** (UDP, default port 6969) only if devices can't use SCP/SFTP.
    The settings page shows the receiver's **SSH host key fingerprint**: pin it on
    devices where they support it. The key lives in the `state` volume; keep it.
-3. On each device that pushes, set **Device pushes its backups** to SCP/SFTP, and
+3. On each device that pushes, set **Device pushes its backups** to SCP/SFTP (or TFTP), and
    optionally the accepted file names (a glob such as `*-confg*`). It needs a storage
    target. Every receiver accepts every pushing device, so point devices at any
    receiver (or a virtual address shared by several).
@@ -240,17 +242,30 @@ the host so that only device networks reach the listening ports.
    the trailing `*` in the pattern above. Each uploaded file becomes a backup job
    (trigger *Push*), stored like any other.
 
+**TFTP has no login.** A TFTP upload is accepted only from the address of a device
+set to push over TFTP (an SCP/SFTP device's TFTP uploads are refused), so anyone who
+can send packets with that source address can replace its backup. Use it only on
+networks that drop spoofed traffic, and prefer SCP/SFTP. Read requests are always
+refused. The receiver answers from the address it listens on: on a host with several
+addresses, set the listen address to the one devices use, or replies may come from
+another address and be ignored. Large files work (block numbers wrap past 65535), but
+TFTP is slow; set a larger block size on the device if it allows (`blksize`).
+
 Uploads from unknown addresses, with a wrong login, a file name that doesn't match,
 or over the size limit are refused and nothing is kept. Refusals are audited
 (`push.rejected`) and the latest are listed under **Refused pushes** on the Workers
 page, which helps when a device's address or login is wrong.
 
 **Ports below 1024.** The receiver runs unprivileged, so it cannot listen on port 22
-directly. Either configure devices with port 2222 where they allow it, or redirect
-on the host, e.g. with nftables (for a receiver address that has no SSH daemon of its
-own): `nft add rule ip nat prerouting ip daddr <receiver-ip> tcp dport 22 redirect to :2222`,
+(SSH) or 69 (TFTP) directly. Either configure devices with the high ports where they
+allow it, or redirect on the host, e.g. with nftables (for a receiver address that has
+no SSH daemon of its own):
+`nft add rule ip nat prerouting ip daddr <receiver-ip> tcp dport 22 redirect to :2222` and
+`nft add rule ip nat prerouting ip daddr <receiver-ip> udp dport 69 redirect to :6969`,
 or lower the host's unprivileged port start
-(`sysctl net.ipv4.ip_unprivileged_port_start=22`, which affects the whole host).
+(`sysctl net.ipv4.ip_unprivileged_port_start=22`, which affects the whole host). The TFTP
+redirect needs no conntrack helper: replies come from the receiver's own ports, which
+host networking leaves untranslated.
 
 ## 5. Flower
 

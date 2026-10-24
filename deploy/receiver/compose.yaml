@@ -1,4 +1,4 @@
-# DeviceVault push receiver: devices upload their backups to it (SCP/SFTP).
+# DeviceVault push receiver: devices upload their backups to it (SCP/SFTP, TFTP).
 #
 #   cp receiver.env.example receiver.env   # then edit
 #   docker compose -p dv-receiver up -d

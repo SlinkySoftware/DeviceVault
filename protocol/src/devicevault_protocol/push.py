@@ -9,6 +9,7 @@ A receiver is a worker with role ``receiver``. Its assignment (see
         "ssh": {"enabled": true, "port": 2222, "username": "devicevault",
                 "password": "..." | "password_sealed": {"<worker_id>": "<sealed>"},
                 "authorized_keys": "ssh-ed25519 AAAA... comment\\n..."},
+        "tftp": {"enabled": false, "port": 6969},
         "devices": [{"id": 7, "ip": "192.0.2.1", "push_mode": "ssh", "filename_pattern": "*-confg"}],
         "encryption": {"kid": "...", "public_key": "..."} | null,
     }
@@ -29,7 +30,7 @@ fields ``job_id`` and ``device_id`` before it stages it, so it picks the job
 id; the orchestrator creates the BackupJob with that id.
 
 Heartbeats from a receiver add ``"receiver": {"host_key_fingerprint",
-"vault_kid", "devices", "listeners": {"ssh": {"port", "listening", "error"}}}``.
+"vault_kid", "devices", "listeners": {"ssh" | "tftp": {"enabled", "port", "listening", "error"}}}``.
 """
 
 import ipaddress
@@ -41,7 +42,8 @@ EVENT_REJECTED = 'rejected'
 
 PUSH_OFF = 'off'
 PUSH_SSH = 'ssh'  # SCP or SFTP
-PROTOCOLS = (PUSH_SSH,)
+PUSH_TFTP = 'tftp'  # unauthenticated: the source address is all there is
+PROTOCOLS = (PUSH_SSH, PUSH_TFTP)
 
 REASON_UNKNOWN_SOURCE = 'unknown_source'
 REASON_AUTH_FAILED = 'auth_failed'
@@ -61,6 +63,7 @@ REASONS = (
 )
 
 DEFAULT_SSH_PORT = 2222
+DEFAULT_TFTP_PORT = 6969
 DEFAULT_MAX_FILE_SIZE = 512 * 1024 * 1024
 
 
