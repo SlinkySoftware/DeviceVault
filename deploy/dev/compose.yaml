@@ -97,6 +97,21 @@ services:
       - storage:/srv/devicevault
       - storage-1-state:/var/lib/devicevault
 
+  # On the compose network, unlike a deployment (host networking): pushes from the
+  # host arrive from the network's gateway address, so test from a container on
+  # this network (its address is the device's) or add a device for the gateway.
+  receiver-1:
+    <<: *python
+    working_dir: /workspace
+    entrypoint: [dv-receiver]
+    environment:
+      DV_WORKER_NAME: receiver-1
+    volumes:
+      - ../..:/workspace
+      - receiver-1-state:/var/lib/devicevault
+    ports:
+      - "${DV_DEV_SSH_PORT:-2222}:2222"
+
   frontend:
     image: node:24-alpine
     user: "${DV_UID:-1000}:${DV_GID:-1000}"
@@ -117,3 +132,4 @@ volumes:
   collector-1-state:
   collector-2-state:
   storage-1-state:
+  receiver-1-state:

@@ -1,0 +1,31 @@
+# DeviceVault push receiver: devices upload their backups to it (SCP/SFTP).
+#
+#   cp receiver.env.example receiver.env   # then edit
+#   docker compose -p dv-receiver up -d
+#
+# Like a worker it connects out to RabbitMQ and Redis only, registers with the
+# orchestrator and waits for an administrator to approve it as a receiver
+# (Admin Settings > Workers). It listens on nothing until its settings there
+# enable a protocol.
+#
+# Host networking is required, not a convenience: devices are matched by
+# their source address, which Docker's port publishing can replace, and a
+# listener's port is opened only while its assignment enables it. Firewall
+# the host so only device networks reach the listening ports.
+
+name: devicevault-receiver
+
+services:
+  receiver:
+    image: ${DV_RECEIVER_IMAGE:-devicevault-receiver:latest}
+    restart: unless-stopped
+    network_mode: host
+    env_file: [receiver.env]
+    volumes:
+      # Identity, SSH host key, and uploads in progress. Keep it: a new host key
+      # makes devices that pinned the old one refuse to connect.
+      - state:/var/lib/devicevault
+    stop_grace_period: 60s
+
+volumes:
+  state:

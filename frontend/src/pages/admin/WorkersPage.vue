@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
-  <PageCard title="Workers" caption="Collectors and storage workers register themselves; approve them to give them work">
+  <PageCard
+    title="Workers"
+    caption="Collectors, storage workers and push receivers register themselves; approve them to give them work"
+  >
     <template #actions>
       <q-btn color="primary" icon="refresh" label="Refresh" :loading="loading" @click="load" />
     </template>
@@ -49,7 +52,20 @@
       </template>
       <template #body-cell-assignment="props">
         <q-td :props="props">
-          <div v-if="props.row.status === 'approved'">
+          <div v-if="props.row.status === 'approved' && props.row.role === 'receiver'">
+            <div class="text-weight-medium">{{ roleLabel(props.row.role) }}</div>
+            <div class="row q-gutter-xs q-mt-xs">
+              <template v-for="listener in listeners(props.row)" :key="listener.label">
+                <q-badge :color="listener.color" :outline="!listener.listening" :label="listener.label" />
+                <q-tooltip v-if="listener.error">{{ listener.error }}</q-tooltip>
+              </template>
+              <span v-if="listeners(props.row).length === 0" class="text-grey">Listening for nothing</span>
+            </div>
+            <div v-if="props.row.runtime.receiver" class="text-caption text-grey q-mt-xs">
+              accepts {{ props.row.runtime.receiver.devices }} device{{ props.row.runtime.receiver.devices === 1 ? '' : 's' }}
+            </div>
+          </div>
+          <div v-else-if="props.row.status === 'approved'">
             <div class="text-weight-medium">{{ roleLabel(props.row.role) }}</div>
             <div class="row q-gutter-xs q-mt-xs">
               <q-badge v-for="queue in props.row.assigned_queues" :key="queue" outline color="primary" :label="queue" />
@@ -86,7 +102,15 @@
             @click="openAssignment(props.row)"
           />
           <template v-else>
-            <q-btn dense round flat color="primary" icon="tune" aria-label="Change assignment" @click="openAssignment(props.row)">
+            <template v-if="props.row.role === 'receiver'">
+              <q-btn dense round flat color="primary" icon="settings_input_antenna" aria-label="Receiver settings" @click="openReceiver(props.row)">
+                <q-tooltip>Receiver settings</q-tooltip>
+              </q-btn>
+              <q-btn dense round flat color="primary" icon="report" aria-label="Refused pushes" @click="openRejections(props.row)">
+                <q-tooltip>Refused pushes</q-tooltip>
+              </q-btn>
+            </template>
+            <q-btn v-else dense round flat color="primary" icon="tune" aria-label="Change assignment" @click="openAssignment(props.row)">
               <q-tooltip>Change assignment</q-tooltip>
             </q-btn>
             <q-btn dense round flat color="warning" icon="block" aria-label="Revoke" @click="confirmRevoke(props.row)">
@@ -105,6 +129,8 @@
     </div>
 
     <WorkerAssignmentDialog v-model="assignmentOpen" :worker="selected" @saved="load" />
+    <ReceiverSettingsDialog v-model="receiverOpen" :worker="selected" @saved="load" />
+    <PushRejectionsDialog v-model="rejectionsOpen" :worker="selected" />
   </PageCard>
 </template>
 
@@ -115,13 +141,16 @@ import { computed, onMounted, ref } from 'vue'
 import { workersApi } from '@/api/endpoints'
 import type { OrchestratorIdentity, Worker, WorkerStatus } from '@/api/types'
 import PageCard from '@/components/PageCard.vue'
+import PushRejectionsDialog from '@/components/PushRejectionsDialog.vue'
+import ReceiverSettingsDialog from '@/components/ReceiverSettingsDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
 import WorkerAssignmentDialog from '@/components/WorkerAssignmentDialog.vue'
 import { useNotify } from '@/composables/useNotify'
 import { usePolling } from '@/composables/usePolling'
+import { pushProtocolLabel } from '@/utils/format'
 
 const STATUS_COLORS: Record<WorkerStatus, string> = { pending: 'warning', approved: 'positive', revoked: 'grey' }
-const ROLE_LABELS: Record<string, string> = { collector: 'Collector', storage: 'Storage' }
+const ROLE_LABELS: Record<string, string> = { collector: 'Collector', storage: 'Storage', receiver: 'Push receiver' }
 const statusColor = (status: WorkerStatus) => STATUS_COLORS[status]
 const roleLabel = (role: string) => ROLE_LABELS[role] ?? 'Unassigned'
 const STATUS_ORDER: Record<WorkerStatus, number> = { pending: 0, approved: 1, revoked: 2 }
@@ -170,6 +199,32 @@ const selected = ref<Worker | null>(null)
 function openAssignment(worker: Worker): void {
   selected.value = worker
   assignmentOpen.value = true
+}
+
+const receiverOpen = ref(false)
+const rejectionsOpen = ref(false)
+
+function openReceiver(worker: Worker): void {
+  selected.value = worker
+  receiverOpen.value = true
+}
+
+function openRejections(worker: Worker): void {
+  selected.value = worker
+  rejectionsOpen.value = true
+}
+
+/** A receiver's enabled listeners, as it last reported them. */
+function listeners(worker: Worker): { label: string; color: string; listening: boolean; error: string }[] {
+  const reported = worker.runtime.receiver?.listeners ?? {}
+  return Object.entries(reported)
+    .filter(([, status]) => status?.enabled)
+    .map(([protocol, status]) => ({
+      label: `${pushProtocolLabel(protocol)} :${status!.port}${status!.error ? ' failed' : ''}`,
+      color: status!.error ? 'negative' : 'positive',
+      listening: status!.listening,
+      error: status!.error,
+    }))
 }
 
 function confirm(title: string, message: string, label: string, color: string, action: () => Promise<void>): void {

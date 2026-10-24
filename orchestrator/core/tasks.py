@@ -2,6 +2,7 @@
 
 from devicevault.celery import app
 from devicevault_protocol.jobs import JOB_EVENT_TASK
+from devicevault_protocol.push import PUSH_EVENT_TASK
 from devicevault_protocol.registration import WORKER_EVENT_TASK
 
 from .workers import EventRejected, handle_event
@@ -24,4 +25,15 @@ def job_event(envelope: dict) -> None:
     try:
         handle_job_event(envelope)
     except JobEventRejected:
+        pass
+
+
+@app.task(name=PUSH_EVENT_TASK, ignore_result=True)
+def push_event(envelope: dict) -> None:
+    from push.events import EventRejected as PushEventRejected
+    from push.events import handle_push_event
+
+    try:
+        handle_push_event(envelope)
+    except PushEventRejected:
         pass

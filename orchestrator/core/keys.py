@@ -110,7 +110,7 @@ def for_workers(value: Any, workers) -> dict[str, str]:
 def add_secret(spec: dict[str, Any], name: str, value: Any, workers) -> None:
     """Put ``value`` in a task spec: sealed per worker as ``<name>_sealed``, or plain when payload encryption is off.
 
-    The worker side is ``devicevault_worker.payload.secret``.
+    The worker side is ``devicevault_worker.payload.secret`` (receivers: ``devicevault_receiver.config``).
     """
     if payload_encryption():
         spec[f'{name}_sealed'] = for_workers(value, workers)

@@ -1,14 +1,16 @@
 # Deploying DeviceVault
 
-DeviceVault ships as three images and three independent Compose stacks. The
-stacks never talk to each other directly: orchestrators and workers connect
-out to RabbitMQ and Redis in the infra stack, and that is all.
+DeviceVault ships as four images and four independent Compose stacks. The
+stacks never talk to each other directly: orchestrators, workers and receivers
+connect out to RabbitMQ and Redis in the infra stack, and that is all. Only
+receivers accept connections from devices.
 
 | Stack | Path | Runs |
 |---|---|---|
 | Infra | `deploy/infra` | RabbitMQ, Redis, PostgreSQL (optional) |
 | Orchestrator | `deploy/orchestrator` | web (nginx + UI), api, events, scheduler, Flower (optional) |
 | Worker | `deploy/worker` | one collector or storage worker per Compose project |
+| Receiver | `deploy/receiver` | one push receiver (devices upload backups to it) per host, optional |
 
 > **Status:** pre-release. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -16,11 +18,11 @@ out to RabbitMQ and Redis in the infra stack, and that is all.
 
 ```bash
 make images IMAGE_TAG=0.1.0
-# devicevault-orchestrator:0.1.0, devicevault-worker:0.1.0, devicevault-web:0.1.0
+# devicevault-orchestrator:0.1.0, devicevault-worker:0.1.0, devicevault-receiver:0.1.0, devicevault-web:0.1.0
 ```
 
-Push them to your registry and set `DV_ORCHESTRATOR_IMAGE`, `DV_WEB_IMAGE` and
-`DV_WORKER_IMAGE` when running the stacks, or retag them as `:latest`.
+Push them to your registry and set `DV_ORCHESTRATOR_IMAGE`, `DV_WEB_IMAGE`,
+`DV_WORKER_IMAGE` and `DV_RECEIVER_IMAGE` when running the stacks, or retag them as `:latest`.
 
 ## 2. Infra
 
@@ -194,6 +196,62 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
   where it writes (path, bucket, prefix, database) makes earlier backups unreadable unless their
   data moves too.
 
+### Push receivers
+
+Devices can also upload their configuration themselves, for example a Cisco
+`archive` that copies the configuration on every `write memory`. They upload to
+a **receiver**: its own image (`devicevault-receiver`) and stack, registered and
+approved like a worker, that accepts SCP and SFTP uploads. Devices are matched by
+their **source address** (every device's IP address is unique), so pushing works
+alongside polling: a device can do both, or only push (backup method *None*).
+
+```bash
+cd deploy/receiver
+cp receiver.env.example receiver.env
+docker compose -p dv-receiver up -d
+docker compose -p dv-receiver logs receiver | grep -E 'worker_identity|receiver_host_key'
+```
+
+The stack uses **host networking**, which it needs: Docker's port publishing can
+replace a device's source address (always for IPv6, and through its userland
+proxy), and a receiver opens a port only while its settings enable it. Firewall
+the host so that only device networks reach the listening ports.
+
+1. Under **Admin Settings > Workers**, check the fingerprint and **Approve** it as a
+   **Push receiver**. It listens for nothing yet.
+2. Open its **Receiver settings**: enable SCP/SFTP, the port (default 2222), the
+   username devices log in with and a password and/or authorised public keys, the
+   largest file accepted (default 512 MiB) and optionally the address to listen on.
+   The settings page shows the receiver's **SSH host key fingerprint**: pin it on
+   devices where they support it. The key lives in the `state` volume; keep it.
+3. On each device that pushes, set **Device pushes its backups** to SCP/SFTP, and
+   optionally the accepted file names (a glob such as `*-confg*`). It needs a storage
+   target. Every receiver accepts every pushing device, so point devices at any
+   receiver (or a virtual address shared by several).
+4. Configure the device, e.g. on Cisco IOS:
+
+   ```
+   archive
+    path scp://devicevault:<password>@<receiver>/$h-confg
+    write-memory
+   ```
+
+   IOS appends a version number to archive files (`edge-confg-1`, `-2`...), hence
+   the trailing `*` in the pattern above. Each uploaded file becomes a backup job
+   (trigger *Push*), stored like any other.
+
+Uploads from unknown addresses, with a wrong login, a file name that doesn't match,
+or over the size limit are refused and nothing is kept. Refusals are audited
+(`push.rejected`) and the latest are listed under **Refused pushes** on the Workers
+page, which helps when a device's address or login is wrong.
+
+**Ports below 1024.** The receiver runs unprivileged, so it cannot listen on port 22
+directly. Either configure devices with port 2222 where they allow it, or redirect
+on the host, e.g. with nftables (for a receiver address that has no SSH daemon of its
+own): `nft add rule ip nat prerouting ip daddr <receiver-ip> tcp dport 22 redirect to :2222`,
+or lower the host's unprivileged port start
+(`sysctl net.ipv4.ip_unprivileged_port_start=22`, which affects the whole host).
+
 ## 5. Flower
 
 Flower shows live workers, queues and tasks. Register each Flower under
@@ -347,6 +405,19 @@ secrets). The file takes precedence.
 | `DV_LOG_LEVEL` | `INFO` | |
 | `DV_STATE_DIR` | `/var/lib/devicevault` | Where the worker keeps its identity |
 | `DV_WORKER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat interval |
+
+### Receiver
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DV_BROKER_URL` | `amqp://guest:guest@localhost:5672//` | RabbitMQ |
+| `DV_REDIS_URL` | `redis://localhost:6379/0` | Redis |
+| `DV_WORKER_NAME` | `receiver` | Display name |
+| `DV_LOG_LEVEL` | `INFO` | |
+| `DV_STATE_DIR` | `/var/lib/devicevault` | Identity, SSH host key and uploads in progress |
+| `DV_WORKER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat interval |
+
+Everything else (protocols, ports, login, size limit) is set per receiver in the UI.
 
 ## Known limitations (pre-release)
 

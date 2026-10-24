@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest'
 
-import { formatDuration, isActiveJob, statusColor, statusLabel } from './format'
+import { formatDuration, isActiveJob, pushProtocolLabel, statusColor, statusLabel } from './format'
 
 describe('job states', () => {
   it('treats only unfinished states as active', () => {
@@ -25,5 +25,12 @@ describe('formatDuration', () => {
     [185_000, '3 min 5 s'],
   ])('%s -> %s', (ms, expected) => {
     expect(formatDuration(ms)).toBe(expected)
+  })
+})
+
+describe('push protocols', () => {
+  it('names SSH uploads by what devices know them as', () => {
+    expect(pushProtocolLabel('ssh')).toBe('SCP/SFTP')
+    expect(pushProtocolLabel('ftp')).toBe('FTP')
   })
 })

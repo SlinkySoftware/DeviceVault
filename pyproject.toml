@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["protocol", "worker", "orchestrator"]
+members = ["protocol", "worker", "receiver", "orchestrator"]
 
 [tool.ruff]
 line-length = 120
@@ -16,7 +16,7 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = [
     "accounts", "api", "audit", "backups", "core", "credentials", "devices", "devicevault",
-    "devicevault_protocol", "devicevault_worker", "monitoring", "policies", "storage",
+    "devicevault_protocol", "devicevault_receiver", "devicevault_worker", "monitoring", "policies", "push", "storage",
 ]
 
 [tool.ruff.format]

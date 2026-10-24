@@ -1,6 +1,7 @@
 # DeviceVault Python images. Build from the repository root:
 #   docker build -f docker/Dockerfile --target orchestrator -t devicevault-orchestrator .
 #   docker build -f docker/Dockerfile --target worker       -t devicevault-worker .
+#   docker build -f docker/Dockerfile --target receiver     -t devicevault-receiver .
 #   docker build -f docker/Dockerfile --target dev          -t devicevault-dev .
 
 FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
@@ -24,6 +25,7 @@ WORKDIR /src
 COPY pyproject.toml uv.lock ./
 COPY protocol/pyproject.toml protocol/
 COPY worker/pyproject.toml worker/
+COPY receiver/pyproject.toml receiver/
 COPY orchestrator/pyproject.toml orchestrator/
 
 FROM lock AS build-orchestrator
@@ -41,6 +43,14 @@ COPY protocol protocol
 COPY worker worker
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable --package devicevault-worker
+
+FROM lock AS build-receiver
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-workspace --package devicevault-receiver
+COPY protocol protocol
+COPY receiver receiver
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable --package devicevault-receiver
 
 # --- Orchestrator: api, result consumers, worker monitor, flower ---------------
 FROM base AS orchestrator
@@ -69,6 +79,15 @@ USER devicevault
 VOLUME ["/var/lib/devicevault"]
 ENTRYPOINT ["dv-worker"]
 
+# --- Receiver: accepts backups devices push (SCP/SFTP), no Django or Celery pool -
+FROM base AS receiver
+COPY --from=build-receiver /opt/venv /opt/venv
+COPY docker/receiver-entrypoint.sh /usr/local/bin/dv-receiver
+WORKDIR /var/lib/devicevault
+USER devicevault
+VOLUME ["/var/lib/devicevault"]
+ENTRYPOINT ["dv-receiver"]
+
 # --- Dev: every package's dependencies plus dev tools; source is bind-mounted --
 FROM lock AS dev
 # Dev containers run as the host user (any UID), so the storage root and the
@@ -80,8 +99,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git make \
     && chmod 1777 /var/lib/devicevault
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --all-packages --no-install-workspace \
-    && printf '/workspace/protocol/src\n/workspace/worker/src\n' \
+    && printf '/workspace/protocol/src\n/workspace/worker/src\n/workspace/receiver/src\n' \
        > /opt/venv/lib/python3.14/site-packages/devicevault-workspace.pth
 COPY docker/orchestrator-entrypoint.sh /usr/local/bin/dv-orchestrator
 COPY docker/worker-entrypoint.sh /usr/local/bin/dv-worker
+COPY docker/receiver-entrypoint.sh /usr/local/bin/dv-receiver
 WORKDIR /workspace/orchestrator

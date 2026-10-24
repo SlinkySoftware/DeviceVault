@@ -75,7 +75,11 @@
         </template>
       </q-select>
 
-      <div class="text-caption text-grey">
+      <div v-if="isReceiver" class="text-caption text-grey">
+        A push receiver: devices upload their backups to it. Its settings (protocols, ports, login) are on the
+        Workers page once it is approved.
+      </div>
+      <div v-else class="text-caption text-grey">
         Offers: {{ driverNames || 'no collector drivers' }} ·
         storage: {{ storageDriverNames || 'none' }}
       </div>
@@ -109,9 +113,11 @@ const approving = computed(() => props.worker?.status !== 'approved')
 const driverNames = computed(() =>
   (props.worker?.capabilities.collector_drivers ?? []).map((d) => d.name).join(', '),
 )
+const isReceiver = computed(() => !!props.worker?.capabilities.receiver)
 const roleOptions = computed(() => [
   { label: 'Collector', value: 'collector', disable: !props.worker?.capabilities.collector_drivers?.length },
   { label: 'Storage', value: 'storage', disable: !props.worker?.capabilities.storage_drivers?.length },
+  { label: 'Push receiver', value: 'receiver', disable: !isReceiver.value },
 ])
 const offered = computed(() => props.worker?.capabilities.storage_drivers ?? [])
 const storageDriverNames = computed(() => offered.value.map((d) => d.name).join(', '))
@@ -121,9 +127,9 @@ const targetOptions = computed(() => targets.value.filter((t) => offered.value.s
 watch(open, async (isOpen) => {
   if (!isOpen || !props.worker) return
   const worker = props.worker
-  // No default role: every worker image can do both, so the admin must choose.
+  // No default role for workers: every worker image can do both, so the admin must choose.
   Object.assign(form, {
-    role: worker.role,
+    role: worker.role || (worker.capabilities.receiver ? 'receiver' : ''),
     collection_groups: [...worker.collection_groups],
     storage_targets: [...worker.storage_targets],
   })

@@ -170,6 +170,8 @@ interface DeviceBase {
   driver_params: JsonObject
   collection_group: CollectionGroup | null
   enabled: boolean
+  push_mode: PushMode
+  push_filename_pattern: string
   last_backup_time: IsoDateTime | null
   last_backup_status: string | null
   retention_policy: Id | null
@@ -197,11 +199,14 @@ export interface DeviceWrite {
   dns_name: string
   device_type: Id | null
   manufacturer: Id | null
+  /** Empty: not polled (only for devices that push). */
   backup_method: string
   driver_params: JsonObject
   device_group: Id | null
   collection_group: Id | null
   enabled: boolean
+  push_mode: PushMode
+  push_filename_pattern: string
   retention_policy: Id | null
   storage_target: string | null
   credential: Id | null
@@ -213,7 +218,7 @@ export interface DeviceWrite {
 /** A backup job's lifecycle; `stored` is the only successful outcome. */
 export type JobState = 'queued' | 'collecting' | 'collected' | 'storing' | 'stored' | 'failed' | 'timed_out'
 
-export type JobTrigger = 'manual' | 'schedule'
+export type JobTrigger = 'manual' | 'schedule' | 'push'
 
 /** One backup of a device, from request to storage. */
 export interface BackupJob {
@@ -224,7 +229,10 @@ export interface BackupJob {
   state: JobState
   trigger: JobTrigger
   requested_by_username: string | null
+  /** Collector driver key, or `push:<protocol>` for a pushed backup. */
   driver: string
+  /** Name the device pushed the file as (pushed backups only). */
+  source_filename: string
   is_binary: boolean
   encrypted: boolean
   size_bytes: number | null
@@ -479,7 +487,7 @@ export interface UserPreferences {
 // --- Monitoring --------------------------------------------------------------
 
 export type WorkerStatus = 'pending' | 'approved' | 'revoked'
-export type WorkerRole = 'collector' | 'storage'
+export type WorkerRole = 'collector' | 'storage' | 'receiver'
 
 export interface CollectorDriver {
   key: string
@@ -501,11 +509,18 @@ export interface Worker {
   storage_targets: string[]
   /** SSH-style SHA256 fingerprint of the worker's signing key. */
   fingerprint: string
-  capabilities: { collector_drivers?: CollectorDriver[]; storage_drivers?: StorageDriver[] }
+  capabilities: {
+    collector_drivers?: CollectorDriver[]
+    storage_drivers?: StorageDriver[]
+    /** Present on push receivers only. */
+    receiver?: { protocols: PushProtocol[]; host_key_fingerprint: string }
+  }
   desired_version: number
   applied_version: number
   applied_queues: string[]
   assigned_queues: string[]
+  /** What the worker reports about its services (receivers: listeners, host key). */
+  runtime: { receiver?: ReceiverRuntime }
   in_sync: boolean
   /** Whether the key the worker pinned is this orchestrator's; null until it pins one. */
   pinned_orchestrator_matches: boolean | null
@@ -520,6 +535,73 @@ export interface WorkerAssignment {
   role: WorkerRole
   collection_groups: Id[]
   storage_targets: string[]
+}
+
+// --- Push collection -----------------------------------------------------------------
+
+/** How a device uploads its own backups to the receivers. */
+export type PushMode = 'off' | 'ssh'
+export type PushProtocol = 'ssh'
+
+export interface ListenerStatus {
+  enabled: boolean
+  port: number
+  listening: boolean
+  error: string
+}
+
+/** What a receiver reports in its heartbeats. */
+export interface ReceiverRuntime {
+  /** OpenSSH-style SHA256 fingerprint of its SSH host key. */
+  host_key_fingerprint: string
+  vault_kid: string | null
+  /** Push-enabled devices it accepts. */
+  devices: number
+  listeners: { ssh?: ListenerStatus }
+}
+
+/** One receiver's settings; the password is write-only. */
+export interface ReceiverSettings {
+  /** Empty or null: every address. */
+  bind_address: string | null
+  max_file_size: number
+  ssh_enabled: boolean
+  ssh_port: number
+  ssh_username: string
+  ssh_password_set: boolean
+  ssh_authorized_keys: string
+  updated_at: IsoDateTime
+}
+
+export interface ReceiverSettingsWrite {
+  bind_address: string | null
+  max_file_size: number
+  ssh_enabled: boolean
+  ssh_port: number
+  ssh_username: string
+  /** Omit to keep the current password; empty removes it. */
+  ssh_password?: string
+  ssh_authorized_keys: string
+}
+
+export type PushRejectionReason =
+  | 'unknown_source'
+  | 'auth_failed'
+  | 'wrong_protocol'
+  | 'filename'
+  | 'too_large'
+  | 'device_changed'
+  | 'error'
+
+/** A push a receiver refused, or the orchestrator discarded. */
+export interface PushRejection {
+  id: Id
+  at: IsoDateTime
+  source_ip: string
+  protocol: PushProtocol
+  reason: PushRejectionReason
+  filename: string
+  detail: string
 }
 
 export interface OrchestratorIdentity {

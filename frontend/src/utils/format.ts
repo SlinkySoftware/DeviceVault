@@ -70,3 +70,10 @@ export function formatDuration(ms: number | null | undefined): string {
   if (seconds < 60) return `${seconds.toFixed(1)} s`
   return `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`
 }
+
+const PUSH_PROTOCOLS: Record<string, string> = { ssh: 'SCP/SFTP' }
+
+/** Display label for a push protocol (`ssh` covers SCP and SFTP). */
+export function pushProtocolLabel(protocol: string): string {
+  return PUSH_PROTOCOLS[protocol] ?? protocol.toUpperCase()
+}

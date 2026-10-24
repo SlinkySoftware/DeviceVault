@@ -25,7 +25,7 @@ from devicevault_protocol.jobs import (
     EVENT_STORED,
     STAGE_STORE,
 )
-from devicevault_protocol.names import COLLECT_TASK, collection_queue_name
+from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, collection_queue_name
 from devicevault_protocol.registration import ROLE_COLLECTOR, STATUS_APPROVED
 from storage.service import target_spec, target_workers
 
@@ -49,6 +49,8 @@ def create_job(device, *, trigger=BackupJob.TRIGGER_MANUAL, user=None, schedule=
     If the device already has an active job, that job is returned instead, so
     repeated "backup now" clicks and overlapping schedules do not pile up.
     """
+    if not device.backup_method:
+        raise JobError('the device is not polled (it only pushes its backups)')
     if not device.collection_group:
         raise JobError('the device has no collection group, so no collector can back it up')
     target = device.storage_target
@@ -95,18 +97,28 @@ def _device_key(device) -> str:
     return f'{device.pk}-{slug}'
 
 
-def collect_payload(job: BackupJob) -> dict[str, Any]:
-    device = job.device
-    store = target_spec(
+def store_spec(job: BackupJob) -> dict[str, Any]:
+    """The orchestrator-signed half of a ``job.store`` task (the other half is the staged blob)."""
+    return target_spec(
         job.storage_target,
         job_id=str(job.id),
         name={
-            'device_key': _device_key(device),
+            'device_key': _device_key(job.device),
             'job_id': str(job.id),
             'timestamp': job.created_at.strftime('%Y%m%dT%H%M%SZ'),
             'extension': '.bin' if job.is_binary else '.cfg',
         },
     )
+
+
+def send_store(job: BackupJob, blob: dict[str, Any]) -> None:
+    """Have the job's storage target store a blob the orchestrator was told about (pushed backups)."""
+    celery_app.send_task(STORE_TASK, args=[sign_task(store_spec(job)), blob], queue=job.storage_target.queue)
+
+
+def collect_payload(job: BackupJob) -> dict[str, Any]:
+    device = job.device
+    store = store_spec(job)
     collect = {
         'job_id': str(job.id),
         'device': {'id': device.pk, 'name': device.name, 'address': device.ip_address},

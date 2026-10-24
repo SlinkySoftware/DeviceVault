@@ -36,7 +36,12 @@ class BackupJob(models.Model):
 
     TRIGGER_MANUAL = 'manual'
     TRIGGER_SCHEDULE = 'schedule'
-    TRIGGER_CHOICES = [(TRIGGER_MANUAL, 'Manual'), (TRIGGER_SCHEDULE, 'Schedule')]
+    TRIGGER_PUSH = 'push'
+    TRIGGER_CHOICES = [
+        (TRIGGER_MANUAL, 'Manual'),
+        (TRIGGER_SCHEDULE, 'Schedule'),
+        (TRIGGER_PUSH, 'Pushed by the device'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     device = models.ForeignKey('devices.Device', on_delete=models.CASCADE, related_name='backup_jobs')
@@ -47,9 +52,10 @@ class BackupJob(models.Model):
         'policies.BackupSchedule', null=True, blank=True, on_delete=models.SET_NULL, related_name='jobs'
     )
 
-    driver = models.CharField(max_length=128, help_text='Collector driver used')
+    driver = models.CharField(max_length=128, help_text='Collector driver used ("push:<protocol>" for pushes)')
+    source_filename = models.CharField(max_length=255, blank=True, help_text='Name the device pushed the file as')
     is_binary = models.BooleanField(default=False)
-    collector = models.CharField(max_length=255, blank=True, help_text='Worker that collected it')
+    collector = models.CharField(max_length=255, blank=True, help_text='Worker that collected (or received) it')
     storage_worker = models.CharField(max_length=255, blank=True, help_text='Worker that stored it')
 
     # Protected: deleting a target would make its backups unreadable.

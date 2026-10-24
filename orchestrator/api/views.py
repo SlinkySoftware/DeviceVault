@@ -19,19 +19,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from django.conf import settings
 from django.db.models import ProtectedError
 from rest_framework import decorators, mixins, response, serializers, status, viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
 from accounts import access
 from accounts.access import HasDeviceGroupPermission, IsGlobalAdmin, IsGlobalAdminOrReadOnly
+from audit.log import record
 from backups.api import device_backup_now
 from core import workers as worker_registry
 from core.models import UserProfile, Worker
 from core.workers import driver_catalogue
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceType, Manufacturer
-from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
+from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_RECEIVER, ROLE_STORAGE, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy
 
 from .serializers import (
@@ -193,6 +194,8 @@ class WorkerViewSet(
     - POST {id}/revoke/: stop the worker consuming anything
     - DELETE: forget the worker (revoking it first); a live worker registers again as pending
     - GET orchestrator/: this orchestrator's key fingerprint, to compare with what workers pinned
+    - GET/PATCH {id}/receiver/: a push receiver's settings (protocols, ports, login, size limit)
+    - GET {id}/rejections/: the latest pushes a receiver refused
     """
 
     queryset = Worker.objects.prefetch_related('collection_groups').select_related('approved_by')
@@ -245,6 +248,42 @@ class WorkerViewSet(
     def revoke(self, request, pk=None):
         worker = worker_registry.revoke(self.get_object())
         return response.Response(WorkerSerializer(worker, context=self.get_serializer_context()).data)
+
+    def _receiver(self):
+        worker = self.get_object()
+        if worker.role != ROLE_RECEIVER:
+            raise NotFound('This worker is not a push receiver.')
+        return worker
+
+    @decorators.action(detail=True, methods=['get', 'patch'])
+    def receiver(self, request, pk=None):
+        """What a receiver listens for. Saving sends it a new assignment."""
+        from push.api import ReceiverSettingsSerializer
+        from push.service import settings_for
+
+        worker = self._receiver()
+        settings = settings_for(worker)
+        if request.method == 'GET':
+            return response.Response(ReceiverSettingsSerializer(settings).data)
+        serializer = ReceiverSettingsSerializer(settings, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        password_changed = 'ssh_password' in serializer.validated_data
+        serializer.save()
+        details = {k: v for k, v in serializer.data.items() if k != 'updated_at'}
+        record(
+            request, 'receiver.update', resource=worker.name, details={**details, 'password_changed': password_changed}
+        )
+        if worker.status == STATUS_APPROVED:
+            worker_registry.update_assignment(worker)
+        return response.Response(serializer.data)
+
+    @decorators.action(detail=True, methods=['get'])
+    def rejections(self, request, pk=None):
+        """The latest pushes this receiver refused (or the orchestrator discarded), newest first."""
+        from push.api import PushRejectionSerializer
+
+        worker = self._receiver()
+        return response.Response(PushRejectionSerializer(worker.push_rejections.all()[:100], many=True).data)
 
     @decorators.action(detail=False, methods=['get'])
     def orchestrator(self, request):

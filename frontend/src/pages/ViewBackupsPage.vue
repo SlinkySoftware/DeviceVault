@@ -41,6 +41,12 @@
           <q-tooltip v-if="props.row.error">{{ props.row.error }}</q-tooltip>
         </q-td>
       </template>
+      <template #body-cell-trigger="props">
+        <q-td :props="props">
+          {{ capitalise(props.row.trigger) }}
+          <div v-if="props.row.source_filename" class="text-caption text-grey">{{ props.row.source_filename }}</div>
+        </q-td>
+      </template>
       <template #body-cell-encrypted="props">
         <q-td :props="props">
           <q-icon

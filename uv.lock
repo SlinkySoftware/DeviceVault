@@ -6,6 +6,7 @@ requires-python = "==3.14.*"
 members = [
     "devicevault-orchestrator",
     "devicevault-protocol",
+    "devicevault-receiver",
     "devicevault-worker",
 ]
 
@@ -37,6 +38,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e6/26/3b59f2bdae5f640389becb1f673cded775287f5fc4f816309d9ca9a3f93d/asgiref-3.12.1.tar.gz", hash = "sha256:59dcb51c272ad209d59bed5708a64a333083e86017d7fcdd67498eeab7784340", size = 42378, upload-time = "2026-07-14T09:56:18.087Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/1b/54f4ad77cd8a584fa70746c47df988e002cf1ee1eba43364d46f87803647/asgiref-3.12.1-py3-none-any.whl", hash = "sha256:fe386d1c2bff7259ea95929266d12a8cf9a8b5a1c2598402967d8792e7a7c094", size = 25478, upload-time = "2026-07-14T09:56:16.926Z" },
+]
+
+[[package]]
+name = "asyncssh"
+version = "2.24.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/c5/41a0d5477865c48cee65050586092dc3ba3fc1c52e29b47fba08d3a44581/asyncssh-2.24.1.tar.gz", hash = "sha256:efcd36e9b35f79873535b06444a7c9b0a3c61d97081b208c7fdd3fd8a40f1eca", size = 558085, upload-time = "2026-10-04T02:48:24.913Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/e5/8bc721f04ff545c5a84c9c23fbf788fbb56960bb57a86c6366bc35be0f66/asyncssh-2.24.1-py3-none-any.whl", hash = "sha256:fc560b4f43be0f0c602d184783e5e3876f5d24d933a25359d86e5a50a5f46fe5", size = 382514, upload-time = "2026-10-04T02:48:23.676Z" },
 ]
 
 [[package]]
@@ -491,6 +505,37 @@ requires-dist = [
     { name = "kombu", specifier = ">=5.6.2,<5.7" },
     { name = "python-json-logger", specifier = ">=4" },
     { name = "redis", specifier = ">=6.4,<7" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fakeredis", extras = ["lua"], specifier = ">=2.32" },
+    { name = "pytest", specifier = ">=9" },
+]
+
+[[package]]
+name = "devicevault-receiver"
+version = "0.1.0"
+source = { editable = "receiver" }
+dependencies = [
+    { name = "asyncssh" },
+    { name = "celery" },
+    { name = "devicevault-protocol" },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncssh", specifier = ">=2.21,<3" },
+    { name = "celery", specifier = ">=5.6.3,<5.7" },
+    { name = "devicevault-protocol", editable = "protocol" },
+    { name = "pydantic", specifier = ">=2.14,<3" },
 ]
 
 [package.metadata.requires-dev]

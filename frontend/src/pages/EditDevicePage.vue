@@ -100,16 +100,16 @@
           />
           <q-select
             v-model="form.backup_method"
-            :options="backupMethods"
+            :options="methodOptions"
             option-value="key"
             option-label="friendly_name"
             emit-value
             map-options
             outlined
             label="Backup method"
-            :hint="backupMethods.length ? undefined : 'No approved collector offers a backup method yet (Admin Settings > Workers)'"
+            :hint="methodHint"
             :disable="!canModify"
-            :rules="[required('Backup method')]"
+            :rules="pushing ? [] : [required('Backup method')]"
             @update:model-value="onMethodChange"
           />
           <q-banner v-if="selectedMethod && selectedMethod.versions.length > 1" dense rounded class="bg-warning text-black">
@@ -147,6 +147,7 @@
             label="Storage target"
             hint="Where backups of this device are stored"
             :disable="!canModify"
+            :rules="pushing ? [required('Storage target')] : []"
           />
           <q-select
             v-model="form.retention_policy"
@@ -172,6 +173,25 @@
             label="Backup schedule"
             hint="Leave empty to back up only on demand"
             :disable="!canModify"
+          />
+
+          <q-select
+            v-model="form.push_mode"
+            :options="PUSH_MODES"
+            emit-value
+            map-options
+            outlined
+            label="Device pushes its backups"
+            hint="Uploads to the push receivers are matched to this device by its IP address"
+            :disable="!canModify"
+          />
+          <q-input
+            v-if="pushing"
+            v-model.trim="form.push_filename_pattern"
+            outlined
+            label="Accepted file names (optional)"
+            hint="A glob such as *-confg*; other files from this device are refused"
+            :readonly="!canModify"
           />
 
           <div class="row q-gutter-sm">
@@ -210,6 +230,7 @@ import type {
   DeviceType,
   DeviceWrite,
   Manufacturer,
+  PushMode,
   RetentionPolicy,
   StorageTarget,
 } from '@/api/types'
@@ -240,6 +261,8 @@ const form = ref<DeviceWrite>({
   device_group: null,
   collection_group: null,
   enabled: true,
+  push_mode: 'off',
+  push_filename_pattern: '',
   retention_policy: null,
   storage_target: null,
   credential: null,
@@ -259,6 +282,20 @@ const deviceGroups = ref<DeviceGroup[]>([])
 const collectionGroups = ref<CollectionGroup[]>([])
 
 const selectedMethod = computed(() => backupMethods.value.find((method) => method.key === form.value.backup_method))
+
+const PUSH_MODES: { label: string; value: PushMode }[] = [
+  { label: 'No', value: 'off' },
+  { label: 'Yes, over SCP or SFTP', value: 'ssh' },
+]
+const pushing = computed(() => form.value.push_mode !== 'off')
+// A device that pushes need not be polled at all.
+const methodOptions = computed(() =>
+  pushing.value ? [{ key: '', friendly_name: 'None: only accept pushed backups' }, ...backupMethods.value] : backupMethods.value,
+)
+const methodHint = computed(() => {
+  if (!backupMethods.value.length) return 'No approved collector offers a backup method yet (Admin Settings > Workers)'
+  return pushing.value ? 'Choose none if the device only pushes' : undefined
+})
 
 // A different driver keeps only the settings it also has.
 function onMethodChange(key: string): void {
@@ -302,6 +339,8 @@ function toForm(detail: DeviceDetail): DeviceWrite {
     device_group: detail.device_group?.id ?? null,
     collection_group: detail.collection_group?.id ?? null,
     enabled: detail.enabled,
+    push_mode: detail.push_mode,
+    push_filename_pattern: detail.push_filename_pattern,
     retention_policy: detail.retention_policy,
     storage_target: detail.storage_target,
     credential: detail.credential,

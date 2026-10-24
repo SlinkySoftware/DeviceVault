@@ -28,7 +28,8 @@ from core.models import UserProfile, Worker
 from core.workers import driver_catalogue, is_online
 from credentials.models import Credential, CredentialType
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
-from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
+from devicevault_protocol.push import PUSH_OFF
+from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_RECEIVER, ROLE_STORAGE, ROLES, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy, validate_cron
 from storage.models import StorageTarget
 
@@ -210,6 +211,8 @@ class DeviceSerializer(serializers.ModelSerializer):
             'device_group_name',
             'collection_group',
             'enabled',
+            'push_mode',
+            'push_filename_pattern',
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
@@ -225,6 +228,8 @@ class DeviceSerializer(serializers.ModelSerializer):
         return access.flags_on(request.user, obj.device_group_id) if request else []
 
     def get_backup_method_display(self, obj):
+        if not obj.backup_method:
+            return 'Push only'
         driver = drivers(self.context).get(obj.backup_method)
         return driver['name'] if driver else obj.backup_method
 
@@ -283,6 +288,8 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
             'device_group',
             'collection_group',
             'enabled',
+            'push_mode',
+            'push_filename_pattern',
             'last_backup_time',
             'last_backup_status',
             'retention_policy',
@@ -298,6 +305,8 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         return access.flags_on(request.user, obj.device_group_id) if request else []
 
     def get_backup_method_display(self, obj):
+        if not obj.backup_method:
+            return 'Push only'
         driver = drivers(self.context).get(obj.backup_method)
         return driver['name'] if driver else obj.backup_method
 
@@ -322,6 +331,8 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             'device_group',
             'collection_group',
             'enabled',
+            'push_mode',
+            'push_filename_pattern',
             'retention_policy',
             'storage_target',
             'schedule',
@@ -331,8 +342,8 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
         extra_kwargs = {'device_group': {'required': True, 'allow_null': True}}
 
     def validate_backup_method(self, value):
-        # An unchanged method stays valid even while no collector offers it.
-        if self.instance is not None and value == self.instance.backup_method:
+        # An unchanged method stays valid even while no collector offers it; none means push only (see validate).
+        if not value or (self.instance is not None and value == self.instance.backup_method):
             return value
         if value not in drivers(self.context):
             raise serializers.ValidationError(f'No approved collector offers the backup method "{value}"')
@@ -347,6 +358,12 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             errors = driver_param_errors(params, driver['params_schema'])
             if errors:
                 raise serializers.ValidationError({'driver_params': errors})
+        push_mode = attrs.get('push_mode', getattr(self.instance, 'push_mode', PUSH_OFF))
+        if not method and push_mode == PUSH_OFF:
+            raise serializers.ValidationError({'backup_method': 'Choose a backup method, or let the device push.'})
+        storage_target = attrs.get('storage_target', getattr(self.instance, 'storage_target', None))
+        if push_mode != PUSH_OFF and storage_target is None:
+            raise serializers.ValidationError({'storage_target': 'A device that pushes needs a storage target.'})
         # A device uses a global credential, or one owned by its own group.
         credential = attrs.get('credential', getattr(self.instance, 'credential', None))
         group = attrs.get('device_group', getattr(self.instance, 'device_group', None))
@@ -391,6 +408,7 @@ class WorkerSerializer(serializers.ModelSerializer):
             'applied_version',
             'applied_queues',
             'assigned_queues',
+            'runtime',
             'in_sync',
             'pinned_orchestrator_matches',
             'registered_at',
@@ -422,6 +440,10 @@ class WorkerSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'role': 'This worker offers no collector drivers.'})
         if role == ROLE_STORAGE and not capabilities.get('storage_drivers'):
             raise serializers.ValidationError({'role': 'This worker offers no storage drivers.'})
+        if role == ROLE_RECEIVER and not capabilities.get('receiver'):
+            raise serializers.ValidationError({'role': 'This worker is not a push receiver.'})
+        if role != ROLE_RECEIVER and capabilities.get('receiver'):
+            raise serializers.ValidationError({'role': 'A push receiver can only be approved as a receiver.'})
         if self.instance is not None and attrs.get('storage_targets'):
             from core.workers import approval_target_problems
 

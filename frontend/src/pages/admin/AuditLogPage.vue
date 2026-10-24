@@ -120,6 +120,8 @@ const ACTION_OPTIONS = [
   { label: 'User groups and grants', value: 'user_group.' },
   { label: 'Backups', value: 'backup.' },
   { label: 'Refused requests', value: 'access.' },
+  { label: 'Push receiver settings', value: 'receiver.' },
+  { label: 'Refused pushes', value: 'push.' },
 ]
 const OUTCOME_OPTIONS: { label: string; value: AuditOutcome }[] = [
   { label: 'Success', value: 'success' },
