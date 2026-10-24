@@ -4,13 +4,14 @@ export interface NavLink {
   label: string
   icon: string
   to: string
+  /** Also shown to administrators of a device group (otherwise global administrators only). */
+  groupAdmins?: boolean
 }
 
 export interface NavSection {
   label: string
   icon: string
   links: NavLink[]
-  superuserOnly?: boolean
 }
 
 export const MAIN_LINKS: NavLink[] = [
@@ -24,7 +25,9 @@ export const ADMIN_SECTIONS: NavSection[] = [
     icon: 'people',
     links: [
       { label: 'Users', icon: 'person', to: '/vaultadmin/users' },
-      { label: 'Groups', icon: 'group', to: '/vaultadmin/groups' },
+      { label: 'User Groups', icon: 'group', to: '/vaultadmin/user-groups' },
+      { label: 'Access', icon: 'grid_on', to: '/vaultadmin/access' },
+      { label: 'Audit Log', icon: 'policy', to: '/vaultadmin/audit-log' },
     ],
   },
   {
@@ -41,7 +44,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
     label: 'Backup Settings',
     icon: 'backup',
     links: [
-      { label: 'Credentials', icon: 'vpn_key', to: '/vaultadmin/credentials' },
+      { label: 'Credentials', icon: 'vpn_key', to: '/vaultadmin/credentials', groupAdmins: true },
       { label: 'Storage Targets', icon: 'storage', to: '/vaultadmin/storage-targets' },
       { label: 'Backup Schedules', icon: 'schedule', to: '/vaultadmin/backup-schedules' },
       { label: 'Retention Policies', icon: 'history', to: '/vaultadmin/retention-policies' },
@@ -50,7 +53,6 @@ export const ADMIN_SECTIONS: NavSection[] = [
   {
     label: 'Application Settings',
     icon: 'settings_applications',
-    superuserOnly: true,
     links: [
       { label: 'Collection Groups', icon: 'hub', to: '/vaultadmin/collection-groups' },
       { label: 'Workers', icon: 'memory', to: '/vaultadmin/workers' },
@@ -58,3 +60,11 @@ export const ADMIN_SECTIONS: NavSection[] = [
     ],
   },
 ]
+
+/** The admin sections and links `auth` may use: everything for global administrators. */
+export function adminSectionsFor(globalAdmin: boolean, groupAdmin: boolean): NavSection[] {
+  return ADMIN_SECTIONS.map((section) => ({
+    ...section,
+    links: section.links.filter((link) => globalAdmin || (groupAdmin && link.groupAdmins)),
+  })).filter((section) => section.links.length > 0)
+}

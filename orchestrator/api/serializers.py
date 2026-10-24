@@ -1,7 +1,7 @@
 """
 Django REST Framework Serializers
 Converts database models to/from JSON for API requests and responses.
-Includes authentication serializers for login and user profile management.
+Users, groups and sign-in live in accounts.api; the audit log in audit.api.
 """
 
 # DeviceVault - A comprehensive network device backup management application with web interface for user and admin access and backend component for automated backup collection.
@@ -20,27 +20,14 @@ Includes authentication serializers for login and user profile management.
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from django.contrib.auth import authenticate
-from django.contrib.auth.models import Group, User
 from jsonschema import Draft202012Validator
 from rest_framework import serializers
 
-from api.permissions import is_admin
-from audit.models import AuditLog
-from core.models import Worker
+from accounts import access
+from core.models import UserProfile, Worker
 from core.workers import driver_catalogue, is_online
 from credentials.models import Credential, CredentialType
-from devices.models import (
-    CollectionGroup,
-    Device,
-    DeviceGroup,
-    DeviceGroupPermission,
-    DeviceGroupRole,
-    DeviceType,
-    GroupDeviceGroupRole,
-    Manufacturer,
-    UserDeviceGroupRole,
-)
+from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, ROLES, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy, validate_cron
 from storage.models import StorageTarget
@@ -112,6 +99,13 @@ class CollectionGroupSerializer(serializers.ModelSerializer):
         return obj.device_count
 
 
+class SummarySerializer(serializers.Serializer):
+    """What users other than global administrators see of shared reference data: enough to choose it."""
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
 class RetentionPolicySerializer(serializers.ModelSerializer):
     """Serializes RetentionPolicy model for API responses"""
 
@@ -149,20 +143,6 @@ class BackupScheduleSerializer(serializers.ModelSerializer):
         return {name: getattr(self.instance, name) for name in names}
 
 
-class AdminOnlyFieldsMixin:
-    """Drop fields that carry secrets from responses to non-administrators."""
-
-    admin_only_fields: tuple[str, ...] = ()
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        request = self.context.get('request')
-        if not is_admin(getattr(request, 'user', None)):
-            for field in self.admin_only_fields:
-                data.pop(field, None)
-        return data
-
-
 class CredentialTypeSerializer(serializers.ModelSerializer):
     """Serializes CredentialType model for API responses"""
 
@@ -171,14 +151,29 @@ class CredentialTypeSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class CredentialSerializer(AdminOnlyFieldsMixin, serializers.ModelSerializer):
-    """Serializes Credential model; the secret data is admin-only."""
+class CredentialSerializer(serializers.ModelSerializer):
+    """A credential. ``data`` is write-only: responses list which keys are set (``data_keys``).
 
-    admin_only_fields = ('data',)
+    On update, a key sent as null or "" keeps its stored value, and omitting ``data`` keeps it all.
+    """
+
+    data = serializers.JSONField(write_only=True, required=False)
+    data_keys = serializers.SerializerMethodField()
+    device_group_name = serializers.CharField(source='device_group.name', read_only=True, default=None)
 
     class Meta:
         model = Credential
-        fields = '__all__'
+        fields = ['id', 'name', 'credential_type', 'device_group', 'device_group_name', 'data', 'data_keys']
+
+    def get_data_keys(self, obj) -> list[str]:
+        return sorted(key for key, value in (obj.data or {}).items() if value not in (None, ''))
+
+    def validate_data(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Credential data must be a JSON object.')
+        stored = self.instance.data if self.instance is not None else {}
+        merged = {key: stored.get(key) if item in (None, '') else item for key, item in value.items()}
+        return {key: item for key, item in merged.items() if item is not None}
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -225,283 +220,13 @@ class DeviceSerializer(serializers.ModelSerializer):
         ]
 
     def get_user_permissions(self, obj):
-        """Return Django permission codes for this device's group: view, modify, view_backups, backup_now"""
-        from devices.permissions import user_get_device_group_django_permissions
-
+        """The flags the requesting user holds on this device's group."""
         request = self.context.get('request')
-        if not request or not request.user or not obj.device_group:
-            return []
-        return list(user_get_device_group_django_permissions(request.user, obj.device_group))
+        return access.flags_on(request.user, obj.device_group_id) if request else []
 
     def get_backup_method_display(self, obj):
         driver = drivers(self.context).get(obj.backup_method)
         return driver['name'] if driver else obj.backup_method
-
-
-class UserSerializer(serializers.ModelSerializer):
-    """
-    Serializes User model with JIT detection
-
-    Fields:
-        - id, username, email, first_name, last_name (from User model)
-        - is_jit (computed): Whether user is from SSO/LDAP (Just-In-Time provisioned)
-
-    Methods:
-        - get_is_jit(obj): Determines if user is from external identity provider
-    """
-
-    is_jit = serializers.SerializerMethodField(read_only=True)
-    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
-
-    class Meta:
-        model = User
-        fields = [
-            'id',
-            'username',
-            'email',
-            'first_name',
-            'last_name',
-            'is_staff',
-            'is_superuser',
-            'is_jit',
-            'password',
-        ]
-
-    def get_is_jit(self, obj):
-        """
-        Detect if user is from Just-In-Time provisioning (SSO/LDAP)
-
-        Args:
-            obj (User): User instance to check
-
-        Returns:
-            bool: True if user has no usable password or has social auth relation
-        """
-        try:
-            has_social = hasattr(obj, 'social_auth') and obj.social_auth.exists()
-        except Exception:
-            has_social = False
-        return (not obj.has_usable_password()) or has_social
-
-    def create(self, validated_data):
-        """Create a new user with password"""
-        password = validated_data.pop('password', None)
-        user = User.objects.create(**validated_data)
-        if password:
-            user.set_password(password)
-            user.save()
-        return user
-
-
-class GroupSerializer(serializers.ModelSerializer):
-    """
-    Serializes Django auth Group with user membership and device group permissions.
-
-    Read-only:
-        - users: Users in this group
-        - device_group_permissions: Device group Django permissions (view, modify, view_backups, backup_now)
-
-    Write-only:
-        - user_ids: List of user IDs to set as group members
-        - permission_ids: List of permission IDs to assign (device group permissions)
-    """
-
-    users = serializers.SerializerMethodField(read_only=True)
-    device_group_permissions = serializers.SerializerMethodField(read_only=True)
-    user_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
-    permission_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
-
-    class Meta:
-        model = Group
-        fields = ['id', 'name', 'users', 'device_group_permissions', 'user_ids', 'permission_ids']
-
-    def get_users(self, obj):
-        return UserSerializer(obj.user_set.all(), many=True).data
-
-    def get_device_group_permissions(self, obj):
-        """Return only device group related Django permissions (those starting with dg_)"""
-        perms = obj.permissions.filter(codename__startswith='dg_').select_related('content_type')
-        return [{'id': p.id, 'codename': p.codename, 'name': p.name} for p in perms]
-
-    def create(self, validated_data):
-        user_ids = validated_data.pop('user_ids', [])
-        permission_ids = validated_data.pop('permission_ids', [])
-        group = Group.objects.create(name=validated_data.get('name'))
-        self._set_users(group, user_ids)
-        self._set_permissions(group, permission_ids)
-        return group
-
-    def update(self, instance, validated_data):
-        user_ids = validated_data.pop('user_ids', None)
-        permission_ids = validated_data.pop('permission_ids', None)
-        name = validated_data.get('name')
-        if name is not None:
-            instance.name = name
-            instance.save()
-        if user_ids is not None:
-            instance.user_set.clear()
-            if user_ids:
-                users = User.objects.filter(id__in=user_ids)
-                for u in users:
-                    u.groups.add(instance)
-        if permission_ids is not None:
-            instance.permissions.clear()
-            self._set_permissions(instance, permission_ids)
-        return instance
-
-    def _set_users(self, group, user_ids):
-        if user_ids:
-            users = User.objects.filter(id__in=user_ids)
-            for u in users:
-                u.groups.add(group)
-
-    def _set_permissions(self, group, permission_ids):
-        if permission_ids:
-            from django.contrib.auth.models import Permission
-
-            perms = Permission.objects.filter(id__in=permission_ids, codename__startswith='dg_')
-            group.permissions.set(perms)
-
-
-class AuditLogSerializer(serializers.ModelSerializer):
-    """
-    Serializes AuditLog model with actor name resolution
-
-    Fields:
-        - actor_name (computed): Username of the user who triggered the action
-    """
-
-    actor_name = serializers.CharField(source='actor.username', read_only=True)
-
-    class Meta:
-        model = AuditLog
-        fields = '__all__'
-
-
-# ===== Authentication Serializers =====
-
-
-class LoginSerializer(serializers.Serializer):
-    """
-    Validates login credentials and authenticates user
-
-    Inputs:
-        - username (str): Username or email
-        - password (str): User password
-
-    Outputs (if valid):
-        - user (User): Authenticated user instance
-
-    Raises:
-        ValidationError: If credentials are invalid
-    """
-
-    username = serializers.CharField(write_only=True, help_text='Username or email address')
-    password = serializers.CharField(write_only=True, style={'input_type': 'password'}, help_text='User password')
-
-    def validate(self, data):
-        """
-        Authenticate user against provided credentials
-
-        Args:
-            data (dict): username and password from request
-
-        Returns:
-            dict: Validated data with authenticated user instance
-
-        Raises:
-            ValidationError: If authentication fails
-        """
-        user = authenticate(username=data['username'], password=data['password'])
-        if not user:
-            raise serializers.ValidationError('Invalid credentials')
-        data['user'] = user
-        return data
-
-
-# ===== User Profile Serializers =====
-
-
-class UserUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for updating editable user profile fields
-
-    Editable Fields:
-        - email: User email address
-        - first_name: User's first name
-        - last_name: User's last name
-
-    Note: Username and password are not editable via this serializer
-    """
-
-    class Meta:
-        model = User
-        fields = ['email', 'first_name', 'last_name']
-        extra_kwargs = {
-            'email': {'required': False},
-            'first_name': {'required': False},
-            'last_name': {'required': False},
-        }
-
-
-class ChangePasswordSerializer(serializers.Serializer):
-    """
-    Validates password change request for local users
-
-    Inputs:
-        - current_password (str): User's current password
-        - new_password (str): New password (min 8 characters)
-
-    Restrictions:
-        - Cannot change password if user is from SSO/LDAP (JIT provisioned)
-        - Current password must match existing password
-        - New password must be at least 8 characters
-    """
-
-    current_password = serializers.CharField(
-        write_only=True, style={'input_type': 'password'}, help_text='Current password for verification'
-    )
-    new_password = serializers.CharField(
-        write_only=True, style={'input_type': 'password'}, help_text='New password (minimum 8 characters)'
-    )
-
-    def validate(self, data):
-        """
-        Validate password change request
-
-        Args:
-            data (dict): current_password and new_password from request
-
-        Returns:
-            dict: Validated password data
-
-        Raises:
-            ValidationError: If validation fails (JIT user, wrong current password, weak password)
-        """
-        user = self.context['request'].user
-        # Block password changes for JIT/SSO users
-        try:
-            has_social = hasattr(user, 'social_auth') and user.social_auth.exists()
-        except Exception:
-            has_social = False
-        if (not user.has_usable_password()) or has_social:
-            raise serializers.ValidationError(
-                'Password is managed by external identity provider and cannot be changed.'
-            )
-        if not user.check_password(data['current_password']):
-            raise serializers.ValidationError({'current_password': 'Current password is incorrect'})
-        if len(data['new_password']) < 8:
-            raise serializers.ValidationError({'new_password': 'New password must be at least 8 characters'})
-        return data
-
-
-from core.models import DashboardLayout, UserProfile
-
-
-class DashboardLayoutSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DashboardLayout
-        fields = ['id', 'user', 'is_default', 'layout', 'updated_at']
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -510,101 +235,19 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ['theme', 'created_at', 'updated_at']
 
 
-# ===== Device Group RBAC Serializers =====
-
-
-class DeviceGroupPermissionSerializer(serializers.ModelSerializer):
-    """Serializes DeviceGroupPermission model for API responses"""
-
-    class Meta:
-        model = DeviceGroupPermission
-        fields = ['id', 'code', 'description']
-
-
-class DeviceGroupRoleSerializer(serializers.ModelSerializer):
-    """Serializes DeviceGroupRole model with nested permissions"""
-
-    permissions = DeviceGroupPermissionSerializer(many=True, read_only=True)
-    device_group_name = serializers.CharField(source='device_group.name', read_only=True)
-
-    class Meta:
-        model = DeviceGroupRole
-        fields = ['id', 'name', 'device_group', 'device_group_name', 'permissions', 'created_at']
-
-
 class DeviceGroupSerializer(serializers.ModelSerializer):
-    """Serializes DeviceGroup model with nested roles and user-level modify flag"""
+    """A device group, with the flags the requesting user holds on it."""
 
-    roles = DeviceGroupRoleSerializer(many=True, read_only=True)
-    can_modify = serializers.SerializerMethodField()
     user_permissions = serializers.SerializerMethodField()
+    device_count = serializers.IntegerField(source='device_set.count', read_only=True)
 
     class Meta:
         model = DeviceGroup
-        fields = ['id', 'name', 'description', 'roles', 'created_at', 'updated_at', 'can_modify', 'user_permissions']
-
-    def get_can_modify(self, obj):
-        """Return True if the requesting user has the group's Django modify permission"""
-        request = self.context.get('request')
-        if not request:
-            return False
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if user.is_staff or user.is_superuser:
-            return True
-        try:
-            link = obj.django_permissions
-        except Exception:
-            return False
-        perm = link.perm_modify
-        perm_code = f'{perm.content_type.app_label}.{perm.codename}'
-        return user.has_perm(perm_code)
+        fields = ['id', 'name', 'description', 'device_count', 'created_at', 'updated_at', 'user_permissions']
 
     def get_user_permissions(self, obj):
-        """Return Django permission codes for this device group: view, modify, view_backups, backup_now"""
-        from devices.permissions import user_get_device_group_django_permissions
-
         request = self.context.get('request')
-        if not request or not request.user:
-            return []
-        return list(user_get_device_group_django_permissions(request.user, obj))
-
-
-class UserDeviceGroupRoleSerializer(serializers.ModelSerializer):
-    """Serializes user-device group role assignments.
-
-    ``role`` is written as a primary key and read back as the nested role.
-    """
-
-    username = serializers.CharField(source='user.username', read_only=True)
-
-    class Meta:
-        model = UserDeviceGroupRole
-        fields = ['id', 'user', 'username', 'role']
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['role'] = DeviceGroupRoleSerializer(instance.role, context=self.context).data
-        return data
-
-
-class GroupDeviceGroupRoleSerializer(serializers.ModelSerializer):
-    """Serializes auth group-device group role assignments.
-
-    ``role`` is written as a primary key and read back as the nested role.
-    """
-
-    auth_group_name = serializers.CharField(source='auth_group.name', read_only=True)
-
-    class Meta:
-        model = GroupDeviceGroupRole
-        fields = ['id', 'auth_group', 'auth_group_name', 'role']
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['role'] = DeviceGroupRoleSerializer(instance.role, context=self.context).data
-        return data
+        return access.flags_on(request.user, obj) if request else []
 
 
 class DeviceDetailedSerializer(serializers.ModelSerializer):
@@ -650,13 +293,9 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
         ]
 
     def get_user_permissions(self, obj):
-        """Return Django permission codes for this device's group: view, modify, view_backups, backup_now"""
-        from devices.permissions import user_get_device_group_django_permissions
-
+        """The flags the requesting user holds on this device's group."""
         request = self.context.get('request')
-        if not request or not request.user or not obj.device_group:
-            return []
-        return list(user_get_device_group_django_permissions(request.user, obj.device_group))
+        return access.flags_on(request.user, obj.device_group_id) if request else []
 
     def get_backup_method_display(self, obj):
         driver = drivers(self.context).get(obj.backup_method)
@@ -688,7 +327,8 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             'schedule',
             'credential',
         ]
-        extra_kwargs = {'device_group': {'required': True, 'allow_null': False}}
+        # Explicit, so a device never falls out of its group by omission; null (ungrouped) is for global admins.
+        extra_kwargs = {'device_group': {'required': True, 'allow_null': True}}
 
     def validate_backup_method(self, value):
         # An unchanged method stays valid even while no collector offers it.
@@ -707,6 +347,13 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             errors = driver_param_errors(params, driver['params_schema'])
             if errors:
                 raise serializers.ValidationError({'driver_params': errors})
+        # A device uses a global credential, or one owned by its own group.
+        credential = attrs.get('credential', getattr(self.instance, 'credential', None))
+        group = attrs.get('device_group', getattr(self.instance, 'device_group', None))
+        if credential is not None and credential.device_group_id not in (None, getattr(group, 'pk', None)):
+            raise serializers.ValidationError(
+                {'credential': "Use a global credential or one owned by the device's group."}
+            )
         return attrs
 
     def to_representation(self, instance):

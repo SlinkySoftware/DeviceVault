@@ -57,7 +57,9 @@
             outlined
             label="Device group"
             :disable="!canModify"
-            :rules="[required('Device group')]"
+            :rules="auth.isGlobalAdmin ? [] : [required('Device group')]"
+            :clearable="auth.isGlobalAdmin"
+            :hint="auth.isGlobalAdmin ? 'Ungrouped devices are visible to global administrators only' : undefined"
           />
           <q-select
             v-model="form.collection_group"
@@ -122,7 +124,7 @@
           />
           <q-select
             v-model="form.credential"
-            :options="credentials"
+            :options="credentialOptions"
             option-value="id"
             option-label="name"
             emit-value
@@ -130,6 +132,7 @@
             clearable
             outlined
             label="Credential"
+            hint="A global credential, or one owned by the device group"
             :disable="!canModify"
           />
           <q-select
@@ -263,18 +266,24 @@ function onMethodChange(key: string): void {
   form.value.driver_params = keepKnown(form.value.driver_params, method?.params_schema)
 }
 
-const canModify = computed(() => (device.value ? device.value.user_permissions.includes('modify') : true))
+const canModify = computed(() => (device.value ? device.value.user_permissions.includes('admin') : true))
 const title = computed(() => {
   if (!isEdit.value) return 'Add Device'
   return `${canModify.value ? 'Configure' : 'View'} ${device.value?.name ?? 'Device'}`
 })
 
-// Devices can only be placed in groups the user may modify (the current group
+// Devices can only be placed in groups the user administers (the current group
 // is always listed so an existing device displays correctly).
 const groupOptions = computed(() =>
   deviceGroups.value.filter(
-    (group) =>
-      auth.isAdmin || group.user_permissions.includes('modify') || group.id === device.value?.device_group?.id,
+    (group) => group.user_permissions.includes('admin') || group.id === device.value?.device_group?.id,
+  ),
+)
+
+// A device uses a global credential or one owned by its own group.
+const credentialOptions = computed(() =>
+  credentials.value.filter(
+    (credential) => credential.device_group === null || credential.device_group === form.value.device_group,
   ),
 )
 

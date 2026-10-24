@@ -9,25 +9,27 @@ import { createAuthGuard, safeRedirect } from './guard'
 
 type AuthStore = ReturnType<typeof useAuthStore>
 
-const ADMIN = { is_staff: true, is_superuser: false } as CurrentUser
-const MEMBER = { is_staff: false, is_superuser: false } as CurrentUser
+const MEMBER = { is_global_admin: false, grants: { '1': ['view'] } } as unknown as CurrentUser
+const GROUP_ADMIN = { is_global_admin: false, grants: { '1': ['view', 'admin'] } } as unknown as CurrentUser
+const GLOBAL_ADMIN = { is_global_admin: true, grants: {} } as unknown as CurrentUser
 
-function fakeAuth(user: CurrentUser | null, token: string | null = user ? 'token' : null): AuthStore {
+/** A fake store; `session` is who the API reports as signed in (null: nobody). */
+function fakeAuth(user: CurrentUser | null, session: CurrentUser | null = user): AuthStore {
   const auth = {
-    token,
     user,
     get isAuthenticated() {
-      return this.token !== null
+      return this.user !== null
     },
-    get isAdmin() {
-      return !!this.user && (this.user.is_staff || this.user.is_superuser)
+    get isGlobalAdmin() {
+      return !!this.user?.is_global_admin
     },
-    get isSuperuser() {
-      return !!this.user?.is_superuser
+    get administersAny() {
+      return !!this.user && (this.user.is_global_admin || Object.values(this.user.grants).some((f) => f.includes('admin')))
     },
     fetchUser: vi.fn(async () => {
-      auth.user = MEMBER
-      return MEMBER
+      if (!session) throw new Error('401')
+      auth.user = session
+      return session
     }),
     clear: vi.fn(),
   }
@@ -56,33 +58,43 @@ describe('safeRedirect', () => {
 })
 
 describe('auth guard', () => {
-  it('sends anonymous users to login, remembering where they were going', async () => {
+  it('sends users without a session to login, remembering where they were going', async () => {
     expect(await navigate(fakeAuth(null), route('/devices'))).toEqual({
       name: 'login',
       query: { redirect: '/devices' },
     })
   })
 
-  it('lets anonymous users reach public routes', async () => {
-    expect(await navigate(fakeAuth(null), route('/login', { public: true }, 'login'))).toBe(true)
-  })
+  it('picks up an existing session after a reload', async () => {
+    const auth = fakeAuth(null, MEMBER)
 
-  it('keeps non-admins out of admin routes', async () => {
-    expect(await navigate(fakeAuth(MEMBER), route('/vaultadmin/users', { requiresAdmin: true }))).toEqual({
-      name: 'dashboard',
-    })
-  })
-
-  it('keeps admins who are not superusers out of superuser routes', async () => {
-    expect(await navigate(fakeAuth(ADMIN), route('/vaultadmin/workers', { requiresSuperuser: true }))).toEqual({
-      name: 'dashboard',
-    })
-  })
-
-  it('loads the user before checking roles when only a token is cached', async () => {
-    const auth = fakeAuth(null, 'token')
-
-    expect(await navigate(auth, route('/vaultadmin/users', { requiresAdmin: true }))).toEqual({ name: 'dashboard' })
+    expect(await navigate(auth, route('/devices'))).toBe(true)
     expect(auth.fetchUser).toHaveBeenCalledOnce()
+  })
+
+  it('lets anyone reach public routes without asking the API', async () => {
+    const auth = fakeAuth(null)
+
+    expect(await navigate(auth, route('/login', { public: true }, 'login'))).toBe(true)
+    expect(auth.fetchUser).not.toHaveBeenCalled()
+  })
+
+  it('keeps group administrators out of global admin routes', async () => {
+    expect(await navigate(fakeAuth(GROUP_ADMIN), route('/vaultadmin/users', { requiresGlobalAdmin: true }))).toEqual({
+      name: 'dashboard',
+    })
+  })
+
+  it('lets group administrators reach group admin routes, but not members', async () => {
+    const credentials = route('/vaultadmin/credentials', { requiresGroupAdmin: true })
+
+    expect(await navigate(fakeAuth(GROUP_ADMIN), credentials)).toBe(true)
+    expect(await navigate(fakeAuth(MEMBER), credentials)).toEqual({ name: 'dashboard' })
+  })
+
+  it('lets global administrators everywhere', async () => {
+    expect(await navigate(fakeAuth(GLOBAL_ADMIN), route('/vaultadmin/workers', { requiresGlobalAdmin: true }))).toBe(
+      true,
+    )
   })
 })

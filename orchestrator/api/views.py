@@ -17,90 +17,72 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from django.conf import settings
-from django.contrib.auth.models import Group, Permission, User
-from rest_framework import decorators, mixins, response, status, viewsets
-from rest_framework.authtoken.models import Token
+from django.db.models import ProtectedError
+from rest_framework import decorators, mixins, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
-from api.permissions import IsAdmin, IsAdminOrReadOnly
-from audit.models import AuditLog
+from accounts import access
+from accounts.access import HasDeviceGroupPermission, IsGlobalAdmin, IsGlobalAdminOrReadOnly
 from backups.api import device_backup_now
 from core import workers as worker_registry
-from core.models import DashboardLayout, Worker
+from core.models import UserProfile, Worker
 from core.workers import driver_catalogue
 from credentials.models import Credential, CredentialType
-from devices.models import (
-    CollectionGroup,
-    Device,
-    DeviceGroup,
-    DeviceGroupRole,
-    DeviceType,
-    GroupDeviceGroupRole,
-    Manufacturer,
-    UserDeviceGroupRole,
-)
-from devices.permissions import user_has_device_group_permission
+from devices.models import CollectionGroup, Device, DeviceType, Manufacturer
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy
 
 from .serializers import (
-    AuditLogSerializer,
     BackupScheduleSerializer,
-    ChangePasswordSerializer,
     CollectionGroupSerializer,
     CredentialSerializer,
     CredentialTypeSerializer,
-    DashboardLayoutSerializer,
     DeviceDetailedSerializer,
-    DeviceGroupRoleSerializer,
     DeviceGroupSerializer,
     DeviceSerializer,
     DeviceTypeSerializer,
     DeviceWriteSerializer,
-    GroupDeviceGroupRoleSerializer,
-    GroupSerializer,
-    LoginSerializer,
     ManufacturerSerializer,
     RetentionPolicySerializer,
-    UserDeviceGroupRoleSerializer,
+    SummarySerializer,
     UserProfileSerializer,
-    UserSerializer,
-    UserUpdateSerializer,
     WorkerApprovalSerializer,
     WorkerSerializer,
 )
 
 
+def protected_conflict(exc: ProtectedError, noun: str) -> response.Response:
+    kinds = sorted({str(obj._meta.verbose_name_plural) for obj in exc.protected_objects})
+    return response.Response(
+        {'error': f'This {noun} is still used by {", ".join(kinds)}.'}, status=status.HTTP_409_CONFLICT
+    )
+
+
 class DeviceTypeViewSet(viewsets.ModelViewSet):
     queryset = DeviceType.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = DeviceTypeSerializer
 
 
 class ManufacturerViewSet(viewsets.ModelViewSet):
     queryset = Manufacturer.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = ManufacturerSerializer
 
 
 class CollectionGroupViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing collection groups
+    """Collection groups: administered by global administrators, readable (as a summary) by everyone.
 
-    Features:
-    - Restricted to superuser only for all operations
-    - Prevents deletion of collection groups that have devices assigned
-    - Returns device count for each collection group
-
-    Permissions:
-    - Only superuser/staff users can access this endpoint
+    Deleting a group that still has devices is refused.
     """
 
     queryset = CollectionGroup.objects.all()
-    serializer_class = CollectionGroupSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
+
+    def get_serializer_class(self):
+        return CollectionGroupSerializer if access.is_global_admin(self.request.user) else SummarySerializer
 
     def perform_update(self, serializer):
         old_queue = serializer.instance.rabbitmq_queue_id
@@ -108,15 +90,15 @@ class CollectionGroupViewSet(viewsets.ModelViewSet):
         if group.rabbitmq_queue_id != old_queue:
             worker_registry.bump_collection_group(group)
 
-    def perform_destroy(self, instance):
-        """Prevent deletion if any devices are assigned to this collection group"""
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
         if instance.device_count > 0:
-            from django.core.exceptions import ValidationError
-
-            raise ValidationError(
-                f'Cannot delete collection group "{instance.name}": {instance.device_count} device(s) are assigned to this group.'
+            return response.Response(
+                {'error': f'"{instance.name}" still has {instance.device_count} device(s).'},
+                status=status.HTTP_409_CONFLICT,
             )
         instance.delete()
+        return response.Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BackupMethodViewSet(viewsets.ViewSet):
@@ -142,18 +124,19 @@ class BackupMethodViewSet(viewsets.ViewSet):
 
 
 class DeviceViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing devices with RBAC support
+    """Devices in the device groups the user can view (a device in another group is a 404).
 
-    Features:
-    - Filters devices based on user's device group access
-    - Respects device group permissions for view/edit operations
-    - Returns user's permissions in device detail
+    Creating, changing and deleting a device needs ``admin`` on its group (on both
+    groups when moving it); ungrouped devices are for global administrators.
+    ``POST {id}/backup_now/`` needs ``backup_now``.
     """
 
-    queryset = Device.objects.all()
     serializer_class = DeviceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasDeviceGroupPermission('view')]
+
+    def get_queryset(self):
+        devices = Device.objects.select_related('device_type', 'manufacturer', 'collection_group', 'device_group')
+        return access.devices_for(self.request.user, 'view', devices)
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -162,52 +145,33 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return DeviceDetailedSerializer
         return DeviceSerializer
 
-    def _require_modify(self, device_group):
-        from devices.permissions import user_has_device_group_django_permission
-
-        user = self.request.user
-        if user.is_staff or user.is_superuser:
-            return
-        if device_group is None or not user_has_device_group_django_permission(user, device_group, 'modify'):
-            raise PermissionDenied('You do not have permission to modify devices in this device group')
+    def _require_admin(self, device_group):
+        if not access.can(self.request.user, 'admin', device_group):
+            if device_group is None:
+                raise PermissionDenied('Only global administrators manage devices that are in no device group.')
+            raise PermissionDenied('You need the "admin" permission on this device group.')
 
     def perform_create(self, serializer):
-        self._require_modify(serializer.validated_data.get('device_group'))
+        self._require_admin(serializer.validated_data.get('device_group'))
         serializer.save()
 
     def perform_update(self, serializer):
-        self._require_modify(serializer.instance.device_group)
+        self._require_admin(serializer.instance.device_group)
         if 'device_group' in serializer.validated_data:
-            self._require_modify(serializer.validated_data['device_group'])
+            self._require_admin(serializer.validated_data['device_group'])
         serializer.save()
 
-    def get_queryset(self):
-        """Devices in groups the user can access."""
-        from devices.permissions import user_get_accessible_device_groups
-
-        user = self.request.user
-        devices = Device.objects.select_related('device_type', 'manufacturer', 'collection_group', 'device_group')
-        if user.is_staff or user.is_superuser:
-            return devices
-        return devices.filter(device_group__in=user_get_accessible_device_groups(user))
-
     def perform_destroy(self, instance):
-        """Check delete permission before deleting"""
-        if not self.request.user.is_staff and not self.request.user.is_superuser:
-            if not instance.device_group:
-                raise PermissionDenied('Device has no device group')
-
-            if not user_has_device_group_permission(self.request.user, instance.device_group, 'delete_device'):
-                raise PermissionDenied('You do not have permission to delete devices in this group')
-
+        self._require_admin(instance.device_group)
         instance.delete()
 
-    @decorators.action(detail=True, methods=['post'])
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('backup_now')])
     def backup_now(self, request, pk=None):
         return device_backup_now(request, self.get_object())
 
 
 @decorators.api_view(['GET'])
+@decorators.permission_classes([IsAuthenticated])
 def timezone_config(request):
     """Return the configured application timezone"""
     from core.timezone_utils import get_timezone_name
@@ -233,7 +197,7 @@ class WorkerViewSet(
 
     queryset = Worker.objects.prefetch_related('collection_groups').select_related('approved_by')
     serializer_class = WorkerSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsGlobalAdmin]
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def perform_update(self, serializer):
@@ -296,130 +260,59 @@ class WorkerViewSet(
 
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
     queryset = RetentionPolicy.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = RetentionPolicySerializer
 
 
 class BackupScheduleViewSet(viewsets.ModelViewSet):
     queryset = BackupSchedule.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = BackupScheduleSerializer
 
 
 class CredentialViewSet(viewsets.ModelViewSet):
-    queryset = Credential.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    """Credentials: global ones (no owner) and those owned by a device group.
+
+    Lists global credentials and those of groups the user administers. Global
+    credentials are written by global administrators, owned ones by the
+    administrators of their group. Secret data is write-only.
+    """
+
     serializer_class = CredentialSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return access.credentials_for(self.request.user, Credential.objects.select_related('device_group'))
+
+    def _require_owner_admin(self, device_group):
+        if not access.can(self.request.user, 'admin', device_group):
+            if device_group is None:
+                raise PermissionDenied('Only global administrators manage global credentials.')
+            raise PermissionDenied('You need the "admin" permission on the owning device group.')
+
+    def perform_create(self, serializer):
+        self._require_owner_admin(serializer.validated_data.get('device_group'))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._require_owner_admin(serializer.instance.device_group)
+        if 'device_group' in serializer.validated_data:
+            new_owner = serializer.validated_data['device_group']
+            self._require_owner_admin(new_owner)
+            # Devices may use only global credentials or their own group's.
+            if new_owner is not None and serializer.instance.device_set.exclude(device_group=new_owner).exists():
+                raise serializers.ValidationError({'device_group': 'Devices outside that group use this credential.'})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._require_owner_admin(instance.device_group)
+        instance.delete()
 
 
 class CredentialTypeViewSet(viewsets.ModelViewSet):
     queryset = CredentialType.objects.all()
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = CredentialTypeSerializer
-
-
-class GroupViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing user groups with label assignments
-
-    Endpoints:
-    - GET /groups/ - List all groups
-    - POST /groups/ - Create new group
-    - GET /groups/{id}/ - Get group details
-    - PATCH /groups/{id}/ - Update group
-    - DELETE /groups/{id}/ - Delete group
-    """
-
-    queryset = Group.objects.all()
-    permission_classes = [IsAdmin]
-    serializer_class = GroupSerializer
-
-    def destroy(self, request, *args, **kwargs):
-        return super().destroy(request, *args, **kwargs)
-
-
-class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [IsAdmin]
-
-    def _is_jit_provisioned(self, user):
-        try:
-            has_social = hasattr(user, 'social_auth') and user.social_auth.exists()
-        except Exception:
-            has_social = False
-        return (not user.has_usable_password()) or has_social
-
-    def _is_local_auth_enabled(self):
-        return settings.DEVICEVAULT_LOCAL_AUTH_ENABLED
-
-    def create(self, request, *args, **kwargs):
-        """Create a new user - only allowed if local auth is enabled"""
-        # Only staff can create users
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-
-        # Check if local auth is enabled
-        if not self._is_local_auth_enabled():
-            return response.Response(
-                {
-                    'detail': 'User creation is only allowed when local authentication is enabled. Configure local auth in settings first.'
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        """Update a user - only staff can do this"""
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-
-        user = self.get_object()
-        if self._is_jit_provisioned(user):
-            return response.Response(
-                {'detail': 'Profile is managed by external identity provider and cannot be edited.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        return super().update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        """Delete a user - only staff can do this"""
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-
-        user = self.get_object()
-        # Prevent deleting the last superuser
-        if user.is_superuser and User.objects.filter(is_superuser=True).count() == 1:
-            return response.Response(
-                {'detail': 'Cannot delete the last superuser account.'}, status=status.HTTP_403_FORBIDDEN
-            )
-
-        return super().destroy(request, *args, **kwargs)
-
-    @decorators.action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated])
-    def update_details(self, request, pk=None):
-        # Only staff can edit other users
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        user = self.get_object()
-        if self._is_jit_provisioned(user):
-            return response.Response(
-                {'detail': 'Profile is managed by external identity provider and cannot be edited.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        serializer = UserUpdateSerializer(instance=user, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return response.Response(UserSerializer(user).data, status=status.HTTP_200_OK)
-        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = AuditLog.objects.all().order_by('-created_at')
-    permission_classes = [IsAdmin]
-    serializer_class = AuditLogSerializer
 
 
 @decorators.api_view(['GET'])
@@ -437,322 +330,42 @@ def health(request):
 
 
 @decorators.api_view(['GET'])
+@decorators.permission_classes([IsAuthenticated])
 def onboarding(request):
     # Configuration is supplied by the deployment environment, so an
     # orchestrator that is serving requests is configured by definition.
     return response.Response({'configured': True})
 
 
-class AuthConfigView(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        local_enabled = settings.DEVICEVAULT_LOCAL_AUTH_ENABLED
-        auth_type = 'Local' if local_enabled else None
-
-        return response.Response({'providers': ['Local'], 'local_enabled': local_enabled, 'auth_type': auth_type})
-
-
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            token, created = Token.objects.get_or_create(user=user)
-            user_serializer = UserSerializer(user)
-            return response.Response({'token': token.key, 'user': user_serializer.data}, status=status.HTTP_200_OK)
-        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        request.user.auth_token.delete()
-        return response.Response({'message': 'Logged out successfully'}, status=status.HTTP_200_OK)
-
-
-class UserInfoView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def _is_jit_provisioned(self, user):
-        # Heuristic: users from SSO/LDAP typically have unusable passwords
-        # and may have social_auth relations. Local users have usable passwords.
-        try:
-            has_social = hasattr(user, 'social_auth') and user.social_auth.exists()
-        except Exception:
-            has_social = False
-        return (not user.has_usable_password()) or has_social
-
-    def get(self, request):
-        serializer = UserSerializer(request.user)
-        editable = not self._is_jit_provisioned(request.user)
-        # Determine flags based on group membership
-        # is_admin: staff users or members of 'Application Admin' group
-        is_admin = request.user.is_staff or request.user.groups.filter(name__iexact='Application Admin').exists()
-        # ignore_tags: no longer supported via custom group model; default to False
-        ignore_tags = False
-        return response.Response(
-            {**serializer.data, 'editable': editable, 'is_admin': is_admin, 'ignore_tags': ignore_tags},
-            status=status.HTTP_200_OK,
-        )
-
-    def patch(self, request):
-        if self._is_jit_provisioned(request.user):
-            return response.Response(
-                {'detail': 'Profile is managed by external identity provider and cannot be edited.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        serializer = UserUpdateSerializer(instance=request.user, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            # Return updated details with editable flag
-            data = UserSerializer(request.user).data
-            data['editable'] = True
-            return response.Response(data, status=status.HTTP_200_OK)
-        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ChangePasswordView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            request.user.set_password(serializer.validated_data['new_password'])
-            request.user.save()
-            return response.Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
-        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class DashboardLayoutView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        # Try to get user's layout, fall back to default
-        layout = DashboardLayout.objects.filter(user=request.user).first()
-        if not layout:
-            layout = DashboardLayout.objects.filter(is_default=True, user__isnull=True).first()
-        if not layout:
-            # Return empty default layout
-            return response.Response({'layout': [], 'is_default': False}, status=status.HTTP_200_OK)
-        serializer = DashboardLayoutSerializer(layout)
-        return response.Response(serializer.data, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        # Save or update user's layout
-        layout, created = DashboardLayout.objects.get_or_create(user=request.user, is_default=False)
-        layout.layout = request.data.get('layout', [])
-        layout.save()
-        serializer = DashboardLayoutSerializer(layout)
-        return response.Response(serializer.data, status=status.HTTP_200_OK)
-
-
-class DashboardDefaultLayoutView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        # Get default layout (admin only)
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        layout = DashboardLayout.objects.filter(is_default=True, user__isnull=True).first()
-        if not layout:
-            return response.Response({'layout': [], 'is_default': True}, status=status.HTTP_200_OK)
-        serializer = DashboardLayoutSerializer(layout)
-        return response.Response(serializer.data, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        # Save default layout (admin only)
-        if not request.user.is_staff:
-            return response.Response({'detail': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        layout, created = DashboardLayout.objects.get_or_create(is_default=True, user__isnull=True)
-        layout.layout = request.data.get('layout', [])
-        layout.save()
-        serializer = DashboardLayoutSerializer(layout)
-        return response.Response(serializer.data, status=status.HTTP_200_OK)
-
-
 class UserPreferencesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Get user preferences (theme)
-        from core.models import UserProfile
-
-        profile, created = UserProfile.objects.get_or_create(user=request.user)
-        serializer = UserProfileSerializer(profile)
-        return response.Response(serializer.data, status=status.HTTP_200_OK)
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        return response.Response(UserProfileSerializer(profile).data, status=status.HTTP_200_OK)
 
     def patch(self, request):
-        # Update user preferences
-        from core.models import UserProfile
-
-        profile, created = UserProfile.objects.get_or_create(user=request.user)
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
         serializer = UserProfileSerializer(profile, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return response.Response(serializer.data, status=status.HTTP_200_OK)
-        return response.Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# ===== Device Group RBAC ViewSets =====
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return response.Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class DeviceGroupViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing device groups
+    """Device groups the user can view; creating, renaming and deleting them is for global administrators.
 
-    Endpoints:
-    - GET /device-groups/ - List all device groups
-    - POST /device-groups/ - Create new device group (admin only)
-    - GET /device-groups/{id}/ - Get device group details
-    - PATCH /device-groups/{id}/ - Update device group
-    - DELETE /device-groups/{id}/ - Delete device group
+    A group that still has devices or owns credentials cannot be deleted.
     """
 
-    queryset = DeviceGroup.objects.all()
     serializer_class = DeviceGroupSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsGlobalAdminOrReadOnly]
 
     def get_queryset(self):
-        """Only return device groups the user can access via any Django device-group permission"""
-        from devices.permissions import user_get_accessible_device_groups
+        return access.visible_device_groups(self.request.user)
 
-        if self.request.user.is_staff or self.request.user.is_superuser:
-            return DeviceGroup.objects.all()
-        return user_get_accessible_device_groups(self.request.user)
-
-    def perform_create(self, serializer):
-        obj = serializer.save()
-        # Ensure Django permissions exist for this device group
-        from devices.models import DeviceGroupDjangoPermissions
-
-        DeviceGroupDjangoPermissions.ensure_for_group(obj)
-
-    def perform_update(self, serializer):
-        instance = self.get_object()
-        old_name = instance.name
-        obj = serializer.save()
-        if old_name != obj.name:
-            from devices.models import DeviceGroupDjangoPermissions
-
-            try:
-                link = obj.django_permissions
-            except DeviceGroupDjangoPermissions.DoesNotExist:
-                link = DeviceGroupDjangoPermissions.ensure_for_group(obj)
-            link.rename_to(obj.name)
-
-    def perform_destroy(self, instance):
-        # pre_delete signal enforces membership restriction
-        # If deletion allowed, also clean up associated Django role groups
-        # pre_delete signal will raise ValidationError if blocked. Proceed with deletion.
-        return super().perform_destroy(instance)
-
-
-class DeviceGroupRoleViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing device group roles
-
-    Endpoints:
-    - GET /device-group-roles/ - List all roles
-    - POST /device-group-roles/ - Create new role (admin only)
-    - GET /device-group-roles/{id}/ - Get role details
-    - PATCH /device-group-roles/{id}/ - Update role
-    - DELETE /device-group-roles/{id}/ - Delete role
-    """
-
-    queryset = DeviceGroupRole.objects.all()
-    serializer_class = DeviceGroupRoleSerializer
-    permission_classes = [IsAdmin]
-
-    def get_queryset(self):
-        """Only return roles for device groups the user has access to"""
-        from devices.permissions import user_get_accessible_device_groups
-
-        if self.request.user.is_staff or self.request.user.is_superuser:
-            return DeviceGroupRole.objects.all()
-
-        accessible_groups = user_get_accessible_device_groups(self.request.user)
-        return DeviceGroupRole.objects.filter(device_group__in=accessible_groups)
-
-
-class DeviceGroupPermissionViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for retrieving Django auth permissions for device groups
-
-    Endpoints:
-    - GET /device-group-permissions/ - List all device group Django permissions
-    - GET /device-group-permissions/{id}/ - Get permission details
-
-    These are the 4 auto-created Django auth permissions per device group:
-    - Can View
-    - Can Modify
-    - Can View Backups
-    - Can Backup Now
-
-    Only superusers can access this endpoint.
-    """
-
-    queryset = Permission.objects.filter(codename__startswith='dg_').order_by('codename')
-    permission_classes = [IsAdmin]
-
-    def get_queryset(self):
-        """Return Django auth permissions with dg_ prefix"""
-        return Permission.objects.filter(codename__startswith='dg_').order_by('codename')
-
-    def list(self, request, *args, **kwargs):
-        """Return simplified permission list"""
-        queryset = self.get_queryset()
-        data = [{'id': p.id, 'codename': p.codename, 'name': p.name} for p in queryset]
-        return response.Response(data)
-
-    def retrieve(self, request, pk=None, *args, **kwargs):
-        """Return single permission details"""
+    def destroy(self, request, *args, **kwargs):
         try:
-            permission = Permission.objects.get(pk=pk, codename__startswith='dg_')
-            data = {'id': permission.id, 'codename': permission.codename, 'name': permission.name}
-            return response.Response(data)
-        except Permission.DoesNotExist:
-            return response.Response({'error': 'Permission not found'}, status=status.HTTP_404_NOT_FOUND)
-
-
-class UserDeviceGroupRoleViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for assigning device group roles to users
-
-    Endpoints:
-    - GET /user-device-group-roles/ - List assignments
-    - POST /user-device-group-roles/ - Create new assignment (admin only)
-    - DELETE /user-device-group-roles/{id}/ - Remove assignment
-    """
-
-    queryset = UserDeviceGroupRole.objects.all()
-    serializer_class = UserDeviceGroupRoleSerializer
-    permission_classes = [IsAdmin]
-
-    def get_queryset(self):
-        qs = super().get_queryset().select_related('role__device_group')
-        user = self.request.query_params.get('user')
-        return qs.filter(user_id=user) if user else qs
-
-
-class GroupDeviceGroupRoleViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for assigning device group roles to auth groups
-
-    Endpoints:
-    - GET /group-device-group-roles/ - List assignments
-    - POST /group-device-group-roles/ - Create new assignment (admin only)
-    - DELETE /group-device-group-roles/{id}/ - Remove assignment
-    """
-
-    queryset = GroupDeviceGroupRole.objects.all()
-    serializer_class = GroupDeviceGroupRoleSerializer
-    permission_classes = [IsAdmin]
-
-    def get_queryset(self):
-        qs = super().get_queryset().select_related('role__device_group')
-        auth_group = self.request.query_params.get('auth_group')
-        return qs.filter(auth_group_id=auth_group) if auth_group else qs
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            return protected_conflict(exc, 'device group')

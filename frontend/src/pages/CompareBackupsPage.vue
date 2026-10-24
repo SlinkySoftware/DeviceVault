@@ -13,8 +13,8 @@
       v-else-if="older && newer"
       :left="older.content"
       :right="newer.content"
-      :left-title="`A · ${formatDateTime(older.meta.created_at)}`"
-      :right-title="`B · ${formatDateTime(newer.meta.created_at)}`"
+      :left-title="`A · ${formatDateTime(older.job.created_at)}`"
+      :right-title="`B · ${formatDateTime(newer.job.created_at)}`"
     />
   </PageCard>
 </template>
@@ -25,28 +25,18 @@ import { useRoute } from 'vue-router'
 
 import { apiErrorMessage } from '@/api/client'
 import { backupJobsApi } from '@/api/endpoints'
-import type { BackupJob } from '@/api/types'
+import type { ComparedBackup } from '@/api/types'
 import DiffView from '@/components/DiffView.vue'
 import PageCard from '@/components/PageCard.vue'
 import { formatDateTime } from '@/utils/datetime'
 
-interface Side {
-  meta: BackupJob
-  content: string
-}
-
 const route = useRoute()
 const deviceId = computed(() => Number(route.params.id))
 
-const older = ref<Side | null>(null)
-const newer = ref<Side | null>(null)
+const older = ref<ComparedBackup | null>(null)
+const newer = ref<ComparedBackup | null>(null)
 const loading = ref(true)
 const error = ref('')
-
-async function loadSide(id: string): Promise<Side> {
-  const [meta, content] = await Promise.all([backupJobsApi.get(id), backupJobsApi.contentText(id)])
-  return { meta, content }
-}
 
 onMounted(async () => {
   const a = typeof route.query.a === 'string' ? route.query.a : ''
@@ -57,9 +47,9 @@ onMounted(async () => {
     return
   }
   try {
-    const sides = await Promise.all([loadSide(a), loadSide(b)])
-    sides.sort((x, y) => new Date(x.meta.created_at).getTime() - new Date(y.meta.created_at).getTime())
-    ;[older.value, newer.value] = sides
+    const { a: first, b: second } = await backupJobsApi.compare(a, b)
+    const swap = new Date(first.job.created_at).getTime() > new Date(second.job.created_at).getTime()
+    ;[older.value, newer.value] = swap ? [second, first] : [first, second]
   } catch (exc) {
     error.value = apiErrorMessage(exc, 'Failed to load backups for comparison')
   } finally {

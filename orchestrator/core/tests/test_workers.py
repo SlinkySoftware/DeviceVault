@@ -1,6 +1,4 @@
 import pytest
-from django.contrib.auth.models import User
-from rest_framework.test import APIClient
 
 from core import workers
 from core.models import Worker
@@ -117,14 +115,12 @@ def test_revocation_sends_an_empty_assignment(db, worker_keys, published):
     assert (last['status'], last['queues'], last['version']) == (STATUS_REVOKED, [], 2)
 
 
-def test_renaming_a_group_queue_reassigns_its_collectors(db, approved_collector, published):
+def test_renaming_a_group_queue_reassigns_its_collectors(db, approved_collector, published, admin_client):
     group = CollectionGroup.objects.create(name='DMZ', rabbitmq_queue_id='dmz')
     worker = approved_collector(groups=[group])
-    admin = APIClient()
-    admin.force_authenticate(User.objects.create_user('admin', password='x', is_staff=True))
     published.clear()
 
-    resp = admin.patch(f'/api/collection-groups/{group.id}/', {'rabbitmq_queue_id': 'dmz2'}, format='json')
+    resp = admin_client.patch(f'/api/collection-groups/{group.id}/', {'rabbitmq_queue_id': 'dmz2'}, format='json')
 
     assert resp.status_code == 200
     assert assignments(published, worker)[-1]['queues'] == ['collector.group.dmz2']
@@ -146,10 +142,8 @@ def test_driver_catalogue_only_counts_approved_collectors(db, worker_keys, appro
 
 
 @pytest.fixture
-def admin():
-    client = APIClient()
-    client.force_authenticate(User.objects.create_user('admin', password='x', is_staff=True))
-    return client
+def admin(admin_client):
+    return admin_client
 
 
 def test_admin_approves_a_worker_through_the_api(db, admin, worker_keys, published):

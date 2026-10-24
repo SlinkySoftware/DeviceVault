@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24 and are **proposed**, awaiting sign-off.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phase 8 is implemented, phases 9-10 are **proposed**.
 
 ## 1. Goals
 
@@ -114,7 +114,9 @@ Orchestrator secrets (Django secret, master key, vault private keys, signing key
 
 ### 4.4 Authentication, authorization and audit (phases 8-10)
 
-Status: **Proposed** (2026-10-24). Replaces the current role-based device-group RBAC and the staff/superuser admin check.
+Status: phase 8 **implemented** (2026-10-24); phases 9-10 **proposed**. Replaces the role-based device-group RBAC and the staff/superuser admin check.
+
+Phase 8 notes: the `provider`/`external_id` fields of `UserGroup`, break-glass, and the `DV_LOCAL_AUTH_ENABLED` sign-in restriction arrive with providers in phase 9 (until then the setting only blocks creating local users). Contents, downloads and diffs are separate endpoints (`backups/<id>/content/`, `download/`, `compare/?a=&b=`), so each is checked and audited on its own. Credential data is write-only for everyone; a key sent as null keeps its stored value. Shared reference data that is not secret (types, manufacturers, schedules, retention policies) is readable in full; collection groups and storage targets are a summary for anyone but global admins. Sign-in failures are counted from the audit log, so throttling is shared by every node.
 
 #### Concepts
 

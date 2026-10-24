@@ -1,5 +1,4 @@
 import pytest
-from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
 from devices.models import Device, DeviceGroup, DeviceType
@@ -15,25 +14,15 @@ def device(db):
     )
 
 
-def _client_for(user):
-    client = APIClient()
-    client.force_authenticate(user)
-    return client
-
-
-def test_staff_can_delete_device(device):
-    staff = User.objects.create_user('staff', password='x', is_staff=True)
-
-    resp = _client_for(staff).delete(f'/api/devices/{device.pk}/')
+def test_global_admin_can_delete_device(device, admin_client):
+    resp = admin_client.delete(f'/api/devices/{device.pk}/')
 
     assert resp.status_code == 204
     assert not Device.objects.filter(pk=device.pk).exists()
 
 
-def test_user_without_group_access_cannot_delete_device(device):
-    user = User.objects.create_user('viewer', password='x')
-
-    resp = _client_for(user).delete(f'/api/devices/{device.pk}/')
+def test_user_without_group_access_cannot_delete_device(device, make_user, client_for):
+    resp = client_for(make_user('viewer')).delete(f'/api/devices/{device.pk}/')
 
     assert resp.status_code == 404
     assert Device.objects.filter(pk=device.pk).exists()

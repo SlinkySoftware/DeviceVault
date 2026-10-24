@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -10,19 +11,13 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 
+from accounts import access
+from accounts.access import HasDeviceGroupPermission
+from audit.log import record
 from backups.content import ContentUnavailable, read_content
 from backups.models import BackupJob
 from core.timezone_utils import get_day_bounds_local, get_timezone_name, local_now
-from devices.models import Device, DeviceGroup
-from devices.permissions import user_get_accessible_device_groups, user_get_device_group_django_permissions
-
-
-def groups_with(user, permission: str):
-    """Device groups in which ``user`` has the given device-group permission."""
-    if user.is_staff or user.is_superuser:
-        return DeviceGroup.objects.all()
-    ids = [g.pk for g in DeviceGroup.objects.all() if permission in user_get_device_group_django_permissions(user, g)]
-    return DeviceGroup.objects.filter(pk__in=ids)
+from devices.models import Device
 
 
 class BackupJobSerializer(serializers.ModelSerializer):
@@ -69,20 +64,20 @@ class JobPagination(PageNumberPagination):
 
 
 class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
-    """Backup jobs of devices the user may view backups of.
+    """Backup jobs of the devices the user can view (``view``: state, history, sizes, errors and logs).
 
-    Paginated (``?page=``, ``?page_size=``). Filters: ``?device=<id>``, ``?state=<state>``. Actions: ``content`` (the
-    backup itself) and ``logs``.
+    Paginated (``?page=``, ``?page_size=``). Filters: ``?device=<id>``, ``?state=<state>``. The backups
+    themselves: ``{id}/content/`` (``view_contents``), ``{id}/download/`` (``download``) and
+    ``compare/?a=<id>&b=<id>`` (``view_contents``, two backups of one device). Each is audited.
     """
 
     serializer_class = BackupJobSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [HasDeviceGroupPermission('view')]
     pagination_class = JobPagination
 
     def get_queryset(self):
-        jobs = BackupJob.objects.select_related('device', 'requested_by', 'storage_target').filter(
-            device__device_group__in=groups_with(self.request.user, 'view_backups')
-        )
+        jobs = BackupJob.objects.select_related('device', 'requested_by', 'storage_target')
+        jobs = jobs.filter(device__in=access.devices_for(self.request.user, 'view'))
         params = self.request.query_params
         if params.get('device'):
             jobs = jobs.filter(device_id=params['device'])
@@ -90,18 +85,64 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
             jobs = jobs.filter(state=params['state'])
         return jobs
 
-    @decorators.action(detail=True, methods=['get'])
-    def content(self, request, pk=None):
-        job = self.get_object()
+    def _audit(self, action: str, job: BackupJob, **details):
+        record(
+            self.request,
+            action,
+            resource=str(job.id),
+            device_group=job.device.device_group_id,
+            details={'device': job.device_id, 'device_name': job.device.name, 'job': str(job.id), **details},
+        )
+
+    def _content(self, job: BackupJob, *, attachment: bool):
         try:
             data = read_content(job)
         except ContentUnavailable as exc:
             return response.Response({'error': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
-        filename = f'{job.device.name}-{job.created_at:%Y%m%d-%H%M%S}{".bin" if job.is_binary else ".cfg"}'
         content_type = 'application/octet-stream' if job.is_binary else 'text/plain; charset=utf-8'
         reply = HttpResponse(data, content_type=content_type)
-        reply['Content-Disposition'] = f'attachment; filename="{filename}"'
+        if attachment:
+            filename = f'{job.device.name}-{job.created_at:%Y%m%d-%H%M%S}{".bin" if job.is_binary else ".cfg"}'
+            reply['Content-Disposition'] = f'attachment; filename="{filename}"'
         return reply
+
+    @decorators.action(detail=True, methods=['get'], permission_classes=[HasDeviceGroupPermission('view_contents')])
+    def content(self, request, pk=None):
+        job = self.get_object()
+        self._audit('backup.view', job)
+        return self._content(job, attachment=False)
+
+    @decorators.action(detail=True, methods=['get'], permission_classes=[HasDeviceGroupPermission('download')])
+    def download(self, request, pk=None):
+        job = self.get_object()
+        self._audit('backup.download', job)
+        return self._content(job, attachment=True)
+
+    @decorators.action(detail=False, methods=['get'], permission_classes=[HasDeviceGroupPermission('view_contents')])
+    def compare(self, request):
+        jobs = self.get_queryset()
+        ids = [request.query_params.get('a'), request.query_params.get('b')]
+        try:
+            pair = [jobs.get(pk=job_id) for job_id in ids]
+        except BackupJob.DoesNotExist, ValueError, DjangoValidationError:
+            return response.Response({'error': 'Choose two backups to compare.'}, status=status.HTTP_404_NOT_FOUND)
+        if pair[0].device_id != pair[1].device_id:
+            return response.Response(
+                {'error': 'Only backups of the same device can be compared.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        for job in pair:
+            self.check_object_permissions(request, job)
+        try:
+            contents = [read_content(job) for job in pair]
+        except ContentUnavailable as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        self._audit('backup.diff', pair[0], other_job=str(pair[1].id))
+        return response.Response(
+            {
+                'a': {'job': BackupJobSerializer(pair[0]).data, 'content': contents[0].decode('utf-8', 'replace')},
+                'b': {'job': BackupJobSerializer(pair[1]).data, 'content': contents[1].decode('utf-8', 'replace')},
+            }
+        )
 
     @decorators.action(detail=True, methods=['get'])
     def logs(self, request, pk=None):
@@ -112,15 +153,19 @@ def device_backup_now(request, device) -> response.Response:
     """POST /api/devices/{id}/backup_now/: queue a backup (or return the one already running)."""
     from backups.jobs import JobError, create_job
 
-    if not (request.user.is_staff or request.user.is_superuser):
-        if not device.device_group or 'backup_now' not in user_get_device_group_django_permissions(
-            request.user, device.device_group
-        ):
-            raise PermissionDenied('You may not start backups of devices in this group')
+    if not access.can(request.user, 'backup_now', device.device_group_id):
+        raise PermissionDenied('You may not start backups of devices in this group')
     try:
         job, created = create_job(device, user=request.user)
     except JobError as exc:
         return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    record(
+        request,
+        'backup.start',
+        resource=str(job.id),
+        device_group=device.device_group_id,
+        details={'device': device.pk, 'device_name': device.name, 'job': str(job.id), 'created': created},
+    )
     return response.Response(
         {'job': BackupJobSerializer(job).data, 'created': created},
         status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
@@ -132,11 +177,12 @@ ACTIVITY_WINDOWS = {'1h': timedelta(hours=1), '24h': timedelta(hours=24), '7d': 
 
 
 @decorators.api_view(['GET'])
+@decorators.permission_classes([IsAuthenticated])
 def dashboard_stats(request):
     days = min(max(int(request.GET.get('days', 7)), 1), 90)
     now = timezone.now()
     since = now - timedelta(hours=24)
-    devices = Device.objects.filter(device_group__in=user_get_accessible_device_groups(request.user))
+    devices = access.devices_for(request.user, 'view', Device.objects.all())
     jobs = BackupJob.objects.filter(device__in=devices)
     recent = jobs.filter(finished_at__gte=since)
 
@@ -183,9 +229,10 @@ def dashboard_stats(request):
 
 
 @decorators.api_view(['GET'])
+@decorators.permission_classes([IsAuthenticated])
 def recent_backup_activity(request):
     window = ACTIVITY_WINDOWS.get(request.GET.get('time_filter', '1h'), ACTIVITY_WINDOWS['1h'])
-    devices = Device.objects.filter(device_group__in=user_get_accessible_device_groups(request.user))
+    devices = access.devices_for(request.user, 'view', Device.objects.all())
     jobs = (
         BackupJob.objects.filter(device__in=devices, created_at__gte=timezone.now() - window)
         .select_related('device')

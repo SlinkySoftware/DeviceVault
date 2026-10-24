@@ -109,18 +109,23 @@ export interface CredentialType {
   name: string
 }
 
+/** A credential; its data is write-only, so only the names of the keys that are set come back. */
 export interface Credential {
   id: Id
   name: string
   credential_type: Id
-  /** Only returned to administrators. */
-  data?: JsonObject
+  /** Owning device group; null for a global credential. */
+  device_group: Id | null
+  device_group_name: string | null
+  data_keys: string[]
 }
 
 export interface CredentialWrite {
   name: string
   credential_type: Id | null
-  data: JsonObject
+  device_group: Id | null
+  /** On update, a key sent as null keeps its stored value; omit data to keep it all. */
+  data?: JsonObject
 }
 
 export interface BackupMethod {
@@ -139,17 +144,18 @@ export interface BackupMethod {
 
 // --- Devices -----------------------------------------------------------------
 
-export type DevicePermission = 'view' | 'modify' | 'view_backups' | 'backup_now'
+/** Permissions on a device group, weakest first (see accounts/models.py). */
+export type GrantFlag = 'view' | 'backup_now' | 'view_contents' | 'download' | 'admin'
 
 export interface DeviceGroup {
   id: Id
   name: string
   description: string
-  roles: DeviceGroupRole[]
+  device_count: number
   created_at: IsoDateTime
   updated_at: IsoDateTime
-  can_modify: boolean
-  user_permissions: DevicePermission[]
+  /** What the signed-in user holds on this group. */
+  user_permissions: GrantFlag[]
 }
 
 interface DeviceBase {
@@ -170,7 +176,8 @@ interface DeviceBase {
   storage_target: string | null
   credential: Id | null
   schedule: Id | null
-  user_permissions: DevicePermission[]
+  /** What the signed-in user holds on this device's group. */
+  user_permissions: GrantFlag[]
 }
 
 /** List representation. */
@@ -239,6 +246,16 @@ export interface BackupJob {
   duration_ms: number | null
 }
 
+export interface ComparedBackup {
+  job: BackupJob
+  content: string
+}
+
+export interface BackupComparison {
+  a: ComparedBackup
+  b: ComparedBackup
+}
+
 export interface BackupNowResponse {
   job: BackupJob
   /** False if the device already had a backup in progress, which `job` is. */
@@ -264,21 +281,22 @@ export interface LogEntry {
 
 // --- Users and access ------------------------------------------------------
 
+export type UserSource = 'local' | 'external'
+
 export interface User {
   id: Id
   username: string
   email: string
   first_name: string
   last_name: string
-  is_staff: boolean
-  is_superuser: boolean
-  is_jit: boolean
-}
-
-export interface CurrentUser extends User {
-  /** False for users managed by an external identity provider. */
-  editable: boolean
-  is_admin: boolean
+  is_active: boolean
+  source: UserSource
+  /** User groups (ids) the user is a member of. */
+  groups: Id[]
+  group_names: string[]
+  is_global_admin: boolean
+  last_login: IsoDateTime | null
+  date_joined: IsoDateTime
 }
 
 export interface UserCreate {
@@ -287,54 +305,90 @@ export interface UserCreate {
   first_name: string
   last_name: string
   password: string
+  is_active: boolean
+  groups: Id[]
 }
+
+export type UserUpdate = Pick<User, 'email' | 'first_name' | 'last_name' | 'is_active' | 'groups'>
 
 export type UserDetails = Pick<User, 'email' | 'first_name' | 'last_name'>
 
-export interface DjangoPermission {
+/** The signed-in user and their effective permissions. */
+export interface CurrentUser {
   id: Id
-  codename: string
-  name: string
-}
-
-export interface AuthGroup {
-  id: Id
-  name: string
-  users: Pick<User, 'id' | 'username' | 'email'>[]
-  device_group_permissions: DjangoPermission[]
-}
-
-export interface AuthGroupWrite {
-  name: string
-  user_ids: Id[]
-  permission_ids: Id[]
-}
-
-export interface DeviceGroupRole {
-  id: Id
-  name: string
-  device_group: Id
-  device_group_name: string
-  permissions: Id[]
-  created_at: IsoDateTime | null
-}
-
-export interface UserRoleAssignment {
-  id: Id
-  user: Id
   username: string
-  role: DeviceGroupRole
+  email: string
+  first_name: string
+  last_name: string
+  source: UserSource
+  /** False for users managed by an external identity provider. */
+  editable: boolean
+  is_global_admin: boolean
+  /** Device group id -> flags held on it. */
+  grants: Record<string, GrantFlag[]>
+}
+
+export type GrantFlags = Record<GrantFlag, boolean>
+
+export interface Grant extends GrantFlags {
+  device_group: Id
+  device_group_name?: string
+}
+
+export interface UserGroup {
+  id: Id
+  name: string
+  description: string
+  is_global_admin: boolean
+  /** The built-in Administrators group: cannot be deleted or lose its flag. */
+  is_builtin: boolean
+  source: 'internal' | 'external'
+  members: Id[]
+  member_names: string[]
+  grants: Grant[]
+  created_at: IsoDateTime
+  updated_at: IsoDateTime
+}
+
+export type UserGroupWrite = Pick<UserGroup, 'name' | 'description' | 'is_global_admin' | 'members' | 'grants'>
+
+export type AuditOutcome = 'success' | 'failure' | 'denied'
+
+export interface AuditEntry {
+  id: Id
+  created_at: IsoDateTime
+  actor: Id | null
+  actor_name: string
+  action: string
+  resource: string
+  outcome: AuditOutcome
+  details: JsonObject
+  ip: string | null
+  user_agent: string
+  device_group: Id | null
+  device_group_name: string | null
+}
+
+/** Filters of the audit log; `action` is a prefix such as `auth.`. */
+export interface AuditQuery {
+  page?: number | undefined
+  page_size?: number | undefined
+  action?: string | undefined
+  outcome?: AuditOutcome | undefined
+  actor?: string | undefined
+  search?: string | undefined
+  device_group?: Id | undefined
+  since?: string | undefined
+  until?: string | undefined
 }
 
 export interface AuthConfig {
   providers: string[]
   local_enabled: boolean
-  auth_type: string | null
 }
 
 export interface LoginResponse {
-  token: string
-  user: User
+  user: CurrentUser
 }
 
 // --- Settings ----------------------------------------------------------------

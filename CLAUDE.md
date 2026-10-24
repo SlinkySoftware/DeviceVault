@@ -27,7 +27,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   (persistent worker id and keys), `agent` (registration and assignments), `trust`
   (task signature checks). Must not import Django (a test enforces it).
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
-  sending tasks) plus apps: `api`, `audit`, `backups`, `core`, `credentials`, `devices`,
+  sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
+  `access.py` decides every authorization; `sessions.py` timeouts; `api.py` sign-in, users and
+  user groups), `api`, `audit` (`log.record(...)`), `backups`, `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `storage` (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
@@ -37,10 +39,10 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   must not import the worker package.
 - `frontend/`: Quasar 2 / Vue 3 SPA in TypeScript. Talks to same-origin `/api` (nginx in
   production, the Quasar dev proxy in development). `src/api/` (axios client,
-  `types.ts` DTOs, `endpoints.ts` typed calls), `src/stores/` (Pinia: auth, theme,
-  settings), `src/router/` (routes + guard), `src/composables/` (`useCrud`,
+  `types.ts` DTOs, `endpoints.ts` typed calls), `src/stores/` (Pinia: auth with `can(flag, group)`,
+  theme, settings), `src/router/` (routes + guard), `src/composables/` (`useCrud`,
   `useNotify`, `usePolling`), `src/components/`, `src/pages/` (admin pages under
-  `pages/admin/`), `src/utils/` (datetime, diff, rules...). Original artwork lives in
+  `pages/admin/`), `src/utils/` (datetime, diff, grants, rules...). Original artwork lives in
   `frontend/branding/`; `public/` holds only web-sized assets.
 - `docker/`: `Dockerfile` (targets `orchestrator`, `worker`, `dev`), `web.Dockerfile`,
   entrypoints (`dv-orchestrator <role>`, `dv-worker`).
@@ -53,9 +55,12 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   pytest-django, live next to the code in `<app>/tests/`, and use the `db` fixture.
 - API changes: update `api/serializers.py` and `api/views.py` together, and keep
   `frontend/src/api/types.ts` and `endpoints.ts` in step.
-- API permissions: every view states its `permission_classes` (`IsAdmin`,
-  `IsAdminOrReadOnly` in `api/permissions.py`, or device-group checks); never rely on
-  the UI hiding something. Secrets in serializers use `AdminOnlyFieldsMixin`.
+- API permissions: every view states its `permission_classes` (`IsGlobalAdmin`,
+  `IsGlobalAdminOrReadOnly` or `HasDeviceGroupPermission('<flag>')` from `accounts/access.py`,
+  a test enforces it), and querysets are filtered with `access.devices_for(...)` and friends so
+  hidden objects 404; never rely on the UI hiding something, and never check `is_staff`/`is_superuser`.
+  Authentication is the Django session (CSRF on unsafe methods). Secrets in serializers are
+  write-only for everyone. Audit security-relevant actions with `audit.log.record(...)`.
 - Frontend: `<script setup lang="ts">` only (ESLint enforces it); strict TypeScript
   (`make frontend-lint` runs ESLint and vue-tsc). Import via the `@/` alias. Admin CRUD
   pages use `useCrud` + `FormDialog` + `PageCard`; show API errors with

@@ -17,11 +17,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from django.contrib import admin
 from django.urls import include, path
 from rest_framework import routers
 
+from accounts import api as accounts_api
 from api import views
+from audit import api as audit_api
 from backups import api as backup_api
 from monitoring import api as monitoring_api
 from storage import api as storage_api
@@ -31,27 +32,22 @@ router.register(r'device-types', views.DeviceTypeViewSet)
 router.register(r'manufacturers', views.ManufacturerViewSet)
 router.register(r'collection-groups', views.CollectionGroupViewSet)
 router.register(r'backup-methods', views.BackupMethodViewSet, basename='backup-methods')
-router.register(r'devices', views.DeviceViewSet)
+router.register(r'devices', views.DeviceViewSet, basename='devices')
 router.register(r'backups', backup_api.BackupJobViewSet, basename='backups')
 router.register(r'retention-policies', views.RetentionPolicyViewSet)
 router.register(r'backup-schedules', views.BackupScheduleViewSet)
 router.register(r'storage-targets', storage_api.StorageTargetViewSet, basename='storage-targets')
 router.register(r'storage-drivers', storage_api.StorageDriverViewSet, basename='storage-drivers')
-router.register(r'credentials', views.CredentialViewSet)
+router.register(r'credentials', views.CredentialViewSet, basename='credentials')
 router.register(r'credential-types', views.CredentialTypeViewSet)
-router.register(r'groups', views.GroupViewSet)
-router.register(r'device-groups', views.DeviceGroupViewSet)
-router.register(r'device-group-roles', views.DeviceGroupRoleViewSet)
-router.register(r'device-group-permissions', views.DeviceGroupPermissionViewSet)
-router.register(r'user-device-group-roles', views.UserDeviceGroupRoleViewSet)
-router.register(r'group-device-group-roles', views.GroupDeviceGroupRoleViewSet)
-router.register(r'users', views.UserViewSet, basename='users')
-router.register(r'audit-logs', views.AuditLogViewSet)
+router.register(r'device-groups', views.DeviceGroupViewSet, basename='device-groups')
+router.register(r'users', accounts_api.UserViewSet, basename='users')
+router.register(r'user-groups', accounts_api.UserGroupViewSet, basename='user-groups')
+router.register(r'audit-logs', audit_api.AuditLogViewSet, basename='audit-logs')
 router.register(r'workers', views.WorkerViewSet)
 router.register(r'flower-endpoints', monitoring_api.FlowerEndpointViewSet)
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/health/', views.health),
     path('api/flower-auth/', monitoring_api.flower_auth),
@@ -59,11 +55,11 @@ urlpatterns = [
     path('api/dashboard-stats/', backup_api.dashboard_stats),
     path('api/recent-backup-activity/', backup_api.recent_backup_activity),
     path('api/timezone/', views.timezone_config),
-    path('api/auth/config/', views.AuthConfigView.as_view()),
-    path('api/auth/login/', views.LoginView.as_view()),
-    path('api/auth/logout/', views.LogoutView.as_view()),
-    path('api/auth/user/', views.UserInfoView.as_view()),
-    path('api/auth/change-password/', views.ChangePasswordView.as_view()),
+    path('api/auth/config/', accounts_api.AuthConfigView.as_view()),
+    path('api/auth/csrf/', accounts_api.CsrfView.as_view()),
+    path('api/auth/login/', accounts_api.LoginView.as_view()),
+    path('api/auth/logout/', accounts_api.LogoutView.as_view()),
+    path('api/auth/user/', accounts_api.CurrentUserView.as_view()),
+    path('api/auth/change-password/', accounts_api.ChangePasswordView.as_view()),
     path('api/user/preferences/', views.UserPreferencesView.as_view()),
-    # Dashboard layout/customization disabled; fixed layout only
 ]

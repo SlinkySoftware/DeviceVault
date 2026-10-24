@@ -1,6 +1,4 @@
 import pytest
-from django.contrib.auth.models import User
-from rest_framework.test import APIClient
 
 from core import workers
 from core.signing import public_key
@@ -12,10 +10,8 @@ ORCHESTRATOR = lambda: signing.public_key_from_b64(public_key())  # noqa: E731
 
 
 @pytest.fixture
-def admin(db):
-    client = APIClient()
-    client.force_authenticate(User.objects.create_user('admin', password='x', is_staff=True))
-    return client
+def admin(admin_client):
+    return admin_client
 
 
 @pytest.fixture

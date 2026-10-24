@@ -47,10 +47,29 @@ docker compose up -d                           # UI on :8080 (DV_HTTP_PORT)
 docker compose --profile flower up -d          # ... plus Flower (see Flower below)
 ```
 
-The `migrate` service runs first: it applies migrations and creates the
-bootstrap admin from `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` if that user does
-not exist. Put a TLS-terminating proxy or load balancer in front of `web`, and
-set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
+The `migrate` service runs first: it applies migrations, creates the built-in
+**Administrators** user group (global administrators) and, if that user does
+not exist, the bootstrap admin from `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` as
+a member of it. Put a TLS-terminating proxy or load balancer in front of `web`,
+and set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
+
+### Users and access
+
+Sign-in uses a server-side session: an HttpOnly cookie (`Secure` unless
+`DV_DEBUG`, so serve the UI over HTTPS), stored in the database so every
+orchestrator node shares it. Sessions end after `DV_SESSION_IDLE_MIN` without
+use and `DV_SESSION_MAX_HOURS` after sign-in. Repeated failed sign-ins lock out a
+username or client address for `DV_LOGIN_LOCKOUT_MIN`; the client address is the
+last `X-Forwarded-For` hop, which the `web` service adds.
+
+Access comes only from **user groups** (Admin Settings > User Groups): each
+grants its members permissions on device groups (View Status, Backup Now, View
+Contents, Download, Group Admin), and a group flagged global administrator holds
+everything, including application administration. A new user has no access
+until a group grants some. Django's `is_staff`/`is_superuser` flags mean
+nothing, and there is no `/admin/` site. Admin Settings > Access shows the whole
+matrix, and Admin Settings > Audit Log records sign-ins, access changes, backup
+content views, diffs and downloads, and refused requests.
 
 With `DV_DB_ENGINE=sqlite` the database lives in the stack's `data` volume, which
 limits you to a single orchestrator node (see [High availability](#6-high-availability)).
@@ -272,7 +291,10 @@ secrets). The file takes precedence.
 | `DV_BROKER_API` | none | RabbitMQ management API, for Flower |
 | `DV_FLOWER_URL_PREFIX` | none (`flower/local` in the orchestrator stack) | `flower` service: its path, `flower/<slug>` when proxied |
 | `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` / `DV_ADMIN_EMAIL` | `admin` / required on first run / empty | Bootstrap admin |
-| `DV_LOCAL_AUTH_ENABLED` | `true` | Allow local user accounts |
+| `DV_LOCAL_AUTH_ENABLED` | `true` | Allow creating local user accounts |
+| `DV_SESSION_IDLE_MIN` | `60` | A session unused this long ends |
+| `DV_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in, used or not |
+| `DV_LOGIN_MAX_FAILURES` / `DV_LOGIN_LOCKOUT_MIN` | `5` / `15` | Failed sign-ins (per username, and per client address) within the window that lock it out for the window |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
 | `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_keys`) |
 | `DV_DATA_KEYS` | required | AES-256 key ring for secrets at rest (`generate_keys`) |

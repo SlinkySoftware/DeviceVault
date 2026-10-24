@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // HTTP client for the orchestrator API, always served same-origin under /api
 // (nginx in production, the Quasar dev-server proxy in development).
+// Authentication is the server's HttpOnly session cookie; unsafe requests echo
+// Django's CSRF cookie in X-CSRFToken (axios does this for same-origin calls).
 
 import axios from 'axios'
-
-import { readString } from '@/utils/storage'
-
-export const TOKEN_KEY = 'authToken'
 
 export const http = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  xsrfCookieName: 'csrftoken',
+  xsrfHeaderName: 'X-CSRFToken',
 })
 
 let unauthorizedHandler: (() => void) | null = null
@@ -19,12 +19,6 @@ let unauthorizedHandler: (() => void) | null = null
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
 }
-
-http.interceptors.request.use((config) => {
-  const token = readString(TOKEN_KEY)
-  if (token) config.headers.Authorization = `Token ${token}`
-  return config
-})
 
 http.interceptors.response.use(
   (response) => response,
