@@ -7,7 +7,8 @@ other only through RabbitMQ and Redis.
 
 > **Status:** pre-release and under active restructuring. The target design and the
 > phased delivery plan are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). This README
-> describes what works today.
+> describes what works today. Ideas for what comes next, ranked into quick wins and larger
+> changes, are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What works today
 
@@ -97,7 +98,7 @@ orchestrator/   Django project: API, worker events, result consumers
 frontend/       Quasar/Vue single-page app (TypeScript)
 docker/         Image definitions and entrypoints
 deploy/         Compose stacks: infra, orchestrator, worker, dev
-docs/           Architecture, delivery plan and deployment guide
+docs/           Architecture, delivery plan, roadmap and deployment guide
 Makefile        Single entry point for development and CI
 ```
 

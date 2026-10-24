@@ -346,6 +346,8 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 13 | `feat/push-tftp` | TFTP write-only listener and the per-device TFTP opt-in | yes |
 | later | — | Retention enforcement, new vendor drivers, Redis Sentinel | — |
 
+Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
+
 Each backend phase ships its own UI changes, so master never has a broken frontend.
 
 ## 11. Decisions log
