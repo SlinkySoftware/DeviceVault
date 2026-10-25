@@ -23,7 +23,7 @@ from core import keys
 
 TOKEN_RE = re.compile(r'\{\{secret:[0-9a-f]{32}\}\}')
 # Bump when tokenising changes, so the catch-up pass rebuilds every document.
-TOKEN_VERSION = 1
+TOKEN_VERSION = 2
 
 # Cisco type 7: a Vigenère-style XOR with this fixed key, from the offset in the first two digits.
 _CISCO7_KEY = b'dsfd;kfoA,.iyewrkldJKDHSUBsgvca69834ncxv9873254k;fg87'
@@ -80,12 +80,25 @@ def token(value: str, key: bytes | None = None) -> str:
     return f'{{{{secret:{digest}}}}}'
 
 
+def secret_value(value: str, encoding: str | None = None) -> str:
+    """What a secret's token is made from: the value unquoted (``"a \\"b"`` is ``a "b``), decoded if it can be."""
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        value = re.sub(r'\\(.)', r'\1', value[1:-1])
+    decoder = DECODERS.get(encoding or '')
+    decoded = decoder(value) if decoder else None
+    return decoded if decoded is not None else value
+
+
+def secret_tokens(value: str) -> set[str]:
+    """The tokens a typed secret value may be indexed as: itself, or the plaintext of a type 7 value."""
+    key = keys.search_token_key()[1]
+    return {token(secret_value(value), key), *(token(secret_value(value, name), key) for name in DECODERS)}
+
+
 def _token_for(value: str, encoding: str | None, key: bytes) -> str:
     if TOKEN_RE.fullmatch(value):
         return value  # already a token (a result line pasted back as a query)
-    decoder = DECODERS.get(encoding or '')
-    decoded = decoder(value) if decoder else None
-    return token(decoded if decoded is not None else value, key)
+    return token(secret_value(value, encoding), key)
 
 
 def tokenise_line(line: str, patterns: SecretPatterns, key: bytes | None = None) -> str:

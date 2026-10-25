@@ -722,7 +722,8 @@ export type FlowerEndpointWrite = Pick<FlowerEndpoint, 'name' | 'slug' | 'url' |
 
 // --- Config search ----------------------------------------------------------------
 
-export type SearchMode = 'text' | 'regex'
+/** `secret`: a bare secret value, found wherever it is used; never echoed back, recorded or saved. */
+export type SearchMode = 'text' | 'regex' | 'secret'
 
 export interface SearchQuery {
   q: string
@@ -763,3 +764,18 @@ export interface SearchResponse {
   /** Devices with a searchable backup that the search covered. */
   searched_devices: number
 }
+
+/** A search the user keeps to run again (private to them; never a secret search). */
+export interface SavedSearch {
+  id: Id
+  name: string
+  query: string
+  mode: Exclude<SearchMode, 'secret'>
+  device_group: Id | null
+  device_group_name: string | null
+  driver: string
+  created_at: string
+  updated_at: string
+}
+
+export type SavedSearchWrite = Pick<SavedSearch, 'name' | 'query' | 'mode' | 'device_group' | 'driver'>

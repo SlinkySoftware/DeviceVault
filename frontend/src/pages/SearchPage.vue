@@ -9,11 +9,21 @@
           dense
           autofocus
           clearable
-          :label="form.mode === 'regex' ? 'Regular expression (RE2, per line)' : 'Text (a line typed with its secret in it matches)'"
+          autocomplete="off"
+          :type="form.mode === 'secret' && !showSecret ? 'password' : 'text'"
+          :label="QUERY_LABELS[form.mode]"
           input-class="search-input"
           :maxlength="256"
         >
-          <template #prepend><q-icon name="search" /></template>
+          <template #prepend><q-icon :name="form.mode === 'secret' ? 'key' : 'search'" /></template>
+          <template v-if="form.mode === 'secret'" #append>
+            <q-icon
+              :name="showSecret ? 'visibility_off' : 'visibility'"
+              class="cursor-pointer"
+              :aria-label="showSecret ? 'Hide the value' : 'Show the value'"
+              @click="showSecret = !showSecret"
+            />
+          </template>
         </q-input>
       </div>
       <div class="col-auto">
@@ -25,6 +35,7 @@
           :options="[
             { label: 'Text', value: 'text' },
             { label: 'Regex', value: 'regex' },
+            { label: 'Secret', value: 'secret' },
           ]"
         />
       </div>
@@ -52,10 +63,55 @@
           :options="driverOptions"
         />
       </div>
-      <div class="col-auto">
+      <div class="col-auto row q-gutter-sm">
         <q-btn type="submit" color="primary" icon="search" label="Search" :loading="loading" :disable="!form.q" />
+        <q-btn
+          flat
+          color="primary"
+          icon="bookmark_add"
+          aria-label="Save this search"
+          :disable="!form.q || form.mode === 'secret'"
+          @click="openSave"
+        >
+          <q-tooltip>{{ form.mode === 'secret' ? 'Secret searches are never saved' : 'Save this search' }}</q-tooltip>
+        </q-btn>
+        <q-btn-dropdown flat color="primary" icon="bookmarks" label="Saved" :disable="!saved.length">
+          <q-list dense style="min-width: 260px">
+            <q-item v-for="entry in saved" :key="entry.id" v-close-popup clickable @click="runSaved(entry)">
+              <q-item-section>
+                <q-item-label>{{ entry.name }}</q-item-label>
+                <q-item-label caption class="saved-query">
+                  {{ entry.mode === 'regex' ? '/' + entry.query + '/' : entry.query }}
+                  <span v-if="entry.device_group_name"> · {{ entry.device_group_name }}</span>
+                </q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-btn
+                  flat
+                  round
+                  dense
+                  size="sm"
+                  icon="delete"
+                  color="negative"
+                  :aria-label="`Delete ${entry.name}`"
+                  @click.stop="confirmDelete(entry)"
+                />
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
       </div>
     </q-form>
+
+    <div v-if="form.mode === 'secret'" class="text-caption text-grey q-mt-xs">
+      Finds every line holding this exact value as a secret, on any device: for example a password still in
+      use after it was retired. The value is sent once and never shown, saved or recorded.
+    </div>
+
+    <FormDialog v-model="saveDialog.open" title="Save Search" :saving="saveDialog.saving" @submit="save">
+      <q-input v-model.trim="saveDialog.name" label="Name" outlined autofocus :rules="[required]" :maxlength="128" />
+      <div class="text-caption text-grey">Saved searches are yours alone.</div>
+    </FormDialog>
 
     <div v-if="reply" class="q-mt-md">
       <div class="text-subtitle2 q-mb-sm">
@@ -108,17 +164,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { useQuasar } from 'quasar'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
-import { backupMethodsApi, deviceGroupsApi, searchApi } from '@/api/endpoints'
-import type { BackupMethod, DeviceGroup, SearchQuery, SearchResult } from '@/api/types'
+import { backupMethodsApi, deviceGroupsApi, savedSearchesApi, searchApi } from '@/api/endpoints'
+import type { BackupMethod, DeviceGroup, SavedSearch, SearchMode, SearchQuery, SearchResult } from '@/api/types'
+import FormDialog from '@/components/FormDialog.vue'
 import PageCard from '@/components/PageCard.vue'
 import { useNotify } from '@/composables/useNotify'
 import { useSearchStore } from '@/stores/search'
 import { formatDateTime } from '@/utils/datetime'
+import { required } from '@/utils/rules'
 import { splitSecretTokens } from '@/utils/search'
 
+const QUERY_LABELS: Record<SearchMode, string> = {
+  text: 'Text (a line typed with its secret in it matches)',
+  regex: 'Regular expression (RE2, per line)',
+  secret: 'Secret value (exact and case-sensitive)',
+}
+
+const $q = useQuasar()
 const notify = useNotify()
 // The last search lives in memory, not the URL: a query may hold a secret.
 const store = useSearchStore()
@@ -126,6 +192,9 @@ const form = store.form
 const reply = computed(() => store.reply)
 
 const loading = ref(false)
+const showSecret = ref(false)
+const saved = ref<SavedSearch[]>([])
+const saveDialog = reactive({ open: false, name: '', saving: false })
 const groups = ref<DeviceGroup[]>([])
 const methods = ref<BackupMethod[]>([])
 
@@ -161,7 +230,78 @@ async function submit(): Promise<void> {
   }
 }
 
+// A secret typed in Secret mode is not carried into a visible text search.
+watch(
+  () => form.mode,
+  (mode, previous) => {
+    if (previous === 'secret' && mode !== 'secret') form.q = ''
+    showSecret.value = false
+  },
+)
+
+// Nor is it kept once the page is left (the results, which show only tokens, are).
+onBeforeUnmount(() => {
+  if (form.mode === 'secret') form.q = ''
+})
+
+async function loadSaved(): Promise<void> {
+  try {
+    saved.value = await savedSearchesApi.list()
+  } catch (error) {
+    notify.error(error, 'Failed to load saved searches')
+  }
+}
+
+function openSave(): void {
+  Object.assign(saveDialog, { open: true, name: '', saving: false })
+}
+
+async function save(): Promise<void> {
+  if (form.mode === 'secret') return
+  saveDialog.saving = true
+  try {
+    await savedSearchesApi.create({
+      name: saveDialog.name,
+      query: form.q,
+      mode: form.mode,
+      device_group: form.device_group,
+      driver: form.driver ?? '',
+    })
+    saveDialog.open = false
+    notify.success('Search saved')
+    await loadSaved()
+  } catch (error) {
+    notify.error(error, 'Failed to save the search')
+  } finally {
+    saveDialog.saving = false
+  }
+}
+
+async function runSaved(entry: SavedSearch): Promise<void> {
+  Object.assign(form, { q: entry.query, mode: entry.mode, device_group: entry.device_group, driver: entry.driver || null })
+  await submit()
+}
+
+function confirmDelete(entry: SavedSearch): void {
+  $q.dialog({
+    title: 'Delete Saved Search',
+    message: `Delete the saved search "${entry.name}"?`,
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Delete', color: 'negative' },
+  }).onOk(async () => {
+    try {
+      await savedSearchesApi.remove(entry.id)
+      notify.success('Saved search deleted')
+      await loadSaved()
+    } catch (error) {
+      notify.error(error, 'Failed to delete the saved search')
+    }
+  })
+}
+
 onMounted(async () => {
+  void loadSaved()
   try {
     ;[groups.value, methods.value] = await Promise.all([deviceGroupsApi.list(), backupMethodsApi.list()])
   } catch (error) {
@@ -212,6 +352,10 @@ onMounted(async () => {
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.2);
   font-family: inherit;
+}
+
+.saved-query {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :deep(.search-input) {

@@ -267,6 +267,13 @@ Searches:
 - **Regex**: [RE2 syntax](https://github.com/google/re2/wiki/Syntax), case-insensitive, matched
   against one line at a time (no lookarounds or backreferences). Secrets appear as tokens, so
   `snmp-server community \S+ RW` works, but a regex cannot match a secret's value.
+- **Secret**: a secret's exact value, found wherever it is used as a secret, on any device and
+  in any kind of line: which devices still have the retired TACACS+ key, or reuse a password. A
+  type 7 string is looked for as its plaintext too. The value is not echoed back, and the audit log
+  records only that a secret search ran and how many devices matched.
+
+**Saved searches** keep a text or regex search (with its filters) to run again from the
+**Saved** menu. They are private to the user who saved them; secret searches cannot be saved.
 
 Results list up to 200 devices with their first 20 matching lines; a line links to the backup,
 opened at that line, and secrets show as a *secret* chip. Binary backups and backups over 16 MiB are

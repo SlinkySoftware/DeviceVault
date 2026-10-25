@@ -36,6 +36,8 @@ import type {
   RetentionPolicy,
   RetentionPolicyWrite,
   RetentionPreview,
+  SavedSearch,
+  SavedSearchWrite,
   SearchQuery,
   SearchResponse,
   StorageDriver,
@@ -177,6 +179,9 @@ export const searchApi = {
   /** The latest backups of devices the user may read (needs view_contents). A POST: queries may hold secrets. */
   search: async (query: SearchQuery) => (await http.post<SearchResponse>('/search/', query)).data,
 }
+
+/** The signed-in user's own saved searches. */
+export const savedSearchesApi = resource<SavedSearch, SavedSearchWrite>('/saved-searches/')
 
 // --- Users and access ------------------------------------------------------------
 
