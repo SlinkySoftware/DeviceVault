@@ -84,6 +84,11 @@ class CollectorDriver(ABC):
     # (timestamps, counters). The orchestrator ignores them when it summarises what
     # changed between backups, including files the device pushed.
     volatile_lines: ClassVar[tuple[str, ...]] = ()
+    # Regexes (re.search, case-insensitive, leading spaces ignored) whose groups are
+    # secret values; config search indexes them only as keyed tokens. An entry is a
+    # pattern or (pattern, encoding) for a reversible encoding the orchestrator knows
+    # (``cisco7``). The first pattern that matches a line applies to it.
+    secret_lines: ClassVar[tuple[str | tuple[str, str], ...]] = ()
 
     @abstractmethod
     def collect(
@@ -107,6 +112,12 @@ class CollectorDriver(ABC):
             'version': cls.version,
             'is_binary': cls.is_binary,
             'volatile_lines': list(cls.volatile_lines),
+            'secret_lines': [
+                {'pattern': pattern, 'encoding': encoding}
+                for pattern, encoding in (
+                    (entry, None) if isinstance(entry, str) else entry for entry in cls.secret_lines
+                )
+            ],
             'params_schema': cls.Params.model_json_schema(),
         }
 

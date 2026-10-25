@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented. Push collection (unsolicited SCP, SFTP and TFTP uploads, section 7.1, phases 11-13) was added on 2026-10-24; phases 11-13 are implemented. Config search (ROADMAP Q6, section 7.2, phases 16-17) was added on 2026-10-25.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented. Push collection (unsolicited SCP, SFTP and TFTP uploads, section 7.1, phases 11-13) was added on 2026-10-24; phases 11-13 are implemented. Config search (ROADMAP Q6, section 7.2, phases 16-17) was added on 2026-10-25; phase 16 is implemented.
 
 ## 1. Goals
 
@@ -341,9 +341,9 @@ Devices upload their configuration unprompted (for example Cisco `archive` on `w
 
 Only the latest backup is indexed. Searching history is a possible later extension; it would key documents by content so that unchanged backups share one.
 
-**Indexing.** The post-store task (`orchestrator.change_summary`, run by `events`, decision 32) already reads and decrypts the new backup. When search is on, it also builds the device's document from the same bytes, so a backup is read once. The task replaces the document only if its job is newer than the document's (tasks can run out of order). When the summary skips the read (two unencrypted backups with equal hashes), the document just moves to the new job. Binary backups and backups over 16 MiB are not indexed: the device's document is removed rather than left describing an older config, and the job records why. A read that fails is retried like the summary's.
+**Indexing.** The post-store task (`orchestrator.change_summary`, run by `events`, decision 32) already reads and decrypts the new backup. When search is on, it also builds the device's document from the same bytes, so a backup is read once. The task replaces the document only if its job is newer than the document's (tasks can run out of order). When the summary skips the read (two unencrypted backups with equal hashes), the document just moves to the new job. Binary backups and backups over 16 MiB are not indexed: the device's document then has no text and says why (`skipped`), rather than describing an older config, so searches leave it out and the catch-up pass leaves it alone. A read that fails is retried like the summary's.
 
-**Catch-up pass.** Each tick, the scheduler leader queues signed index-only tasks (at most 200 per pass) for devices whose newest stored backup:
+**Catch-up pass.** Every five minutes the scheduler leader queues signed index-only tasks (`orchestrator.search_index`, at most 200 per pass, each device at most once an hour, marked in Redis) for devices whose newest stored backup:
 - has no document (search just turned on, or a failed read), or
 - has a document built with another `token_kid` (data key rotated), or
 - has a document whose `patterns_hash` differs from the current driver catalogue (driver upgraded).
@@ -359,18 +359,18 @@ This makes enabling search, rotating keys and upgrading drivers self-healing, wi
 - Secret patterns apply whatever the device's `strip_volatile` setting is.
 - Cisco IOS starts with SNMP communities, `username ... secret|password`, `enable secret|password`, `key 7`, TACACS+ and RADIUS keys, ISAKMP and IKEv2 pre-shared keys, and BGP neighbour passwords; MikroTik with the `password=`/`secret=`-style export properties. Each driver owns its list.
 
-**Searching.** `GET /api/search/?q=&mode=&device_group=&driver=&limit=`, with `HasDeviceGroupPermission('view_contents')`. The query joins `access.devices_for(user, 'view_contents')`, so hidden devices neither appear nor count. Modes:
+**Searching.** `POST /api/search/` `{q, mode, device_group?, driver?}`, with `HasDeviceGroupPermission('view_contents')`. It is a POST because a query can hold a secret, which must not appear in a URL (access logs, browser history). The query joins `access.devices_for(user, 'view_contents')`, so hidden devices neither appear nor count. Modes:
 - `text`: case-insensitive substring, at least 3 characters (the trigram index needs them). The query goes through each driver's secret patterns (per driver, since their patterns differ) and searches that driver's documents with the result. A whole line with its secret in it therefore matches: `snmp-server community public RO` finds the devices. A secret matches only when typed in full, and case-sensitively.
-- `regex`: RE2 syntax (`google-re2`, linear time, so a query cannot hang the API), matched per line, case-insensitive by default. PostgreSQL first narrows the candidates with `~*` in newline-sensitive mode (`(?n)`) under the statement timeout. RE2 then decides which lines match, and a pattern either engine rejects is a 400. Tokens are part of the text, so `snmp-server community \S+ RW` works; secret values themselves cannot be matched by a regex.
+- `regex`: RE2 syntax (`google-re2`, linear time, so a query cannot hang the API), matched per line, case-insensitive by default. PostgreSQL first narrows the candidates with `~*` in newline-sensitive mode (`(?n)`) under the statement timeout, after translating the RE2 spellings it lacks (`\b`, `\A`, `\z`, named groups); a pattern it still rejects is not pre-filtered. RE2 then decides which lines match, and a pattern RE2 rejects is a 400. Tokens are part of the text, so `snmp-server community \S+ RW` works; secret values themselves cannot be matched by a regex.
 - `secret` (phase 17): the user types a value, the orchestrator tokenises it, and the search returns every line holding that token, on any driver. This finds reuse: "which devices still have the old TACACS key".
 
-Every search runs under a statement timeout (`SET LOCAL statement_timeout`, 5 s) and returns at most 200 devices. Each device comes with its name, group, driver, backup time and job id, the number of matching lines, and up to 20 of them (line number and text, tokens included).
+Every search runs under a statement timeout (`SET LOCAL statement_timeout`, 5 s; on SQLite, which has none, the line matching stops after 10 s) and returns at most 200 devices. Each device comes with its name, group, driver, backup time and job id, the number of matching lines, and up to 20 of them (line number and text, tokens included).
 
-**Audit.** Every search is recorded (`search.query`: mode, filters, the number of devices matched). A text query is recorded in its tokenised form, so a secret typed into it is not written to the log. A secret search records neither the value nor its token.
+**Audit.** Every search is recorded (`search.query`: mode, filters, the number of devices matched and their ids, since results show configuration lines as content views do). A text query is recorded in its tokenised form, so a secret typed into it is not written to the log. A secret search records neither the value nor its token.
 
 **Saved searches (phase 17).** `SavedSearch`: owner, name, query, mode, filters. They are private to their owner and run on demand, a seed for compliance rules (ROADMAP D2). Secret searches cannot be saved, since that would store the value or a token that goes stale at key rotation.
 
-**Frontend.** A Search page, shown when the settings endpoint reports search on and the user holds `view_contents` somewhere. It has a query box, a mode switch (Text, Regex, and Secret with a password input), and group and driver filters. Results are grouped by device, with matching lines and tokens shown as a "secret" chip; each line links to the backup view at that line. Phase 17 adds a saved-search list beside it.
+**Frontend.** A Search page, shown when `GET /api/auth/user/` reports `config_search` and the user holds `view_contents` somewhere. The last search is kept in memory (a Pinia store, cleared at sign-out), never in the URL or browser storage, so going back from a backup shows the same results. It has a query box, a mode switch (Text, Regex, and Secret with a password input), and group and driver filters. Results are grouped by device, with matching lines and tokens shown as a "secret" chip; each line links to the backup view at that line (`?view=<job>&line=<n>` on the device's backups page). Phase 17 adds a saved-search list beside it.
 
 ## 8. HA
 

@@ -6,7 +6,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 ## Ground rules
 
 - **Docker only.** No host Python/Node. Run every tool through `make` (see `Makefile`):
-  `make lint`, `make fmt`, `make test`, `make frontend-lint`, `make frontend-test`,
+  `make lint`, `make fmt`, `make test`, `make test-postgres`, `make frontend-lint`, `make frontend-test`,
   `make frontend-build`, `make lock`, `make dev-up`.
   For ad-hoc commands, use the dev image (`make dev-image` builds it):
   `docker run --rm -v "$PWD":/workspace -u "$(id -u):$(id -g)" -e HOME=/tmp -w /workspace/orchestrator devicevault-dev <cmd>`.
@@ -42,7 +42,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
   `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries), `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
-  `policies`, `push` (receiver settings and refusals; `service.py` builds receiver assignments and
+  `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
+  `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and
   re-sends them when push-enabled devices change, `events.py` turns pushed files into jobs), `storage`
   (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
@@ -107,6 +108,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 - Change summaries (`backups.changes`) run in the `events` process as a signed internal task, never inline in
   event handling. Collector drivers that produce noisy lines set `volatile_lines`, which the orchestrator also uses
   to compare pushed files.
+- Config search (`search`) never indexes a secret value: drivers whose output holds secrets declare `secret_lines`
+  (regex groups, optional `cisco7`-style encodings the orchestrator decodes), and those values are kept only as
+  keyed tokens. Search results are filtered with `access.devices_for(user, 'view_contents')` in the query.
 - Configuration is `DV_*` environment variables read through `devicevault_protocol.env`;
   never add config files. Document new variables in `docs/DEPLOYMENT.md` and the
   relevant `*.env.example`.

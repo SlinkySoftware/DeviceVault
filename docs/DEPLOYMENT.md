@@ -236,6 +236,46 @@ Backups stored before an upgrade have no summary; queue them with
 `docker compose exec api dv-orchestrator manage summarise_changes` (`--device <id>` for one device,
 `--redo` to recompute). It returns at once and the `events` service works through the queue.
 
+### Config search
+
+**Config Search** finds lines in the latest backup of every device whose backups you may read, for
+example which devices still have `ip helper-address 10.0.0.5`. It is **off by default**: set
+`DV_CONFIG_SEARCH=true` on every orchestrator node.
+
+> **What it stores.** To search quickly, the orchestrator keeps the text of each device's latest
+> backup in its database. Everything else there that is sensitive is encrypted (credentials with the
+> data keys, backup content with the vault key), but this text is not: anyone who can read the
+> database can read your configurations. **Secret values are not kept**: the lines collector drivers
+> mark as holding secrets (SNMP communities, passwords, TACACS+/RADIUS and pre-shared keys, routing
+> protocol keys) keep only a keyed hash (HMAC) of the secret, derived from the data key, so a copy of the
+> database alone does not reveal them, though it does show which devices share a secret. Treat the
+> database, and its backups, as holding your configurations.
+
+Turning it on indexes existing backups in the background: the scheduler's leader queues up to 200
+devices every five minutes, and each one's latest backup is read back through its storage worker.
+After that each new backup is indexed when it is stored, from the same read as its change summary.
+Rotating the data key (`DV_DATA_KEYS`, a new first key) or upgrading a collector whose secret patterns
+changed re-indexes the affected devices the same way. Turning it off deletes the index at the next pass.
+`docker compose exec api dv-orchestrator manage reindex_search` rebuilds everything.
+
+Searches:
+
+- **Text**: case-insensitive, any part of a line, at least 3 characters. A secret matches only when
+  typed in full, case and all, within its line from the start: `snmp-server community public RO`
+  finds devices whose community is `public`; `public` on its own does not. Cisco type 7 values also
+  match their plaintext (`password 7 cisco`).
+- **Regex**: [RE2 syntax](https://github.com/google/re2/wiki/Syntax), case-insensitive, matched
+  against one line at a time (no lookarounds or backreferences). Secrets appear as tokens, so
+  `snmp-server community \S+ RW` works, but a regex cannot match a secret's value.
+
+Results list up to 200 devices with their first 20 matching lines; a line links to the backup,
+opened at that line, and secrets show as a *secret* chip. Binary backups and backups over 16 MiB are
+not searched. Every search is audited (`search.query`) with any secret typed into it hashed.
+
+On PostgreSQL a trigram index (`pg_trgm`, created by `migrate`; the database owner can create it on
+PostgreSQL 13 or later) keeps searches fast; each search may run for 5 seconds. SQLite scans every
+document, which suits the small installations it is for.
+
 ### Retention
 
 Under **Admin Settings > Retention Policies**, a policy sets how long the backups of the devices
@@ -469,6 +509,7 @@ secrets). The file takes precedence.
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
 | `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules (and renews its lease) |
 | `DV_RETENTION_INTERVAL_MIN` | `60` | How often the scheduler's leader applies retention policies |
+| `DV_CONFIG_SEARCH` | `false` | Config search: keeps the latest backup of each device, secrets hashed, in the database (see *Config search*) |
 
 ### Worker
 

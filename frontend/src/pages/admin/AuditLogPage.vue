@@ -122,6 +122,7 @@ const ACTION_OPTIONS = [
   { label: 'Refused requests', value: 'access.' },
   { label: 'Push receiver settings', value: 'receiver.' },
   { label: 'Refused pushes', value: 'push.' },
+  { label: 'Config searches', value: 'search.' },
 ]
 const OUTCOME_OPTIONS: { label: string; value: AuditOutcome }[] = [
   { label: 'Success', value: 'success' },

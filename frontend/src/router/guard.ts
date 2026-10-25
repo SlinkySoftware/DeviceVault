@@ -36,6 +36,7 @@ export function createAuthGuard(getAuth: () => AuthStore): NavigationGuardWithTh
     }
     if (to.meta.requiresGlobalAdmin && !auth.isGlobalAdmin) return { name: 'dashboard' }
     if (to.meta.requiresGroupAdmin && !auth.administersAny) return { name: 'dashboard' }
+    if (to.meta.requiresSearch && !auth.searchAvailable) return { name: 'dashboard' }
     return true
   }
 }

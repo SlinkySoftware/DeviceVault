@@ -18,7 +18,9 @@ from functools import cache
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
@@ -34,23 +36,41 @@ _PREFIX = 'dv1'
 
 
 @cache
-def data_keys() -> tuple[str, dict[str, AESGCM]]:
-    """``(current_kid, {kid: cipher})``."""
+def _data_key_ring() -> tuple[str, dict[str, bytes]]:
+    """``(current_kid, {kid: raw key})`` from ``DV_DATA_KEYS``."""
     try:
         ring = parse_key_ring(settings.DEVICEVAULT_DATA_KEYS, 'DV_DATA_KEYS')
         if not ring:
             raise KeyProviderError('DV_DATA_KEYS must be set (generate one with manage.py generate_keys)')
-        ciphers = {}
+        raw_keys = {}
         for kid, value in ring.items():
             if ':' in kid:
                 raise KeyProviderError(f'DV_DATA_KEYS: key id "{kid}" must not contain ":"')
             raw = b64decode(value)
             if len(raw) != AES_KEY_BYTES:
                 raise KeyProviderError(f'DV_DATA_KEYS: key "{kid}" must be {AES_KEY_BYTES} bytes')
-            ciphers[kid] = AESGCM(raw)
+            raw_keys[kid] = raw
     except (KeyProviderError, ValueError) as exc:
         raise ImproperlyConfigured(str(exc)) from exc
-    return next(iter(ciphers)), ciphers
+    return next(iter(raw_keys)), raw_keys
+
+
+@cache
+def data_keys() -> tuple[str, dict[str, AESGCM]]:
+    """``(current_kid, {kid: cipher})``."""
+    kid, raw_keys = _data_key_ring()
+    return kid, {key_id: AESGCM(raw) for key_id, raw in raw_keys.items()}
+
+
+@cache
+def search_token_key() -> tuple[str, bytes]:
+    """``(kid, key)`` that config search tokens are made with, derived from the current data key.
+
+    Deriving it means it is never stored, and rotating the data key re-keys the search index.
+    """
+    kid, raw_keys = _data_key_ring()
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b'devicevault/search-token').derive(raw_keys[kid])
+    return kid, key
 
 
 def encrypt_value(value: Any, *, context: str) -> str:

@@ -19,11 +19,11 @@ PY_PACKAGES = protocol worker receiver orchestrator
 
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
-.PHONY: help dev-image lock lint fmt test check frontend-install frontend-lint frontend-test frontend-build \
+.PHONY: help dev-image lock lint fmt test test-postgres check frontend-install frontend-lint frontend-test frontend-build \
 	images version set-version dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve
 
 help:
-	@echo "Quality:   lint fmt test frontend-lint frontend-test check"
+	@echo "Quality:   lint fmt test test-postgres frontend-lint frontend-test check"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
 	@echo "Release:   version set-version V=X.Y.Z"
@@ -56,7 +56,18 @@ fmt: dev-image
 test: dev-image
 	$(PY) sh -c 'set -e; for pkg in $(PY_PACKAGES); do (cd $$pkg && pytest); done'
 
-check: lint test frontend-lint frontend-test frontend-build
+# The orchestrator suite against PostgreSQL (the config search index is PostgreSQL-specific).
+PG_TEST = devicevault-test-postgres
+test-postgres: dev-image
+	docker rm -f $(PG_TEST) >/dev/null 2>&1 || true
+	docker run -d --name $(PG_TEST) -e POSTGRES_USER=devicevault -e POSTGRES_PASSWORD=test-only \
+		-e POSTGRES_DB=devicevault postgres:18-alpine >/dev/null
+	until docker exec $(PG_TEST) pg_isready -q -U devicevault -h 127.0.0.1; do sleep 1; done
+	$(DOCKER_RUN) --network container:$(PG_TEST) -e DV_TEST_POSTGRES_HOST=127.0.0.1 \
+		-w /workspace/orchestrator $(DEV_IMAGE) pytest -q; \
+		status=$$?; docker rm -f $(PG_TEST) >/dev/null; exit $$status
+
+check: lint test test-postgres frontend-lint frontend-test frontend-build
 
 # Reinstall only when the lockfile changes.
 $(FRONTEND_DEPS): frontend/package.json frontend/package-lock.json

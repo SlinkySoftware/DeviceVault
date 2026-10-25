@@ -6,7 +6,8 @@ standby takes over at its next tick; if the leader dies instead, the lease
 expires first (``LEASE_SECONDS``). The leader also re-checks the lease before
 each due schedule, so a leader that stalled past its lease stops scheduling.
 The leader also prunes expired sign-in sessions, hourly, and applies retention
-policies every ``DV_RETENTION_INTERVAL_MIN`` (backups.retention).
+policies every ``DV_RETENTION_INTERVAL_MIN`` (backups.retention), and runs the
+config search catch-up pass every few minutes (search.indexing).
 """
 
 import logging
@@ -18,6 +19,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from redis import Redis
+from search.indexing import catch_up
 
 from accounts.sessions import prune_expired
 from backups.jobs import JobError, create_job, expire_stale_jobs
@@ -122,7 +124,14 @@ def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None)
     expired = expire_stale_jobs(now)
     prune_sessions(now)
     deletions = apply_retention(now, leading)
-    if created or expired or deletions:
+    indexing = catch_up(now)
+    if created or expired or deletions or indexing:
         logger.info(
-            'scheduler_tick', extra={'jobs_created': created, 'jobs_expired': expired, 'retention_deletions': deletions}
+            'scheduler_tick',
+            extra={
+                'jobs_created': created,
+                'jobs_expired': expired,
+                'retention_deletions': deletions,
+                'search_index_queued': indexing,
+            },
         )

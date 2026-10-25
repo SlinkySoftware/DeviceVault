@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from django.urls import include, path
 from rest_framework import routers
+from search import api as search_api
 
 from accounts import api as accounts_api
 from accounts import oidc_views, provider_api
@@ -58,6 +59,7 @@ urlpatterns = [
     path('api/onboarding/', views.onboarding),
     path('api/dashboard-stats/', backup_api.dashboard_stats),
     path('api/recent-backup-activity/', backup_api.recent_backup_activity),
+    path('api/search/', search_api.SearchView.as_view()),
     path('api/timezone/', views.timezone_config),
     path('api/auth/config/', accounts_api.AuthConfigView.as_view()),
     path('api/auth/csrf/', accounts_api.CsrfView.as_view()),

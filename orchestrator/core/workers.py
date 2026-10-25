@@ -289,13 +289,40 @@ def _volatile_lines(patterns: Any) -> list[str]:
     return valid
 
 
+# Reversible encodings of secret values the orchestrator can decode (search.tokens).
+SECRET_ENCODINGS = frozenset({'cisco7'})
+
+
+def _secret_lines(entries: Any) -> list[dict[str, str | None]]:
+    """A driver's secret-line patterns: valid regexes of a sane size with at least one group.
+
+    An encoding the orchestrator does not know is dropped (the value is then tokenised as written).
+    """
+    if not isinstance(entries, list):
+        return []
+    valid = []
+    for entry in entries[:MAX_VOLATILE_PATTERNS]:
+        if not isinstance(entry, dict):
+            continue
+        pattern, encoding = entry.get('pattern'), entry.get('encoding')
+        if not isinstance(pattern, str) or not pattern or len(pattern) > MAX_VOLATILE_PATTERN_LENGTH:
+            continue
+        try:
+            if re.compile(pattern).groups < 1:
+                continue
+        except re.error:
+            continue
+        valid.append({'pattern': pattern, 'encoding': encoding if encoding in SECRET_ENCODINGS else None})
+    return valid
+
+
 def _catalogue(role: str, capability: str, *flags: str) -> dict[str, dict[str, Any]]:
     """Drivers advertised under ``capabilities[capability]`` by approved workers of ``role``.
 
     Each entry: key, name, description, the ``flags`` (is_binary; shareable and deletes),
     params_schema (JSON schema of its settings), ``workers`` (how many
     approved workers offer it) and ``versions``; collector drivers also have
-    ``volatile_lines``. When workers run different versions of a driver, the
+    ``volatile_lines`` and ``secret_lines``. When workers run different versions of a driver, the
     newest one describes it.
     """
     catalogue: dict[str, dict[str, Any]] = {}
@@ -319,6 +346,7 @@ def _catalogue(role: str, capability: str, *flags: str) -> dict[str, dict[str, A
                 }
                 if role == ROLE_COLLECTOR:
                     entry['volatile_lines'] = _volatile_lines(driver.get('volatile_lines'))
+                    entry['secret_lines'] = _secret_lines(driver.get('secret_lines'))
             entry['workers'] += 1
             entry['versions'].add(version)
     for entry in catalogue.values():

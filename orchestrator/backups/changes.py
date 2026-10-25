@@ -14,6 +14,7 @@ unencrypted backups with the same hash are unchanged without being read.
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import timedelta
 from difflib import SequenceMatcher
 
@@ -40,9 +41,9 @@ def request_summary(job: BackupJob) -> None:
 
 
 def verified_job_id(envelope) -> str:
-    """The job id of a summary task the orchestrator itself signed (workers can publish to its queue too).
+    """The job id of an internal task (summary, search index) the orchestrator itself signed.
 
-    Raises ``signing.SignatureError`` otherwise.
+    Workers can publish to its queue too, so anything else raises ``signing.SignatureError``.
     """
     if not isinstance(envelope, dict) or envelope.get('signer') != ORCHESTRATOR_SIGNER:
         raise signing.SignatureError('change summaries are only requested by the orchestrator')
@@ -94,11 +95,25 @@ def count_changes(old: list[str], new: list[str]) -> tuple[int, int]:
     return added, removed
 
 
-def summarise(job: BackupJob) -> BackupJob:
+def reader() -> Callable[[BackupJob], bytes]:
+    """``read_content`` that reads each backup once, so the summary and the search index share a read."""
+    contents: dict = {}
+
+    def read(job: BackupJob) -> bytes:
+        if job.pk not in contents:
+            contents[job.pk] = read_content(job)
+        return contents[job.pk]
+
+    return read
+
+
+def summarise(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) -> BackupJob:
     """Work out and save how ``job`` differs from the previous backup.
 
-    Raises ``ContentUnavailable`` when a backup cannot be read back right now.
+    ``read`` reads a backup's plaintext (default ``read_content``). Raises
+    ``ContentUnavailable`` when a backup cannot be read back right now.
     """
+    read = read or read_content
     previous = previous_backup(job)
     binary = job.is_binary or bool(previous and previous.is_binary)
     summary = {'compared_to': previous, 'changed': None, 'lines_added': None, 'lines_removed': None}
@@ -108,8 +123,8 @@ def summarise(job: BackupJob) -> BackupJob:
     elif any((backup.size_bytes or 0) > MAX_SUMMARY_BYTES for backup in (job, previous) if backup):
         return _save(job, summary, error=f'larger than {MAX_SUMMARY_BYTES // (1024 * 1024)} MiB, not compared')
     else:
-        new = read_content(job)
-        old = read_content(previous) if previous else None
+        new = read(job)
+        old = read(previous) if previous else None
         if binary:
             summary['changed'] = old != new
         else:

@@ -8,6 +8,8 @@ import { authApi } from '@/api/endpoints'
 import type { CurrentUser, GrantFlag, Id } from '@/api/types'
 import { readString, remove, writeString } from '@/utils/storage'
 
+import { useSearchStore } from './search'
+
 const REMEMBERED_USERNAME_KEY = 'rememberedUsername'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -18,6 +20,12 @@ export const useAuthStore = defineStore('auth', () => {
   /** Global administrators and administrators of at least one device group. */
   const administersAny = computed(
     () => isGlobalAdmin.value || Object.values(user.value?.grants ?? {}).some((flags) => flags.includes('admin')),
+  )
+  /** Config search is on and the user may read some device's backups. */
+  const searchAvailable = computed(
+    () =>
+      !!user.value?.config_search &&
+      (isGlobalAdmin.value || Object.values(user.value.grants).some((flags) => flags.includes('view_contents'))),
   )
   const rememberedUsername = ref(readString(REMEMBERED_USERNAME_KEY) ?? '')
 
@@ -46,9 +54,10 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /** Forget the user locally (no API call). */
+  /** Forget the user locally (no API call), and what they searched for. */
   function clear(): void {
     user.value = null
+    useSearchStore().clear()
   }
 
   /** Signs out; returns the identity provider's sign-out URL to visit, if the session came from one that asks. */
@@ -68,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isGlobalAdmin,
     administersAny,
+    searchAvailable,
     rememberedUsername,
     can,
     fetchUser,

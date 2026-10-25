@@ -36,6 +36,8 @@ import type {
   RetentionPolicy,
   RetentionPolicyWrite,
   RetentionPreview,
+  SearchQuery,
+  SearchResponse,
   StorageDriver,
   StorageTarget,
   StorageTargetWrite,
@@ -167,6 +169,13 @@ export const backupJobsApi = {
   compare: async (a: string, b: string) =>
     (await http.get<BackupComparison>('/backups/compare/', { params: { a, b } })).data,
   logs: async (id: string) => (await http.get<{ logs: LogEntry[] }>(`/backups/${id}/logs/`)).data.logs,
+}
+
+// --- Config search ---------------------------------------------------------------
+
+export const searchApi = {
+  /** The latest backups of devices the user may read (needs view_contents). A POST: queries may hold secrets. */
+  search: async (query: SearchQuery) => (await http.post<SearchResponse>('/search/', query)).data,
 }
 
 // --- Users and access ------------------------------------------------------------

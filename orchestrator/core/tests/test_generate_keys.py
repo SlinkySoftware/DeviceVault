@@ -3,7 +3,7 @@ from django.core.management import execute_from_command_line
 
 from core import keys, signing
 
-LOADERS = (signing.signing_key, keys.data_keys, keys.vault)
+LOADERS = (signing.signing_key, keys._data_key_ring, keys.data_keys, keys.search_token_key, keys.vault)
 
 
 @pytest.fixture

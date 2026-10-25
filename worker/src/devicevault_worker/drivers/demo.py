@@ -31,6 +31,8 @@ class DemoConfigDriver(CollectorDriver):
     name = 'Demo Configuration'
     description = 'Generates a router-style text configuration that changes hourly; for trying out comparisons.'
     Params = DemoConfigParams
+    # Config search indexes the community only as a token.
+    secret_lines = (r'^snmp-server community (\S+)',)
 
     def collect(self, target: Target, credentials: dict[str, Any], params, *, timeout: int, log: CollectionLog):
         now = datetime.now(UTC)
@@ -52,7 +54,13 @@ class DemoConfigDriver(CollectorDriver):
                 f' {state}',
                 '!',
             ]
-        lines += [f'ntp server 10.255.0.{(seed % 3) + 1}', f'snmp-server location rack-{seed % 20}', 'end', '']
+        lines += [
+            f'ntp server 10.255.0.{(seed % 3) + 1}',
+            f'snmp-server location rack-{seed % 20}',
+            'snmp-server community public RO',
+            'end',
+            '',
+        ]
         log.info(f'generated {len(lines)} lines for {hostname}')
         return '\n'.join(lines).encode('utf-8')
 
