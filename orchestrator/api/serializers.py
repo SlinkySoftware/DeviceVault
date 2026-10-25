@@ -27,6 +27,7 @@ from accounts import access
 from core.models import UserProfile, Worker
 from core.workers import driver_catalogue, is_online
 from credentials.models import Credential, CredentialType
+from devices import lifecycle
 from devices.models import CollectionGroup, Device, DeviceGroup, DeviceType, Manufacturer
 from devicevault_protocol.push import PUSH_OFF
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_RECEIVER, ROLE_STORAGE, ROLES, STATUS_APPROVED
@@ -39,6 +40,60 @@ def drivers(context: dict) -> dict:
     if 'drivers' not in context:
         context['drivers'] = driver_catalogue()
     return context['drivers']
+
+
+LIFECYCLE_FIELDS = (
+    'inactive_at',
+    'inactive_by_username',
+    'inactive_reason',
+    'purge_requested_at',
+    'purge_requested_by_username',
+    'lifecycle',
+    'held_until',
+    'held_backups',
+    'held_bytes',
+    'pinned_backups',
+    'can_delete',
+)
+
+
+class LifecycleFieldsMixin(serializers.Serializer):
+    """Where a device is in its retirement (devices.lifecycle), read-only."""
+
+    inactive_by_username = serializers.CharField(source='inactive_by.username', read_only=True, default=None)
+    purge_requested_by_username = serializers.CharField(
+        source='purge_requested_by.username', read_only=True, default=None
+    )
+    lifecycle = serializers.SerializerMethodField()
+    held_until = serializers.SerializerMethodField()
+    held_backups = serializers.SerializerMethodField()
+    held_bytes = serializers.SerializerMethodField()
+    pinned_backups = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
+
+    def _lifecycle(self, obj) -> lifecycle.Lifecycle:
+        if not hasattr(obj, '_lifecycle'):
+            obj._lifecycle = lifecycle.lifecycle(obj)
+        return obj._lifecycle
+
+    def get_lifecycle(self, obj) -> str:
+        return self._lifecycle(obj).state
+
+    def get_held_until(self, obj):
+        held_until = self._lifecycle(obj).held_until
+        return held_until.isoformat() if held_until else None
+
+    def get_held_backups(self, obj) -> int:
+        return self._lifecycle(obj).held_backups
+
+    def get_held_bytes(self, obj) -> int:
+        return self._lifecycle(obj).held_bytes
+
+    def get_pinned_backups(self, obj) -> int:
+        return self._lifecycle(obj).pinned_backups
+
+    def get_can_delete(self, obj) -> bool:
+        return self._lifecycle(obj).can_delete
 
 
 # ===== Model Serializers (Standard CRUD) =====
@@ -178,7 +233,7 @@ class CredentialSerializer(serializers.ModelSerializer):
         return {key: item for key, item in merged.items() if item is not None}
 
 
-class DeviceSerializer(serializers.ModelSerializer):
+class DeviceSerializer(LifecycleFieldsMixin, serializers.ModelSerializer):
     """
     Serializes Device model with nested related objects
 
@@ -221,6 +276,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             'schedule',
             'credential',
             'user_permissions',
+            *LIFECYCLE_FIELDS,
         ]
 
     def get_user_permissions(self, obj):
@@ -256,7 +312,7 @@ class DeviceGroupSerializer(serializers.ModelSerializer):
         return access.flags_on(request.user, obj) if request else []
 
 
-class DeviceDetailedSerializer(serializers.ModelSerializer):
+class DeviceDetailedSerializer(LifecycleFieldsMixin, serializers.ModelSerializer):
     """
     Serializes Device model with nested related objects and RBAC info
 
@@ -298,6 +354,7 @@ class DeviceDetailedSerializer(serializers.ModelSerializer):
             'schedule',
             'credential',
             'user_permissions',
+            *LIFECYCLE_FIELDS,
         ]
 
     def get_user_permissions(self, obj):
@@ -338,9 +395,17 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
             'storage_target',
             'schedule',
             'credential',
+            'inactive_reason',
         ]
-        # Explicit, so a device never falls out of its group by omission; null (ungrouped) is for global admins.
-        extra_kwargs = {'device_group': {'required': True, 'allow_null': True}}
+        extra_kwargs = {
+            # Explicit, so a device never falls out of its group by omission; null (ungrouped) is for global admins.
+            'device_group': {'required': True, 'allow_null': True},
+            # Unique among active devices only; checked in validate.
+            'ip_address': {'validators': []},
+        }
+
+    # What may change while a device is inactive: anything else waits for it to be reactivated.
+    INACTIVE_EDITABLE = ('retention_policy', 'inactive_reason')
 
     def validate_backup_method(self, value):
         # An unchanged method stays valid even while no collector offers it; none means push only (see validate).
@@ -351,6 +416,24 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        inactive = self.instance is not None and self.instance.inactive_at is not None
+        if inactive:
+            changed = [
+                name
+                for name, value in attrs.items()
+                if name not in self.INACTIVE_EDITABLE and value != getattr(self.instance, name)
+            ]
+            if changed:
+                raise serializers.ValidationError(
+                    {name: 'An inactive device cannot be changed. Reactivate it first.' for name in changed}
+                )
+        elif attrs.get('inactive_reason'):
+            raise serializers.ValidationError({'inactive_reason': 'Only an inactive device has a reason.'})
+        address = attrs.get('ip_address')
+        if address and not inactive:
+            taken = Device.objects.filter(ip_address=address, inactive_at__isnull=True)
+            if taken.exclude(pk=getattr(self.instance, 'pk', None)).exists():
+                raise serializers.ValidationError({'ip_address': 'An active device already uses this address.'})
         method = attrs.get('backup_method', getattr(self.instance, 'backup_method', None))
         params = attrs.get('driver_params', getattr(self.instance, 'driver_params', None)) or {}
         changed = 'backup_method' in attrs or 'driver_params' in attrs

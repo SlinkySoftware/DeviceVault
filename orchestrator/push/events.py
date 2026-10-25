@@ -95,6 +95,8 @@ def device_problem(device, protocol: str, source_ip: str, filename: str) -> str 
     """Why ``device`` no longer accepts this push (None if it does)."""
     if device is None:
         return 'the device no longer exists'
+    if device.inactive_at is not None:
+        return 'the device is inactive'
     if not device.enabled:
         return 'the device is disabled'
     if device.push_mode != protocol:

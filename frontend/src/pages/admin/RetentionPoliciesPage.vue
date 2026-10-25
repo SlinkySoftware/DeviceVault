@@ -69,6 +69,15 @@
         outlined
         :rules="[atLeastOne]"
       />
+      <q-input
+        v-model.number="crud.form.value.inactive_keep_days"
+        type="number"
+        label="Keep inactive devices' backups for N days"
+        hint="Counted from when a device is marked inactive; then every unpinned backup goes. Empty: indefinitely"
+        outlined
+        clearable
+        :rules="[optionalNonNegativeInteger]"
+      />
       <q-toggle v-model="crud.form.value.dry_run" label="Dry run: report what would be deleted, delete nothing" />
       <q-banner v-if="!crud.form.value.dry_run" dense rounded class="bg-warning text-dark">
         Expired backups will be deleted from their storage targets. Use Preview to check first; deleted backups
@@ -150,6 +159,7 @@ const crud = useCrud<RetentionPolicy, Form>({
     max_days: null,
     max_size_bytes: null,
     min_backups: 1,
+    inactive_keep_days: 90,
     dry_run: true,
   }),
 })
@@ -161,6 +171,7 @@ function normalise(form: Form): Form {
     max_days: toNullable(form.max_days),
     max_size_bytes: toNullable(form.max_size_bytes),
     min_backups: Number(form.min_backups),
+    inactive_keep_days: toNullable(form.inactive_keep_days),
     dry_run: form.dry_run,
   }
 }
@@ -186,6 +197,13 @@ const columns: QTableColumn<RetentionPolicy>[] = [
     align: 'left',
   },
   { name: 'min_backups', label: 'Always Keep', field: 'min_backups', align: 'left' },
+  {
+    name: 'inactive_keep_days',
+    label: 'Inactive Hold (days)',
+    field: 'inactive_keep_days',
+    format: (value: number | null) => (value === null ? 'Indefinite' : String(value)),
+    align: 'left',
+  },
   { name: 'mode', label: 'Mode', field: 'dry_run', align: 'left' },
   { name: 'last_run', label: 'Last Run', field: 'last_run_at', align: 'left' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },

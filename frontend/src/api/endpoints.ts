@@ -152,7 +152,17 @@ export const devicesApi = {
   get: async (id: Id) => (await http.get<DeviceDetail>(`/devices/${id}/`)).data,
   create: async (body: DeviceWrite) => (await http.post<DeviceDetail>('/devices/', body)).data,
   update: async (id: Id, body: DeviceWrite) => (await http.put<DeviceDetail>(`/devices/${id}/`, body)).data,
+  /** An inactive device accepts only `retention_policy` and `inactive_reason`. */
+  patch: async (id: Id, body: Partial<DeviceWrite>) =>
+    (await http.patch<DeviceDetail>(`/devices/${id}/`, body)).data,
   backupNow: async (id: Id) => (await http.post<BackupNowResponse>(`/devices/${id}/backup_now/`)).data,
+  /** Needs admin on the device's group: stops backups and starts its retention policy's hold. */
+  deactivate: async (id: Id, reason: string) =>
+    (await http.post<DeviceDetail>(`/devices/${id}/deactivate/`, { reason })).data,
+  reactivate: async (id: Id) => (await http.post<DeviceDetail>(`/devices/${id}/reactivate/`)).data,
+  /** Global administrators: unpins and deletes every backup of an inactive device. `confirm` is its name. */
+  purge: async (id: Id, confirm: string) =>
+    (await http.post<DeviceDetail>(`/devices/${id}/purge/`, { confirm })).data,
 }
 
 export interface JobQuery {

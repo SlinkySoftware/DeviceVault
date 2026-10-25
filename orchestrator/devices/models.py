@@ -22,6 +22,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from django.contrib.auth.models import User
 from django.db import models
 from django.db.models.signals import pre_delete
 from django.dispatch import receiver
@@ -131,12 +132,16 @@ class Device(models.Model):
     ``last_backup_time``/``last_backup_status`` reflect the latest finished job.
     With ``push_mode`` set the device may also upload backups to the receivers,
     which match it by ``ip_address`` (ARCHITECTURE.md 7.1).
+
+    A device marked inactive (``inactive_at``) is retired: never backed up again,
+    its backups kept for its retention policy's hold and then deleted, after which
+    it can be deleted itself (``devices.lifecycle``, ARCHITECTURE.md 7.5).
     """
 
     name = models.CharField(max_length=128, help_text='Device hostname or identifier')
-    # Unique: receivers match pushed files to devices by source address alone.
+    # Unique among active devices (see Meta): receivers match pushed files to devices by source address alone.
     ip_address = models.GenericIPAddressField(
-        unique=True, unpack_ipv4=True, help_text='IPv4 or IPv6 address the collector connects to (and pushes come from)'
+        unpack_ipv4=True, help_text='IPv4 or IPv6 address the collector connects to (and pushes come from)'
     )
     dns_name = models.CharField(max_length=128, blank=True, help_text='FQDN for DNS resolution (optional)')
     device_type = models.ForeignKey(
@@ -206,9 +211,28 @@ class Device(models.Model):
         blank=True,
         help_text='SSH/Telnet credentials for device access',
     )
+    inactive_at = models.DateTimeField(null=True, blank=True, help_text='When the device was marked inactive')
+    inactive_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    inactive_reason = models.CharField(max_length=200, blank=True, help_text='Why the device was retired')
+    purge_requested_at = models.DateTimeField(
+        null=True, blank=True, help_text='When a global administrator purged its backups'
+    )
+    purge_requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    class Meta:
+        constraints = [
+            # A replacement can take over a retired device's address while its backups are held.
+            models.UniqueConstraint(
+                fields=['ip_address'], condition=models.Q(inactive_at__isnull=True), name='unique_active_device_address'
+            )
+        ]
 
     def __str__(self):
         return self.name
+
+    @property
+    def is_active(self) -> bool:
+        return self.inactive_at is None
 
 
 # ===== Device groups =====

@@ -88,7 +88,7 @@ def card(*permissions):
 def summary(request):
     """Today's tiles: devices by type and the last 24 hours of backups."""
     since = timezone.now() - timedelta(hours=24)
-    devices = access.devices_for(request.user, 'view')
+    devices = access.devices_for(request.user, 'view').filter(inactive_at__isnull=True)
     jobs = _visible_jobs(request.user)
     recent = jobs.filter(finished_at__gte=since)
     by_type = devices.values('device_type__name', 'device_type__icon').annotate(count=Count('id'))
@@ -184,11 +184,11 @@ def _stalest_first(device: Device):
 
 @card(IsAuthenticated)
 def freshness(request):
-    """Per device group: how old each enabled device's latest successful backup is."""
+    """Per device group: how old each enabled, active device's latest successful backup is."""
     now = timezone.now()
     devices = (
         access.devices_for(request.user, 'view')
-        .filter(enabled=True)
+        .filter(enabled=True, inactive_at__isnull=True)
         .select_related('device_group')
         .annotate(last_success=Max('backup_jobs__finished_at', filter=Q(backup_jobs__state=BackupJob.STORED)))
     )

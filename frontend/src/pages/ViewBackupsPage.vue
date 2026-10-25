@@ -15,6 +15,14 @@
       />
     </template>
 
+    <q-banner v-if="device && device.lifecycle !== 'active'" rounded class="bg-grey-3 text-dark q-mb-md">
+      <template #avatar><q-icon name="archive" color="grey-8" /></template>
+      {{ inactiveSummary(device) }}. It is no longer backed up. {{ holdLabel(device) }}.
+      <template v-if="device.pinned_backups && !onlyPinned" #action>
+        <q-btn flat label="Show pinned backups" @click="showPinned" />
+      </template>
+    </q-banner>
+
     <q-table
       v-model:pagination="pagination"
       flat
@@ -194,7 +202,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import { backupJobsApi, devicesApi } from '@/api/endpoints'
-import type { BackupJob, GrantFlag } from '@/api/types'
+import type { BackupJob, DeviceDetail, GrantFlag } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import PageCard from '@/components/PageCard.vue'
@@ -205,6 +213,7 @@ import { usePolling } from '@/composables/usePolling'
 import { filenameTimestamp, formatDateTime } from '@/utils/datetime'
 import { safeFilename, saveFile } from '@/utils/download'
 import { capitalise, changeLabel, formatBytes, formatDuration, isActiveJob, statusLabel } from '@/utils/format'
+import { holdLabel, inactiveSummary } from '@/utils/lifecycle'
 
 type Pagination = NonNullable<QTableProps['pagination']>
 
@@ -215,6 +224,7 @@ const $q = useQuasar()
 const deviceId = computed(() => Number(route.params.id))
 
 const deviceName = ref('device')
+const device = ref<DeviceDetail | null>(null)
 const jobs = ref<BackupJob[]>([])
 const loading = ref(false)
 const pagination = ref<Pagination>({ page: 1, rowsPerPage: 20, rowsNumber: 0 })
@@ -426,11 +436,17 @@ async function saveLabel(): Promise<void> {
   }
 }
 
+// The pinned backups are what keeps an inactive device from being deleted.
+function showPinned(): void {
+  onlyPinned.value = true
+  void reload()
+}
+
 onMounted(async () => {
   try {
-    const device = await devicesApi.get(deviceId.value)
-    deviceName.value = device.name
-    permissions.value = device.user_permissions
+    device.value = await devicesApi.get(deviceId.value)
+    deviceName.value = device.value.name
+    permissions.value = device.value.user_permissions
   } catch (error) {
     notify.error(error, 'Failed to load device')
   }

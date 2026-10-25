@@ -40,7 +40,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
-  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices`,
+  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices` (`lifecycle.py` marks devices inactive, purges and deletes them),
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
   `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and
@@ -104,7 +104,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   claim without checking its signature and approval.
 - Retention deletes stored content only through `backups.retention` (signed `storage.delete`, confirmed by a
   `deleted` event); a pruned job row stays as the record. Anything that deletes backups must skip pinned ones
-  (`BackupJob.pinned`) and keep the newest `min_backups`.
+  (`BackupJob.pinned`) and keep the newest `min_backups`. Two exceptions (`devices.lifecycle`): past an inactive device's hold, retention
+  drops the `min_backups` floor (pins still hold); a global administrator's purge unpins first and audits the pins it removed.
 - Change summaries (`backups.changes`) run in the `events` process as a signed internal task, never inline in
   event handling. Collector drivers that produce noisy lines set `volatile_lines`, which the orchestrator also uses
   to compare pushed files.
