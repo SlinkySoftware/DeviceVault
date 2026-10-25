@@ -130,6 +130,7 @@
             {{ result.device_name }}
           </router-link>
           <q-badge v-if="result.device_group_name" outline color="primary">{{ result.device_group_name }}</q-badge>
+          <q-chip v-if="result.label" dense square color="primary" text-color="white" icon="label">{{ result.label }}</q-chip>
           <span class="text-caption text-grey">
             {{ result.match_count }} {{ result.match_count === 1 ? 'line' : 'lines' }} · backup of
             {{ formatDateTime(result.backup_at) }}

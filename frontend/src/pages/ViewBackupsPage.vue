@@ -4,6 +4,7 @@
     <template #actions>
       <q-btn flat icon="arrow_back" label="Devices" :to="{ name: 'devices' }" />
       <q-toggle v-model="onlyChanges" label="Only changes" @update:model-value="reload" />
+      <q-toggle v-model="onlyPinned" label="Pinned only" @update:model-value="reload" />
       <q-btn
         v-if="mayRead"
         color="primary"
@@ -36,6 +37,22 @@
           <q-radio v-if="mayRead && comparable(props.row)" v-model="selectedB" :val="props.row.id" aria-label="Compare as B" />
         </q-td>
       </template>
+      <template #body-cell-created_at="props">
+        <q-td :props="props">
+          <div class="row items-center no-wrap q-gutter-x-xs">
+            <span>{{ formatDateTime(props.row.created_at) }}</span>
+            <q-icon v-if="props.row.note" name="sticky_note_2" color="primary" size="xs" aria-label="Note">
+              <q-tooltip max-width="420px"><div style="white-space: pre-wrap">{{ props.row.note }}</div></q-tooltip>
+            </q-icon>
+          </div>
+          <q-chip v-if="props.row.label" dense square color="primary" text-color="white" icon="label" class="q-ml-none backup-label">
+            {{ props.row.label }}
+            <q-tooltip v-if="props.row.annotated_by_username">
+              By {{ props.row.annotated_by_username }}{{ props.row.annotated_at ? ` on ${formatDateTime(props.row.annotated_at)}` : '' }}
+            </q-tooltip>
+          </q-chip>
+        </q-td>
+      </template>
       <template #body-cell-state="props">
         <q-td :props="props">
           <StatusLabel :status="props.row.state" />
@@ -45,7 +62,9 @@
             <q-tooltip>Deleted by its retention policy{{ props.row.pruned_at ? ` on ${formatDateTime(props.row.pruned_at)}` : '' }}</q-tooltip>
           </q-badge>
           <q-icon v-if="props.row.pinned" name="push_pin" color="primary" size="xs" class="q-ml-xs">
-            <q-tooltip>Pinned: kept whatever the retention policy says</q-tooltip>
+            <q-tooltip>
+              Pinned: kept whatever the retention policy says{{ props.row.pinned_by_username ? ` (by ${props.row.pinned_by_username})` : '' }}
+            </q-tooltip>
           </q-icon>
         </q-td>
       </template>
@@ -102,6 +121,22 @@
           >
             <q-tooltip>{{ props.row.is_binary ? 'Download (binary)' : 'Download' }}</q-tooltip>
           </q-btn>
+          <q-btn
+            v-if="mayAdmin && (props.row.pinned || available(props.row))"
+            dense
+            round
+            flat
+            :color="props.row.pinned ? 'primary' : 'grey-6'"
+            icon="push_pin"
+            :aria-label="props.row.pinned ? 'Unpin' : 'Pin'"
+            :loading="pinning.has(props.row.id)"
+            @click="togglePin(props.row)"
+          >
+            <q-tooltip>{{ props.row.pinned ? 'Unpin: rejoin the retention policy' : 'Pin: keep whatever the retention policy says' }}</q-tooltip>
+          </q-btn>
+          <q-btn v-if="mayRead && !isActiveJob(props.row.state)" dense round flat color="primary" icon="edit_note" aria-label="Label and note" @click="openLabel(props.row)">
+            <q-tooltip>Label and note</q-tooltip>
+          </q-btn>
           <q-btn dense round flat color="info" icon="description" aria-label="Logs" @click="openLogs(props.row)">
             <q-tooltip>Logs</q-tooltip>
           </q-btn>
@@ -135,18 +170,33 @@
       </q-card>
     </q-dialog>
 
+    <FormDialog v-model="labelling.open" title="Label and note" :saving="labelling.saving" @submit="saveLabel">
+      <div class="text-caption text-muted">{{ labelling.title }}</div>
+      <q-input
+        v-model.trim="labelling.label"
+        label="Label"
+        hint="One line, such as 'pre-upgrade 17.9' or 'approved baseline'"
+        outlined
+        autofocus
+        counter
+        maxlength="64"
+      />
+      <q-input v-model="labelling.note" label="Note" type="textarea" outlined autogrow counter maxlength="2000" />
+    </FormDialog>
+
     <BackupLogViewer v-model="logs.open" :backup-id="logs.backupId" :info="logs.info" />
   </PageCard>
 </template>
 
 <script setup lang="ts">
-import type { QTableColumn, QTableProps, QVirtualScroll } from 'quasar'
+import { useQuasar, type QTableColumn, type QTableProps, type QVirtualScroll } from 'quasar'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import { backupJobsApi, devicesApi } from '@/api/endpoints'
 import type { BackupJob, GrantFlag } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
+import FormDialog from '@/components/FormDialog.vue'
 import PageCard from '@/components/PageCard.vue'
 import StatusLabel from '@/components/StatusLabel.vue'
 import type { BackupLogInfo } from '@/components/types'
@@ -161,6 +211,7 @@ type Pagination = NonNullable<QTableProps['pagination']>
 const route = useRoute()
 const router = useRouter()
 const notify = useNotify()
+const $q = useQuasar()
 const deviceId = computed(() => Number(route.params.id))
 
 const deviceName = ref('device')
@@ -171,16 +222,19 @@ const selectedA = ref<string | null>(null)
 const selectedB = ref<string | null>(null)
 const downloading = reactive(new Set<string>())
 const onlyChanges = ref(false)
+const onlyPinned = ref(false)
+const pinning = reactive(new Set<string>())
 
 // What the user may do with this device's backups (hidden otherwise; the API enforces it).
 const permissions = ref<GrantFlag[]>([])
 const mayRead = computed(() => permissions.value.includes('view_contents'))
 const mayDownload = computed(() => permissions.value.includes('download'))
+const mayAdmin = computed(() => permissions.value.includes('admin'))
 
 const columns: QTableColumn<BackupJob>[] = [
   { name: 'select-a', label: 'A', field: 'id', align: 'center', style: 'width: 48px' },
   { name: 'select-b', label: 'B', field: 'id', align: 'center', style: 'width: 48px' },
-  { name: 'created_at', label: 'Requested', field: 'created_at', format: formatDateTime, align: 'left' },
+  { name: 'created_at', label: 'Requested', field: 'created_at', align: 'left' },
   { name: 'state', label: 'Status', field: 'state', align: 'left' },
   { name: 'changes', label: 'Changes', field: 'changed', align: 'left' },
   { name: 'trigger', label: 'Trigger', field: 'trigger', format: capitalise, align: 'left' },
@@ -217,6 +271,7 @@ async function load(): Promise<void> {
       page,
       page_size: rowsPerPage,
       ...(onlyChanges.value ? { changed: true } : {}),
+      ...(onlyPinned.value ? { pinned: true } : {}),
     })
     jobs.value = result.results
     pagination.value = { ...pagination.value, rowsNumber: result.count }
@@ -255,7 +310,8 @@ const scroller = ref<QVirtualScroll | null>(null)
 
 /** Show a backup's content; `line` (1-based) is highlighted and scrolled to. */
 async function view(job: BackupJob, line: number | null = null): Promise<void> {
-  Object.assign(viewer, { open: true, loading: true, title: formatDateTime(job.created_at), content: '', line })
+  const title = job.label ? `${formatDateTime(job.created_at)} · ${job.label}` : formatDateTime(job.created_at)
+  Object.assign(viewer, { open: true, loading: true, title, content: '', line })
   try {
     viewer.content = (await backupJobsApi.contentText(job.id)) || '(empty backup)'
   } catch (error) {
@@ -313,6 +369,63 @@ function openLogs(job: BackupJob): void {
   logs.open = true
 }
 
+function replaceJob(updated: BackupJob): void {
+  jobs.value = jobs.value.map((job) => (job.id === updated.id ? updated : job))
+}
+
+async function setPinned(job: BackupJob, pinned: boolean): Promise<void> {
+  pinning.add(job.id)
+  try {
+    replaceJob(await backupJobsApi.pin(job.id, pinned))
+    notify.success(pinned ? 'Backup pinned' : 'Backup unpinned')
+  } catch (error) {
+    notify.error(error, pinned ? 'Failed to pin backup' : 'Failed to unpin backup')
+  } finally {
+    pinning.delete(job.id)
+  }
+}
+
+// Unpinning hands the backup back to its retention policy, which may delete it at the next pass.
+function togglePin(job: BackupJob): void {
+  if (!job.pinned) {
+    void setPinned(job, true)
+    return
+  }
+  $q.dialog({
+    title: 'Unpin backup',
+    message:
+      'It rejoins the retention policy. If the policy no longer keeps it (too old, or beyond its count or size), ' +
+      'the next retention pass that is not a dry run deletes it.',
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Unpin', color: 'negative' },
+  }).onOk(() => void setPinned(job, false))
+}
+
+const labelling = reactive({ open: false, saving: false, jobId: '', title: '', label: '', note: '' })
+
+function openLabel(job: BackupJob): void {
+  Object.assign(labelling, {
+    open: true,
+    jobId: job.id,
+    title: `Backup of ${formatDateTime(job.created_at)}`,
+    label: job.label,
+    note: job.note,
+  })
+}
+
+async function saveLabel(): Promise<void> {
+  labelling.saving = true
+  try {
+    replaceJob(await backupJobsApi.annotate(labelling.jobId, { label: labelling.label, note: labelling.note }))
+    labelling.open = false
+  } catch (error) {
+    notify.error(error, 'Failed to save the label')
+  } finally {
+    labelling.saving = false
+  }
+}
+
 onMounted(async () => {
   try {
     const device = await devicesApi.get(deviceId.value)
@@ -362,5 +475,9 @@ onMounted(async () => {
 .line-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.backup-label {
+  max-width: 220px;
 }
 </style>

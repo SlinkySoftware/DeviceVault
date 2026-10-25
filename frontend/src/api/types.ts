@@ -280,8 +280,16 @@ export interface BackupJob {
   /** Names of the workers that collected and stored it. */
   collector: string
   storage_worker: string
-  /** Exempt from retention. */
+  /** Exempt from retention. Set by group admins (`backupJobsApi.pin`). */
   pinned: boolean
+  pinned_by_username: string | null
+  pinned_at: IsoDateTime | null
+  /** One line, at most 64 characters; blank when none. Set with `view_contents` (`backupJobsApi.annotate`). */
+  label: string
+  /** Free text, at most 2000 characters. */
+  note: string
+  annotated_by_username: string | null
+  annotated_at: IsoDateTime | null
   /** Deleted (or being deleted) by retention: the content is gone. */
   pruned: boolean
   pruned_at: IsoDateTime | null
@@ -809,6 +817,8 @@ export interface SearchResult {
   /** The backup searched: the device's newest stored one. */
   job: string
   backup_at: string
+  /** That backup's label, blank when none. */
+  label: string
   indexed_at: string
   match_count: number
   /** The first matching lines (match_count may be more). */

@@ -6,6 +6,9 @@ import uuid
 from django.contrib.auth.models import User
 from django.db import models
 
+LABEL_MAX = 64
+NOTE_MAX = 2000
+
 
 class BackupJob(models.Model):
     """A backup of one device, tracked through collection and storage.
@@ -72,8 +75,15 @@ class BackupJob(models.Model):
     # deletion is requested the content is treated as gone; ``pruned_at`` is set when
     # the storage worker confirms it. The job row stays as the record.
     pinned = models.BooleanField(default=False, help_text='Exempt from retention')
+    pinned_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    pinned_at = models.DateTimeField(null=True, blank=True)
     prune_requested_at = models.DateTimeField(null=True, blank=True)
     pruned_at = models.DateTimeField(null=True, blank=True)
+    # What people say about it ("pre-upgrade 17.9", "approved baseline"); see backups.api.
+    label = models.CharField(max_length=LABEL_MAX, blank=True)
+    note = models.TextField(blank=True)
+    annotated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    annotated_at = models.DateTimeField(null=True, blank=True)
 
     # Change summary (backups.changes), filled in shortly after the job is stored: how it
     # differs from the device's previous backup, ignoring the driver's volatile lines.
