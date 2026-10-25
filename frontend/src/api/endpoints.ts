@@ -160,6 +160,9 @@ export interface JobQuery {
   state?: string
   /** Only backups that changed (true) or did not (false). */
   changed?: boolean
+  pinned?: boolean
+  /** Only backups with a label (true) or without one (false). */
+  labelled?: boolean
   page?: number
   page_size?: number
 }
@@ -177,6 +180,11 @@ export const backupJobsApi = {
   compare: async (a: string, b: string) =>
     (await http.get<BackupComparison>('/backups/compare/', { params: { a, b } })).data,
   logs: async (id: string) => (await http.get<{ logs: LogEntry[] }>(`/backups/${id}/logs/`)).data.logs,
+  /** Needs admin on the device's group; only stored backups retention has kept can be pinned. */
+  pin: async (id: string, pinned: boolean) => (await http.post<BackupJob>(`/backups/${id}/pin/`, { pinned })).data,
+  /** Needs view_contents; a field left out is kept. */
+  annotate: async (id: string, body: { label?: string; note?: string }) =>
+    (await http.post<BackupJob>(`/backups/${id}/annotate/`, body)).data,
 }
 
 // --- Config search ---------------------------------------------------------------

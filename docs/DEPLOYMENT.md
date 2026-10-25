@@ -291,6 +291,11 @@ than N days, and a total size limit (counted from the newest). Whatever the limi
 (**Always keep**, at least 1) stay, and pinned backups are never counted or deleted. A device with
 no policy keeps everything.
 
+Administrators of a device group pin a backup from its row on the device's backups page. Unpinning
+hands it back to the policy, so the next pass that is not a dry run may delete it. Anyone who may
+read a group's backups can give one a label ("pre-upgrade 17.9") and a note. Pins, unpins and label
+changes are audited (`backup.pin`, `backup.unpin`, `backup.annotate`; the note text is not logged).
+
 The scheduler's leader applies every policy every `DV_RETENTION_INTERVAL_MIN` minutes and sends
 signed `storage.delete` tasks to the storage targets holding expired backups; their workers delete
 them and report back. A deleted backup stays in the backup list, marked deleted, as a record. At most

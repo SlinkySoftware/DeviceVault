@@ -228,6 +228,7 @@ def _result(document: SearchDocument, lines: list[tuple[int, str]]) -> dict:
         'driver': document.driver,
         'job': str(document.job_id),
         'backup_at': document.job.created_at,
+        'label': document.job.label,
         'indexed_at': document.indexed_at,
         'match_count': len(lines),
         'lines': [{'number': number, 'text': text} for number, text in lines[:MAX_LINES]],

@@ -13,8 +13,8 @@
       v-else-if="older && newer"
       :left="older.content"
       :right="newer.content"
-      :left-title="`A · ${formatDateTime(older.job.created_at)}`"
-      :right-title="`B · ${formatDateTime(newer.job.created_at)}`"
+      :left-title="title('A', older)"
+      :right-title="title('B', newer)"
     />
   </PageCard>
 </template>
@@ -37,6 +37,9 @@ const older = ref<ComparedBackup | null>(null)
 const newer = ref<ComparedBackup | null>(null)
 const loading = ref(true)
 const error = ref('')
+
+const title = (side: string, backup: ComparedBackup) =>
+  [side, formatDateTime(backup.job.created_at), backup.job.label].filter(Boolean).join(' · ')
 
 onMounted(async () => {
   const a = typeof route.query.a === 'string' ? route.query.a : ''

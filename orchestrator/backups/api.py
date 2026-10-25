@@ -1,7 +1,9 @@
-"""API for backup jobs: history, content and logs. The dashboard is in backups.dashboard."""
+"""API for backup jobs: history, content, logs, pins and labels. The dashboard is in backups.dashboard."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import decorators, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
@@ -10,7 +12,7 @@ from accounts import access
 from accounts.access import HasDeviceGroupPermission
 from audit.log import record
 from backups.content import ContentDeleted, ContentUnavailable, read_content
-from backups.models import BackupJob
+from backups.models import LABEL_MAX, NOTE_MAX, BackupJob
 
 
 class BackupJobSerializer(serializers.ModelSerializer):
@@ -19,6 +21,8 @@ class BackupJobSerializer(serializers.ModelSerializer):
     storage_target_name = serializers.CharField(source='storage_target.name', read_only=True, default=None)
     duration_ms = serializers.IntegerField(read_only=True)
     pruned = serializers.BooleanField(read_only=True)
+    pinned_by_username = serializers.CharField(source='pinned_by.username', read_only=True, default=None)
+    annotated_by_username = serializers.CharField(source='annotated_by.username', read_only=True, default=None)
 
     class Meta:
         model = BackupJob
@@ -40,6 +44,12 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'collector',
             'storage_worker',
             'pinned',
+            'pinned_by_username',
+            'pinned_at',
+            'label',
+            'note',
+            'annotated_by_username',
+            'annotated_at',
             'pruned',
             'pruned_at',
             'changed',
@@ -66,6 +76,25 @@ def _unavailable(exc: ContentUnavailable) -> response.Response:
     return response.Response({'error': str(exc)}, status=code)
 
 
+class PinSerializer(serializers.Serializer):
+    pinned = serializers.BooleanField()
+
+
+class AnnotationSerializer(serializers.Serializer):
+    """Either field may be left out to keep it; blank clears it."""
+
+    label = serializers.CharField(max_length=LABEL_MAX, allow_blank=True, required=False)
+    note = serializers.CharField(max_length=NOTE_MAX, allow_blank=True, required=False, trim_whitespace=False)
+
+    def validate_label(self, value):
+        if '\n' in value or '\r' in value:
+            raise serializers.ValidationError('A label is a single line.')
+        return value
+
+    def validate_note(self, value):
+        return value.strip()
+
+
 class JobPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'page_size'
@@ -76,7 +105,9 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
     """Backup jobs of the devices the user can view (``view``: state, history, sizes, errors and logs).
 
     Paginated (``?page=``, ``?page_size=``). Filters: ``?device=<id>``, ``?state=<state>``,
-    ``?changed=true|false`` (the change summary; see backups.changes). The backups
+    ``?changed=true|false`` (the change summary; see backups.changes), ``?pinned=true|false`` and
+    ``?labelled=true|false``. ``{id}/pin/`` (``admin``: it overrides the group's retention policy) and
+    ``{id}/annotate/`` (``view_contents``: a label describes the content) change them. The backups
     themselves: ``{id}/content/`` (``view_contents``), ``{id}/download/`` (``download``) and
     ``compare/?a=<id>&b=<id>`` (``view_contents``, two backups of one device). Each is audited.
     """
@@ -86,7 +117,7 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = JobPagination
 
     def get_queryset(self):
-        jobs = BackupJob.objects.select_related('device', 'requested_by', 'storage_target')
+        jobs = BackupJob.objects.select_related('device', 'requested_by', 'storage_target', 'pinned_by', 'annotated_by')
         jobs = jobs.filter(device__in=access.devices_for(self.request.user, 'view'))
         params = self.request.query_params
         if params.get('device'):
@@ -95,6 +126,10 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
             jobs = jobs.filter(state=params['state'])
         if params.get('changed') in ('true', 'false'):
             jobs = jobs.filter(changed=params['changed'] == 'true')
+        if params.get('pinned') in ('true', 'false'):
+            jobs = jobs.filter(pinned=params['pinned'] == 'true')
+        if params.get('labelled') in ('true', 'false'):
+            jobs = jobs.exclude(label='') if params['labelled'] == 'true' else jobs.filter(label='')
         return jobs
 
     def _audit(self, action: str, job: BackupJob, **details):
@@ -159,6 +194,57 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
     @decorators.action(detail=True, methods=['get'])
     def logs(self, request, pk=None):
         return response.Response({'logs': self.get_object().log})
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('admin')])
+    def pin(self, request, pk=None):
+        """Pin a stored backup (retention leaves it alone) or unpin it (it rejoins its policy)."""
+        job = self.get_object()
+        body = PinSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        pinned = body.validated_data['pinned']
+        # Retention claims deletions under the same row lock and re-checks ``pinned``,
+        # so a backup is never both pinned and deleted.
+        with transaction.atomic():
+            job = BackupJob.objects.select_for_update().get(pk=job.pk)
+            if pinned and not job.pinned:
+                if job.state != BackupJob.STORED:
+                    return response.Response(
+                        {'error': 'Only a stored backup can be pinned.'}, status=status.HTTP_400_BAD_REQUEST
+                    )
+                if job.pruned:
+                    return response.Response(
+                        {'error': 'Its retention policy has already deleted this backup.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                job.pinned, job.pinned_by, job.pinned_at = True, request.user, timezone.now()
+            elif not pinned and job.pinned:
+                job.pinned, job.pinned_by, job.pinned_at = False, None, None
+            else:
+                return response.Response(BackupJobSerializer(self.get_object()).data)
+            job.save(update_fields=['pinned', 'pinned_by', 'pinned_at'])
+        self._audit('backup.pin' if pinned else 'backup.unpin', job, label=job.label)
+        return response.Response(BackupJobSerializer(self.get_object()).data)
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('view_contents')])
+    def annotate(self, request, pk=None):
+        """Set a finished backup's label and note."""
+        job = self.get_object()
+        if job.state not in BackupJob.TERMINAL_STATES:
+            return response.Response(
+                {'error': 'Wait for the backup to finish before labelling it.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        body = AnnotationSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        label = body.validated_data.get('label', job.label)
+        note = body.validated_data.get('note', job.note)
+        if (label, note) != (job.label, job.note):
+            note_changed = note != job.note
+            BackupJob.objects.filter(pk=job.pk).update(
+                label=label, note=note, annotated_by=request.user, annotated_at=timezone.now()
+            )
+            # The note is free text up to NOTE_MAX characters: the audit log says only that it changed.
+            self._audit('backup.annotate', job, label=label, note_changed=note_changed)
+        return response.Response(BackupJobSerializer(self.get_object()).data)
 
 
 def device_backup_now(request, device) -> response.Response:
