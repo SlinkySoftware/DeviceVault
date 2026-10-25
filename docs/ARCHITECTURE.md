@@ -249,6 +249,7 @@ read (UI):  api → storage.read task → storage.target.<t> → blob dv:blob:re
 check (UI): api → storage.check task → storage.target.<t> → Celery result
 retention:  scheduler leader → expired BackupJobs → storage.delete task (batched) → storage.target.<t>
             → deleted | delete_failed event per backup → dv.orchestrator (job kept, marked pruned)
+            (an inactive device past its hold: every unpinned backup; a purged one: every backup, section 7.5)
 summary:    job stored → orchestrator.change_summary (signed, dv.orchestrator) → read it and the previous backup
             → decrypt, drop volatile lines, diff → changed, lines_added, lines_removed on the job
 search:     same task, same bytes (when DV_CONFIG_SEARCH is on) → replace secrets with tokens
@@ -410,7 +411,7 @@ Engineers mark known-good backups ("pre-upgrade 17.9", "approved baseline") and 
 - `annotated_by` and `annotated_at`: who last changed the label or note, and when.
 
 **API.** The job list stays read-only. The two changes are separate actions because they need different grants and are audited differently:
-- `POST /api/backups/{id}/pin/` `{pinned}` needs `HasDeviceGroupPermission('admin')`, because a pin overrides the group's retention policy (storage cost, and holding data the policy meant to delete). Only a stored backup can be pinned, and only while retention has not asked for its deletion, so a pruned backup gives 400. The check runs under `select_for_update` on the row. Retention claims rows under the same lock and re-checks `pinned`, so a pin and a deletion cannot both win. Unpinning is always allowed. The backup then rejoins its policy and may be deleted at the next pass that is not a dry run, so the UI asks first. Pinning does not protect a backup from deleting its device.
+- `POST /api/backups/{id}/pin/` `{pinned}` needs `HasDeviceGroupPermission('admin')`, because a pin overrides the group's retention policy (storage cost, and holding data the policy meant to delete). Only a stored backup can be pinned, and only while retention has not asked for its deletion, so a pruned backup gives 400. The check runs under `select_for_update` on the row. Retention claims rows under the same lock and re-checks `pinned`, so a pin and a deletion cannot both win. Unpinning is always allowed. The backup then rejoins its policy and may be deleted at the next pass that is not a dry run, so the UI asks first. A pinned backup also keeps an inactive device from becoming deletable (section 7.5).
 - `POST /api/backups/{id}/annotate/` `{label, note}` needs `HasDeviceGroupPermission('view_contents')`, since a label describes the content. It works on any finished job, including failed and pruned ones: "device was being replaced" on a failure is useful, and a pruned job row stays as the record.
 - The serializer adds `pinned_by_username`, `pinned_at`, `label`, `note`, `annotated_by_username` and `annotated_at`. Anyone with `view` sees them, as they see the rest of the job row. The list gains `?pinned=true` and `?labelled=true` filters.
 
@@ -422,6 +423,62 @@ Engineers mark known-good backups ("pre-upgrade 17.9", "approved baseline") and 
 - Users with `view_contents` get a "Label and note" action (`FormDialog`).
 - A "Pinned only" toggle sits next to "Only changes".
 - The compare page and the backup viewer show both backups' labels, and config search results show the label of the backup that matched.
+
+### 7.5 Decommissioning devices (phase 20)
+
+Devices are retired, replaced and removed, and nobody can delete one today. The API's `DELETE /api/devices/{id}/` (not offered in the UI) cascades to the device's job rows and leaves their stored content behind on the targets, with nothing left that points to it. Deleting on the spot is also wrong for the common case: after a device is retired, its last configuration is still needed for a while (rebuilding a replacement, audits, "what did the old core switch have?").
+
+So removal takes two steps. **Mark inactive** stops all collection and starts a hold set by the device's retention policy. Once retention has removed every backup it is allowed to remove, the action becomes **Delete**, which removes the device row and its job history. A device with no stored backups (never backed up) can be deleted straight away. For the exceptions, such as a device added by mistake or a hold that must end now, a global administrator can **purge** an inactive device, which deletes its backups at once, pins included.
+
+**States.** `active`, then `inactive` (holding backups), then `deletable` (inactive, and nothing retention could still remove). `deletable` is worked out from the device's backups, not stored:
+- **Inactive**: `inactive_at` is set. The device is never collected: no schedule, no Backup Now, no pushes. Its backups stay readable, downloadable and comparable with the usual grants, and can still be pinned, labelled and annotated.
+- **Deletable**: inactive, and no backup is stored, unpruned and on a target whose driver deletes, and no deletion is in flight (`prune_requested_at` set without `pruned_at`). Backups on targets that keep everything (git, decision 31) do not block deletion. They stay in that target's history, and the delete confirmation says so.
+
+`enabled` keeps its meaning: a temporary pause of a device that is still in service. An inactive device ignores `enabled`.
+
+**Model.** `Device` gains:
+- `inactive_at` and `inactive_by`: when the device was marked inactive, and by whom.
+- `inactive_reason`: up to 200 characters, optional ("replaced by core-sw-02").
+- `purge_requested_at` and `purge_requested_by`: set when a global administrator purges the device.
+- The unique constraint on `ip_address` becomes a partial one, applied only while `inactive_at` is null. A replacement usually takes over the old device's address, so it must not wait out the old device's hold. Inactive devices are never matched to pushes, so the receivers' match by source address stays unambiguous (decision 25). Reactivating a device whose address an active device now uses fails with 400.
+
+`RetentionPolicy` gains `inactive_keep_days` (90 by default, nullable): how long an inactive device's backups are kept, counted from `inactive_at`. The migration sets existing policies to 90. Null means they are kept until someone acts: the device stays inactive until it is reactivated, given a policy that sets the field, or purged. A device with no retention policy behaves the same way. Nothing is deleted unless a policy or a purge says so.
+
+**Retention.** `retention.plan` treats inactive devices differently:
+- During the hold (`now < inactive_at + inactive_keep_days`), the policy applies as usual, including the `min_backups` floor. The newest backups survive the hold, so the device's final configuration is always there.
+- After the hold, every stored, unpinned and unpruned backup has expired. The `min_backups` floor is lifted because the device will produce no new backups, and the floor exists to keep a current one.
+- Everything else is unchanged. Pinned backups are never deleted, so a pinned backup keeps the device inactive until someone unpins it (the UI says which backups are holding it). A policy in dry run audits what would go and deletes nothing. The 1000-deletion cap per pass still applies. Deletions are confirmed by `deleted` events, as now (decision 30).
+
+- A purged device has no hold, no floor and no pins left (the purge removed them), and dry run does not apply: every stored, unpruned backup has expired, whatever its policy, or with no policy at all. The purge itself sends the deletions (below), so the pass only picks up what it could not send, such as backups on a target with no worker online.
+
+Retention never deletes the device itself. When the last deletion is confirmed, the device becomes `deletable` and waits for a person.
+
+**API.** Deactivate, reactivate and delete need `HasDeviceGroupPermission('admin')`, as the permission matrix already says for disabling and deleting devices. They lock the device row (`select_for_update`):
+- `POST /api/devices/{id}/deactivate/` `{reason}`: sets the inactive fields. A job that is already running finishes normally. If the device was push-enabled, the receivers get a new assignment without it (`push.service.bump_receivers`).
+- `POST /api/devices/{id}/reactivate/`: clears them, and the purge fields too. The device goes back to its schedule, and the receivers get it back if it pushes. Backups that retention already deleted stay deleted, and deletions already requested still complete.
+- `POST /api/devices/{id}/purge/` `{confirm}` needs `IsGlobalAdmin`: it ends the hold and removes pins, which overrides both the group's policy and its administrators' pins, so a group `admin` grant is not enough. `confirm` must equal the device name. The device must be inactive (400 otherwise), so a purge is always the second deliberate step. Under the row lock it sets the purge fields, unpins every pinned backup of the device, and claims all its stored, unpruned backups for deletion through `retention.request_deletion`, batched by target as retention does but not counted against the per-pass cap. Pinning a backup of a purged device gives 400.
+- `DELETE /api/devices/{id}/`: allowed only when the device is `deletable` or has never had a stored backup. Otherwise it answers 409 with the reason (active, holding until a given date, held by N pinned backups, deletions in flight). The state is re-checked under the row lock, and the delete removes the device, its job rows and its `SearchDocument`.
+- While a device is inactive, the API rejects edits to anything except `retention_policy` and `inactive_reason` (400). A device that is being kept should not be reconfigured.
+- The device serializers add `inactive_at`, `inactive_by_username`, `inactive_reason`, `purge_requested_at`, `purge_requested_by_username`, `lifecycle` (`active`, `inactive` or `deletable`), `held_until` (the end of the hold, or null when it has no end), `held_backups` (stored backups retention could still delete) and `pinned_backups`. The list annotates the counts in one query. `?lifecycle=active|inactive|deletable` filters the list, and leaving it out returns every device.
+
+**Effects elsewhere.**
+- Scheduler, Backup Now and `create_job`: inactive devices are skipped or refused, with `JobError('the device is inactive')`.
+- Push: `push_devices()` leaves inactive devices out, and the `events` re-check refuses a file from an inactive device with `device_changed`, as it does for a disabled one.
+- Config search: search shows a device's current configuration, so a retired device's configuration would give wrong answers to "which devices still have…". Deactivating deletes the device's `SearchDocument`, and the catch-up pass skips inactive devices and rebuilds the document after reactivation.
+- Dashboard: summary and freshness count active devices only. Activity, trend, failing and storage keep counting the device's jobs, because they describe history and the storage actually used, until the device is deleted (decision 37).
+- Device groups, collection groups, credentials and storage targets that are referenced by inactive devices still cannot be deleted, as now. A target holding their backups stays protected until the device is deleted.
+
+**Audit.** `device.deactivate` (with the reason), `device.reactivate`, and `device.delete`. `device.delete` keeps a snapshot, because the row is gone afterwards: name, address, group, driver, number of job rows, first and last backup, and the targets that still hold content that cannot be deleted. Refused deletes (409) are not audited, since nothing changed. `device.purge` records the device, how many backups and bytes were claimed for deletion, and each backup it unpinned (job, label, who had pinned it), so the pins are not lost silently. Retention's own audit entries record what its passes delete.
+
+**Frontend.**
+- Devices page: a lifecycle filter (Active by default, Inactive, All). Inactive devices get an "Inactive" badge and a tooltip with the reason, who marked them and when. In place of Disabled, the badge shows "Held until 23 Jan 2027", "Held by 2 pinned backups", "Kept (no policy limit)", "Purging (12 left)" or "Ready to delete".
+- Group administrators get one action whose label follows the state: "Mark inactive" for an active device (a `FormDialog` asking for the reason and showing the policy's hold), "Delete" when the device is deletable or never stored a backup, and "Reactivate" on an inactive device.
+- Delete confirms by asking for the device name to be typed. It names any backups that will stay in a git target's history.
+- Global administrators also get "Purge backups now" on an inactive device that still holds backups. The dialog states how many backups and bytes go, lists the pinned ones with their labels, and asks for the device name to be typed.
+- The device's backups page shows a banner while the device is inactive, with the hold and links to the pinned backups that are holding it. Backup Now and edit are hidden there.
+- The retention policy form gains "Keep inactive devices' backups for (days)", 90 by default, which can be cleared to keep them indefinitely.
+
+**Out of scope.** Deleting devices automatically when they become deletable. The device row and its job history are the last record of the device, so a person decides when they go.
 
 ## 8. HA
 
@@ -459,6 +516,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 17 | `feat/secret-search` | Secret search mode (audited without the value) and private saved searches, with their UI | yes |
 | 18 | `feat/dashboard` | Dashboard upgrades (ROADMAP Q13, section 7.3): per-card `/api/dashboard/` endpoints (summary, activity, trend, freshness, failing, storage, push refusals for global admins); one grouped query per trend; `(state, finished_at)` index; push refusals kept by age; in-house SVG chart components replacing the canvas chart; page-wide period in the URL; dead `DashboardLayout` removed | yes |
 | 19 | `feat/backup-pins` | Pin, label and annotate backups (ROADMAP Q8, section 7.4): `pin/` (group `admin`, locked against retention) and `annotate/` (`view_contents`) actions, who and when, `?pinned=`/`?labelled=` filters, audit, UI on the backups, compare and search pages | yes |
+| 20 | `feat/device-decommission` | Decommissioning devices (section 7.5): Mark inactive (who, when, reason), a hold set by the new `RetentionPolicy.inactive_keep_days` (90 days by default), retention lifting the `min_backups` floor once the hold ends, Delete only when nothing deletable remains (409 otherwise), global-admin purge (unpins, deletes at once, audited), the IP address unique among active devices only, inactive devices left out of scheduling, push, search and the dashboard device counts, audit with a snapshot on delete, lifecycle filter and actions in the UI | yes |
 | later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
@@ -508,3 +566,6 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 37 | (phase 18) Dashboard figures are **computed on request** from job rows, one endpoint per card, filtered by `access.devices_for(user, 'view')`. No rollup table and no scheduled aggregation: the data is small at the expected scale, and a rollup would be a second copy to keep consistent with retention and device deletion. Push refusals are shown to global administrators only, since they belong to no device group. |
 | 38 | (phase 18) Charts are **in-house components** (SVG time series, HTML bar lists), not a charting library. The dashboard needs only daily lines, bars and horizontal bars. SVG follows the theme through CSS variables, gives hover and keyboard values and a text alternative without extra work, and adds no dependency to keep pinned. |
 | 39 | (phase 19) Pinning needs the group's **`admin`** grant, because it overrides that group's retention policy. Labels and notes need **`view_contents`**, because they describe content. They are separate actions with separate audit entries. Pinning takes the same row lock as retention's deletion claim, so a backup is never both pinned and deleted. |
+| 40 | (phase 20) Devices are removed in two steps. **Mark inactive** stops collection and starts a hold. **Delete** removes the device and its job rows, and is allowed only once retention has removed every backup it may remove (or the device never stored one). Only a person deletes a device; retention never does. A global administrator can **purge** an inactive device to end its hold early: it unpins and deletes every backup at once, needs the device name typed, and is audited with the pins it removed. A group `admin` cannot, since a purge overrides the group's policy and pins. Backups on targets that keep everything (git) do not block deletion and stay in their history. |
+| 41 | (phase 20) The hold is a retention policy setting, `inactive_keep_days` (90 days by default), counted from when the device was marked inactive. During the hold the policy applies as usual, `min_backups` included. Afterwards the floor is lifted and every unpinned backup expires. With no value, or no policy, backups are kept until someone acts (reactivates, sets a policy, or purges). Pinned backups keep a device inactive until they are unpinned. |
+| 42 | (phase 20) `Device.ip_address` is unique among **active** devices only, so a replacement can take over its predecessor's address during the hold. Inactive devices are never matched to pushes, so decision 25 still holds. Reactivating a device whose address is taken fails. |
