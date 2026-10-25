@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from django.conf import settings
 from django.db.models import ProtectedError
 from rest_framework import decorators, mixins, response, serializers, status, viewsets
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
@@ -31,6 +31,7 @@ from core import workers as worker_registry
 from core.models import UserProfile, Worker
 from core.workers import driver_catalogue
 from credentials.models import Credential, CredentialType
+from devices import lifecycle
 from devices.models import CollectionGroup, Device, DeviceType, Manufacturer
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_RECEIVER, ROLE_STORAGE, STATUS_APPROVED
 from policies.models import BackupSchedule, RetentionPolicy
@@ -124,20 +125,45 @@ class BackupMethodViewSet(viewsets.ViewSet):
         return response.Response(data, status=status.HTTP_200_OK)
 
 
+class DeactivateSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+
+
+class PurgeSerializer(serializers.Serializer):
+    confirm = serializers.CharField(help_text='The device name, typed to confirm')
+
+
 class DeviceViewSet(viewsets.ModelViewSet):
     """Devices in the device groups the user can view (a device in another group is a 404).
 
     Creating, changing and deleting a device needs ``admin`` on its group (on both
     groups when moving it); ungrouped devices are for global administrators.
-    ``POST {id}/backup_now/`` needs ``backup_now``.
+    ``POST {id}/backup_now/`` needs ``backup_now``. Retiring a device
+    (``deactivate/``, ``reactivate/``, and ``DELETE`` once it is deletable) needs
+    ``admin``; ``purge/`` is for global administrators (devices.lifecycle).
+    ``?lifecycle=active|inactive|deletable`` filters the list.
     """
 
     serializer_class = DeviceSerializer
     permission_classes = [HasDeviceGroupPermission('view')]
 
     def get_queryset(self):
-        devices = Device.objects.select_related('device_type', 'manufacturer', 'collection_group', 'device_group')
-        return access.devices_for(self.request.user, 'view', devices)
+        devices = Device.objects.select_related(
+            'device_type',
+            'manufacturer',
+            'collection_group',
+            'device_group',
+            'retention_policy',
+            'inactive_by',
+            'purge_requested_by',
+        )
+        devices = lifecycle.with_lifecycle(access.devices_for(self.request.user, 'view', devices))
+        state = self.request.query_params.get('lifecycle')
+        if self.action == 'list' and state:
+            if state not in (lifecycle.ACTIVE, lifecycle.INACTIVE, lifecycle.DELETABLE):
+                raise ValidationError({'lifecycle': 'Use active, inactive or deletable.'})
+            devices = lifecycle.filter_lifecycle(devices, state)
+        return devices
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -162,13 +188,88 @@ class DeviceViewSet(viewsets.ModelViewSet):
             self._require_admin(serializer.validated_data['device_group'])
         serializer.save()
 
-    def perform_destroy(self, instance):
-        self._require_admin(instance.device_group)
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        device = self.get_object()
+        self._require_admin(device.device_group)
+        group = device.device_group_id
+        try:
+            snapshot = lifecycle.delete(device)
+        except lifecycle.LifecycleError as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_409_CONFLICT)
+        record(request, 'device.delete', resource=str(snapshot['device']), device_group=group, details=snapshot)
+        return response.Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _detail(self) -> response.Response:
+        return response.Response(
+            DeviceDetailedSerializer(self.get_object(), context=self.get_serializer_context()).data
+        )
 
     @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('backup_now')])
     def backup_now(self, request, pk=None):
         return device_backup_now(request, self.get_object())
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('admin')])
+    def deactivate(self, request, pk=None):
+        """Mark the device inactive: no more backups, and its retention policy's hold begins."""
+        body = DeactivateSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            device = lifecycle.deactivate(self.get_object(), request.user, body.validated_data['reason'])
+        except lifecycle.LifecycleError as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        record(
+            request,
+            'device.deactivate',
+            resource=str(device.pk),
+            device_group=device.device_group_id,
+            details={'device': device.pk, 'device_name': device.name, 'reason': device.inactive_reason},
+        )
+        return self._detail()
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('admin')])
+    def reactivate(self, request, pk=None):
+        """Put an inactive device back in service."""
+        try:
+            device = lifecycle.reactivate(self.get_object())
+        except lifecycle.LifecycleError as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        record(
+            request,
+            'device.reactivate',
+            resource=str(device.pk),
+            device_group=device.device_group_id,
+            details={'device': device.pk, 'device_name': device.name},
+        )
+        return self._detail()
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[IsGlobalAdmin])
+    def purge(self, request, pk=None):
+        """End an inactive device's hold now: unpin and delete all of its backups."""
+        device = self.get_object()
+        body = PurgeSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        if body.validated_data['confirm'] != device.name:
+            return response.Response(
+                {'error': 'Type the device name to confirm the purge.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            result = lifecycle.purge(device, request.user)
+        except lifecycle.LifecycleError as exc:
+            return response.Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        record(
+            request,
+            'device.purge',
+            resource=str(device.pk),
+            device_group=device.device_group_id,
+            details={
+                'device': device.pk,
+                'device_name': device.name,
+                'requested': len(result.requested),
+                'requested_bytes': sum(job.size_bytes or 0 for job in result.requested),
+                'unpinned': result.unpinned,
+            },
+        )
+        return self._detail()
 
 
 @decorators.api_view(['GET'])

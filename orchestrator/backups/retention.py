@@ -7,9 +7,16 @@ For each policy it works out which backups of its devices have expired
 storage worker reports each deletion as a job event (``backups.jobs``); the job
 row stays, marked pruned, as the record of what was kept and when it went.
 
+Inactive devices (``devices.lifecycle``) follow their policy for its
+``inactive_keep_days`` after being marked inactive; then every unpinned backup
+expires, the newest included, since the device makes no new ones. A purged device
+(a global administrator ended its hold) loses every backup whatever its policy,
+dry run included: ``apply_purges`` sends what the purge itself could not.
+
 Safety rails:
 
-- the newest ``min_backups`` (at least one) of a device are always kept;
+- the newest ``min_backups`` (at least one) of an active device, or of an
+  inactive one during its hold, are always kept;
 - pinned backups are never counted or deleted;
 - backups on a target whose driver does not delete (git) are kept;
 - new policies start in dry run, which audits what would go instead;
@@ -47,15 +54,29 @@ ITEMS_PER_TASK = 100
 AUDIT_MAX_JOBS = 100
 
 
-def expired_jobs(device, policy: RetentionPolicy, now: datetime) -> list[BackupJob]:
-    """The stored backups of ``device`` that ``policy`` no longer keeps, newest first."""
-    cutoff = now - timedelta(days=policy.max_days) if policy.max_days is not None else None
-    jobs = (
+def _stored(device):
+    """The device's stored, unpinned, unpruned backups, newest first."""
+    return (
         BackupJob.objects.filter(device=device, state=BackupJob.STORED, pinned=False, pruned_at__isnull=True)
         .exclude(storage_ref='')
         .select_related('device', 'storage_target')
         .order_by('-created_at')
     )
+
+
+def hold_over(device, policy: RetentionPolicy, now: datetime) -> bool:
+    """Whether ``device`` is inactive and ``policy``'s hold of its backups has ended."""
+    if device.inactive_at is None or policy.inactive_keep_days is None:
+        return False
+    return now >= device.inactive_at + timedelta(days=policy.inactive_keep_days)
+
+
+def expired_jobs(device, policy: RetentionPolicy, now: datetime) -> list[BackupJob]:
+    """The stored backups of ``device`` that ``policy`` no longer keeps, newest first."""
+    jobs = _stored(device)
+    if hold_over(device, policy, now):
+        return list(jobs)
+    cutoff = now - timedelta(days=policy.max_days) if policy.max_days is not None else None
     expired = []
     total = 0
     for index, job in enumerate(jobs):
@@ -90,15 +111,26 @@ class Plan:
         return sum(job.size_bytes or 0 for job in self.jobs)
 
 
+def keeping_drivers() -> set[str]:
+    # Only a driver that says so keeps everything; one no worker offers now is just unavailable.
+    return {key for key, driver in storage_driver_catalogue().items() if not driver['deletes']}
+
+
+def purge_jobs(device, keeping: set[str] | None = None) -> list[BackupJob]:
+    """Every backup of a purged ``device`` that can be deleted, newest first."""
+    keeping = keeping_drivers() if keeping is None else keeping
+    return [job for job in _stored(device) if job.storage_target.driver not in keeping]
+
+
 def plan(policy: RetentionPolicy, now: datetime | None = None) -> Plan:
-    """Which backups of the devices using ``policy`` have expired."""
+    """Which backups of the devices using ``policy`` have expired (purged devices aside)."""
     from devices.models import Device
 
     now = now or timezone.now()
-    # Only a driver that says so keeps everything; one no worker offers now is just unavailable.
-    keeping = {key for key, driver in storage_driver_catalogue().items() if not driver['deletes']}
+    keeping = keeping_drivers()
     result = Plan()
-    for device in Device.objects.filter(retention_policy=policy).order_by('name'):
+    devices = Device.objects.filter(retention_policy=policy, purge_requested_at__isnull=True)
+    for device in devices.order_by('name'):
         jobs = expired_jobs(device, policy, now)
         deletable = [job for job in jobs if job.storage_target.driver not in keeping]
         result.kept += len(jobs) - len(deletable)
@@ -146,6 +178,44 @@ def _send(envelope: dict[str, Any], queue: str) -> None:
     celery_app.send_task(DELETE_TASK, args=[envelope], queue=queue, expires=int(PRUNE_RETRY_AFTER.total_seconds()))
 
 
+def _due(jobs: list[BackupJob], now: datetime) -> list[BackupJob]:
+    """Those not asked for already, or asked for so long ago that the request is sent again."""
+    stale = now - PRUNE_RETRY_AFTER
+    return [job for job in jobs if not job.prune_requested_at or job.prune_requested_at < stale]
+
+
+def apply_purges(now: datetime, budget: int) -> int:
+    """Send the deletions purged devices still need. Returns how many were requested."""
+    from devices.models import Device
+
+    keeping = keeping_drivers()
+    requested = 0
+    for device in Device.objects.filter(purge_requested_at__isnull=False).order_by('pk'):
+        if requested >= budget:
+            break
+        due = _due(purge_jobs(device, keeping), now)[: budget - requested]
+        if not due:
+            continue
+        sent = request_deletion(due, now)
+        requested += len(sent)
+        if sent:
+            record(
+                None,
+                'retention.purge',
+                resource=str(device.pk),
+                device_group=device.device_group_id,
+                details={
+                    'device': device.pk,
+                    'device_name': device.name,
+                    'requested': len(sent),
+                    'requested_bytes': sum(job.size_bytes or 0 for job in sent),
+                    'jobs': [str(job.id) for job in sent[:AUDIT_MAX_JOBS]],
+                },
+                actor_name=ACTOR,
+            )
+    return requested
+
+
 def apply_policy(policy: RetentionPolicy, now: datetime, budget: int) -> int:
     """One retention pass of ``policy``. Returns how many deletions it requested."""
     found = plan(policy, now)
@@ -169,8 +239,7 @@ def apply_policy(policy: RetentionPolicy, now: datetime, budget: int) -> int:
                 actor_name=ACTOR,
             )
     else:
-        stale = now - PRUNE_RETRY_AFTER
-        due = [job for job in jobs if not job.prune_requested_at or job.prune_requested_at < stale][:budget]
+        due = _due(jobs, now)[:budget]
         sent = request_deletion(due, now)
         result['requested'] = len(sent)
         if sent:
@@ -201,6 +270,12 @@ def run_retention(now: datetime | None = None, leading: Callable[[], bool] | Non
     """
     now = now or timezone.now()
     requested = 0
+    if leading is not None and not leading():
+        return requested
+    try:
+        requested += apply_purges(now, MAX_DELETIONS_PER_PASS)
+    except Exception:
+        logger.exception('retention_purge_failed')
     for policy in RetentionPolicy.objects.order_by('pk'):
         if leading is not None and not leading():
             logger.warning('scheduler_lease_lost', extra={'policy': policy.pk})

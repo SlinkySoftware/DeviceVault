@@ -52,6 +52,8 @@ def create_job(device, *, trigger=BackupJob.TRIGGER_MANUAL, user=None, schedule=
     If the device already has an active job, that job is returned instead, so
     repeated "backup now" clicks and overlapping schedules do not pile up.
     """
+    if device.inactive_at is not None:
+        raise JobError('the device is inactive')
     if not device.backup_method:
         raise JobError('the device is not polled (it only pushes its backups)')
     if not device.collection_group:

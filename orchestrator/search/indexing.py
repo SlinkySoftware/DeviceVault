@@ -67,14 +67,18 @@ def _is_current(document: SearchDocument | None, driver: str, kid: str, patterns
     )
 
 
-def index_job(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) -> SearchDocument:
+def index_job(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) -> SearchDocument | None:
     """Make ``job`` (stored) its device's search document, unless a newer backup already is.
+
+    Inactive devices have no document (search shows current configurations): None.
 
     ``read`` reads a backup's plaintext (default ``backups.content.read_content``).
     Raises ``ContentUnavailable`` when the backup cannot be read back right now.
     """
     read = read or read_content
     device = job.device
+    if device.inactive_at is not None:
+        return None
     document = SearchDocument.objects.select_related('job').filter(device=device).first()
     if document is not None and document.job.created_at > job.created_at:
         return document  # tasks ran out of order
@@ -105,6 +109,8 @@ def index_job(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) 
         locked = SearchDocument.objects.select_for_update().select_related('job').filter(device=device).first()
         if locked is not None and locked.job.created_at > job.created_at:
             return locked  # a newer backup was indexed meanwhile
+        if not Device.objects.filter(pk=device.pk, inactive_at__isnull=True).exists():
+            return None  # marked inactive meanwhile
         document, _ = SearchDocument.objects.update_or_create(device=device, defaults=fields)
     return document
 
@@ -126,7 +132,8 @@ def stale_jobs() -> list[tuple[int, str]]:
         .values('pk')[:1]
     )
     rows = (
-        Device.objects.annotate(newest_job=Subquery(newest))
+        Device.objects.filter(inactive_at__isnull=True)
+        .annotate(newest_job=Subquery(newest))
         .filter(newest_job__isnull=False)
         .values_list('pk', 'newest_job', 'backup_method')
     )

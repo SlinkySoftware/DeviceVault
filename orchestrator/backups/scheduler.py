@@ -66,7 +66,7 @@ class Leadership:
 
 
 def run_due_schedules(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> int:
-    """Create jobs for every enabled device on every schedule that is due. Returns jobs created.
+    """Create jobs for every enabled, active device on every schedule that is due. Returns jobs created.
 
     A schedule that was missed (e.g. the orchestrator was down) runs once on
     catch-up, not once per missed slot. ``leading`` is asked before each due
@@ -86,7 +86,7 @@ def run_due_schedules(now: datetime | None = None, leading: Callable[[], bool] |
             logger.warning('scheduler_lease_lost', extra={'schedule': schedule.pk})
             break
         with transaction.atomic():
-            for device in schedule.devices.filter(enabled=True).select_related(
+            for device in schedule.devices.filter(enabled=True, inactive_at__isnull=True).select_related(
                 'collection_group', 'storage_target', 'credential'
             ):
                 try:

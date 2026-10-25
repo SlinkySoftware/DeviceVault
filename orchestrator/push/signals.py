@@ -9,11 +9,11 @@ from devicevault_protocol.push import PUSH_OFF
 from .service import bump_receivers
 
 # What receivers are told about a device; a change to anything else is no news to them.
-_FIELDS = ('ip_address', 'push_mode', 'push_filename_pattern', 'enabled')
+_FIELDS = ('ip_address', 'push_mode', 'push_filename_pattern', 'enabled', 'inactive_at')
 
 
 def _pushing(values: dict) -> bool:
-    return values['push_mode'] != PUSH_OFF and values['enabled']
+    return values['push_mode'] != PUSH_OFF and values['enabled'] and values['inactive_at'] is None
 
 
 @receiver(pre_save, sender=Device)

@@ -37,6 +37,10 @@ class RetentionPolicy(models.Model):
     the newest. Whatever the limits, the newest ``min_backups`` are always kept, and
     pinned backups are neither counted nor deleted. A policy in ``dry_run`` only
     reports (and audits) what it would delete.
+
+    An inactive device's backups follow the policy for ``inactive_keep_days`` after it
+    was marked inactive; then every unpinned one expires, ``min_backups`` included.
+    With no value they are kept until someone acts.
     """
 
     name = models.CharField(max_length=128, help_text='Descriptive name for this retention policy')
@@ -49,6 +53,12 @@ class RetentionPolicy(models.Model):
         default=1,
         validators=[MinValueValidator(1)],
         help_text='Always keep the newest N backups, whatever the limits say',
+    )
+    inactive_keep_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=90,
+        help_text="Keep an inactive device's backups for N days after it was marked inactive (empty: indefinitely)",
     )
     dry_run = models.BooleanField(default=True, help_text='Only report what would be deleted; delete nothing')
     last_run_at = models.DateTimeField(null=True, blank=True, help_text='When retention last applied this policy')

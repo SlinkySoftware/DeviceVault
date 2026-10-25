@@ -8,6 +8,12 @@
       </q-badge>
     </div>
 
+    <q-banner v-if="device && inactive" rounded class="bg-grey-3 text-dark q-mb-md">
+      <template #avatar><q-icon name="archive" color="grey-8" /></template>
+      {{ inactiveSummary(device) }}. {{ holdLabel(device) }}. An inactive device keeps its settings: reactivate it
+      from the Devices page to change them. Only its retention policy can change meanwhile.
+    </q-banner>
+
     <q-card v-if="device" class="q-mb-md">
       <q-card-section class="row q-col-gutter-md">
         <div class="col-12 col-sm-6">
@@ -159,7 +165,7 @@
             clearable
             outlined
             label="Retention policy"
-            :disable="!canModify"
+            :disable="!canChangePolicy"
           />
           <q-select
             v-model="form.schedule"
@@ -195,8 +201,8 @@
           />
 
           <div class="row q-gutter-sm">
-            <q-btn v-if="canModify" type="submit" color="primary" label="Save" :loading="saving" />
-            <q-btn flat :label="canModify ? 'Cancel' : 'Back'" :to="{ name: 'devices' }" />
+            <q-btn v-if="canModify || canChangePolicy" type="submit" color="primary" label="Save" :loading="saving" />
+            <q-btn flat :label="canModify || canChangePolicy ? 'Cancel' : 'Back'" :to="{ name: 'devices' }" />
           </div>
         </q-form>
       </q-card-section>
@@ -239,6 +245,7 @@ import { useNotify } from '@/composables/useNotify'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/datetime'
 import { statusColor } from '@/utils/format'
+import { holdLabel, inactiveSummary } from '@/utils/lifecycle'
 import { keepKnown } from '@/utils/schema'
 
 const route = useRoute()
@@ -304,7 +311,11 @@ function onMethodChange(key: string): void {
   form.value.driver_params = keepKnown(form.value.driver_params, method?.params_schema)
 }
 
-const canModify = computed(() => (device.value ? device.value.user_permissions.includes('admin') : true))
+const isAdmin = computed(() => (device.value ? device.value.user_permissions.includes('admin') : true))
+const inactive = computed(() => !!device.value && device.value.lifecycle !== 'active')
+const canModify = computed(() => isAdmin.value && !inactive.value)
+// An inactive device keeps its settings; only its retention policy (how long its backups are held) can change.
+const canChangePolicy = computed(() => isAdmin.value && inactive.value)
 const title = computed(() => {
   if (!isEdit.value) return 'Add Device'
   return `${canModify.value ? 'Configure' : 'View'} ${device.value?.name ?? 'Device'}`
@@ -352,7 +363,9 @@ function toForm(detail: DeviceDetail): DeviceWrite {
 async function save(): Promise<void> {
   saving.value = true
   try {
-    if (deviceId.value !== null) {
+    if (deviceId.value !== null && inactive.value) {
+      await devicesApi.patch(deviceId.value, { retention_policy: form.value.retention_policy })
+    } else if (deviceId.value !== null) {
       await devicesApi.update(deviceId.value, form.value)
     } else {
       await devicesApi.create(form.value)

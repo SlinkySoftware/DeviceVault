@@ -51,6 +51,8 @@ export interface RetentionPolicy {
   max_days: number | null
   max_size_bytes: number | null
   min_backups: number
+  /** Days an inactive device's backups are kept after it was marked inactive; null: indefinitely. */
+  inactive_keep_days: number | null
   /** Only report what would be deleted. */
   dry_run: boolean
   last_run_at: IsoDateTime | null
@@ -196,6 +198,12 @@ export interface DeviceGroup {
   user_permissions: GrantFlag[]
 }
 
+/**
+ * Where a device is in its retirement: `inactive` while its backups are held,
+ * `deletable` once nothing retention could delete is left.
+ */
+export type DeviceLifecycle = 'active' | 'inactive' | 'deletable'
+
 interface DeviceBase {
   id: Id
   name: string
@@ -218,6 +226,21 @@ interface DeviceBase {
   schedule: Id | null
   /** What the signed-in user holds on this device's group. */
   user_permissions: GrantFlag[]
+  inactive_at: IsoDateTime | null
+  inactive_by_username: string | null
+  inactive_reason: string
+  /** Set when a global administrator purged its backups. */
+  purge_requested_at: IsoDateTime | null
+  purge_requested_by_username: string | null
+  lifecycle: DeviceLifecycle
+  /** End of an inactive device's hold; null while active, purged, or kept with no time limit. */
+  held_until: IsoDateTime | null
+  /** Stored backups retention could still delete, and their size. */
+  held_backups: number
+  held_bytes: number
+  pinned_backups: number
+  /** Deletable, or never stored a backup. */
+  can_delete: boolean
 }
 
 /** List representation. */
@@ -249,6 +272,8 @@ export interface DeviceWrite {
   storage_target: string | null
   credential: Id | null
   schedule: Id | null
+  /** Only for an inactive device. */
+  inactive_reason?: string
 }
 
 // --- Backups -------------------------------------------------------------------

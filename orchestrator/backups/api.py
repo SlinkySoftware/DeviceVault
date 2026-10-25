@@ -216,6 +216,10 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
                         {'error': 'Its retention policy has already deleted this backup.'},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
+                if job.device.purge_requested_at:
+                    return response.Response(
+                        {'error': "This device's backups are being purged."}, status=status.HTTP_400_BAD_REQUEST
+                    )
                 job.pinned, job.pinned_by, job.pinned_at = True, request.user, timezone.now()
             elif not pinned and job.pinned:
                 job.pinned, job.pinned_by, job.pinned_at = False, None, None

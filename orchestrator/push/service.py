@@ -29,7 +29,7 @@ def push_devices() -> list[dict[str, Any]]:
     """The devices receivers accept pushes from."""
     from devices.models import Device
 
-    devices = Device.objects.filter(enabled=True).exclude(push_mode=PUSH_OFF).order_by('pk')
+    devices = Device.objects.filter(enabled=True, inactive_at__isnull=True).exclude(push_mode=PUSH_OFF).order_by('pk')
     return [
         {'id': d.pk, 'ip': d.ip_address, 'push_mode': d.push_mode, 'filename_pattern': d.push_filename_pattern}
         for d in devices
