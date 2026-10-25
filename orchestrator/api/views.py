@@ -86,12 +86,6 @@ class CollectionGroupViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         return CollectionGroupSerializer if access.is_global_admin(self.request.user) else SummarySerializer
 
-    def perform_update(self, serializer):
-        old_queue = serializer.instance.rabbitmq_queue_id
-        group = serializer.save()
-        if group.rabbitmq_queue_id != old_queue:
-            worker_registry.bump_collection_group(group)
-
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.device_count > 0:

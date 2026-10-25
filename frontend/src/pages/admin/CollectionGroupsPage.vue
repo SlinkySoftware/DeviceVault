@@ -40,13 +40,7 @@
     >
       <q-input v-model.trim="crud.form.value.name" label="Name" outlined autofocus :rules="[required]" />
       <q-input v-model="crud.form.value.description" label="Description" type="textarea" autogrow outlined />
-      <q-input
-        v-model.trim="crud.form.value.rabbitmq_queue_id"
-        label="Queue ID"
-        outlined
-        :hint="`Collectors consume ${queueName(crud.form.value.rabbitmq_queue_id || '<id>')}`"
-        :rules="[required, queueId]"
-      />
+      <div class="text-caption text-grey">The group's queue is named for you and sent to its collectors.</div>
     </FormDialog>
   </PageCard>
 </template>
@@ -62,16 +56,15 @@ import RowActions from '@/components/RowActions.vue'
 import { useCrud } from '@/composables/useCrud'
 import { required } from '@/utils/rules'
 
-type Form = Pick<CollectionGroup, 'name' | 'description' | 'rabbitmq_queue_id'>
+type Form = Pick<CollectionGroup, 'name' | 'description'>
 
 const queueName = (id: string) => `collector.group.${id}`
-const queueId = (value: string) => /^[\w.-]+$/.test(value) || 'Letters, digits, ".", "-" and "_" only'
 
 const crud = useCrud<CollectionGroup, Form>({
   api: collectionGroupsApi,
   noun: 'collection group',
-  emptyForm: () => ({ name: '', description: '', rabbitmq_queue_id: '' }),
-  toForm: (row) => ({ name: row.name, description: row.description, rabbitmq_queue_id: row.rabbitmq_queue_id }),
+  emptyForm: () => ({ name: '', description: '' }),
+  toForm: (row) => ({ name: row.name, description: row.description }),
 })
 
 const columns: QTableColumn<CollectionGroup>[] = [

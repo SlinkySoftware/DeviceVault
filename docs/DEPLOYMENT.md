@@ -176,7 +176,7 @@ matches and **Approve** the worker with a role:
 The worker starts consuming within seconds. It pins the orchestrator key shown
 on the Workers page; check that the fingerprint in its `orchestrator_pinned`
 log line matches. To automate approval: `manage.py approve_worker <name>
---role collector --groups <queue id> ...` or `--role storage --targets <name> ...`.
+--role collector --groups <group name> ...` or `--role storage --targets <name> ...`.
 
 - Keep the `state` volume. Deleting it (or `identity.json`) resets the worker:
   it registers as a new, pending worker.

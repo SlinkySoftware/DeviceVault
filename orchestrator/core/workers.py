@@ -174,12 +174,6 @@ def approval_target_problems(worker: Worker, targets) -> list[str]:
     return problems
 
 
-def bump_collection_group(group) -> None:
-    """A collection group's queue changed: reassign every worker serving it."""
-    for worker in Worker.objects.filter(collection_groups=group, status=STATUS_APPROVED):
-        update_assignment(worker)
-
-
 # --- events --------------------------------------------------------------------------
 
 

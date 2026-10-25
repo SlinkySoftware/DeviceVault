@@ -15,7 +15,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('name', help='Worker name, or a prefix ending in * (e.g. "collector-*")')
         parser.add_argument('--role', required=True, choices=ROLES)
-        parser.add_argument('--groups', nargs='*', default=[], help='Collection group queue IDs (collectors)')
+        parser.add_argument('--groups', nargs='*', default=[], help='Collection group names (collectors)')
         parser.add_argument('--all-groups', action='store_true', help='Assign every collection group')
         parser.add_argument('--targets', nargs='*', default=[], help='Storage target names (storage workers)')
         parser.add_argument(
@@ -32,13 +32,11 @@ class Command(BaseCommand):
         collection_groups = []
         if role == ROLE_COLLECTOR:
             collection_groups = list(
-                CollectionGroup.objects.all()
-                if all_groups
-                else CollectionGroup.objects.filter(rabbitmq_queue_id__in=groups)
+                CollectionGroup.objects.all() if all_groups else CollectionGroup.objects.filter(name__in=groups)
             )
-            missing = set(groups) - {g.rabbitmq_queue_id for g in collection_groups}
+            missing = set(groups) - {g.name for g in collection_groups}
             if missing:
-                raise CommandError(f'Unknown collection group queue IDs: {", ".join(sorted(missing))}')
+                raise CommandError(f'Unknown collection groups: {", ".join(sorted(missing))}')
 
         named = list(StorageTarget.objects.filter(name__in=targets))
         missing = set(targets) - {t.name for t in named}

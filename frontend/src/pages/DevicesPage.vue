@@ -113,6 +113,25 @@
       <template #body-cell-actions="props">
         <q-td :props="props" class="no-wrap">
           <q-btn
+            v-if="can(props.row, 'backup_now') && props.row.lifecycle === 'active'"
+            dense
+            color="positive"
+            icon="play_arrow"
+            label="Backup now"
+            class="q-mr-xs"
+            :loading="dispatching.has(props.row.id)"
+            @click="backupNow(props.row)"
+          />
+          <q-btn
+            v-if="can(props.row, 'view')"
+            dense
+            color="primary"
+            icon="history"
+            label="View backups"
+            class="q-mr-xs"
+            :to="{ name: 'device-backups', params: { id: props.row.id } }"
+          />
+          <q-btn
             dense
             round
             flat
@@ -122,31 +141,6 @@
             :to="{ name: 'device-edit', params: { id: props.row.id } }"
           >
             <q-tooltip>{{ can(props.row, 'admin') ? 'Configure' : 'View' }}</q-tooltip>
-          </q-btn>
-          <q-btn
-            v-if="can(props.row, 'view')"
-            dense
-            round
-            flat
-            color="primary"
-            icon="history"
-            aria-label="Backups"
-            :to="{ name: 'device-backups', params: { id: props.row.id } }"
-          >
-            <q-tooltip>Backups</q-tooltip>
-          </q-btn>
-          <q-btn
-            v-if="can(props.row, 'backup_now') && props.row.lifecycle === 'active'"
-            dense
-            round
-            flat
-            color="positive"
-            icon="play_arrow"
-            aria-label="Backup now"
-            :loading="dispatching.has(props.row.id)"
-            @click="backupNow(props.row)"
-          >
-            <q-tooltip>Backup now</q-tooltip>
           </q-btn>
           <q-btn
             v-if="can(props.row, 'admin')"

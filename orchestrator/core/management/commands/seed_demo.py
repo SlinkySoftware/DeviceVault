@@ -235,11 +235,11 @@ def create_sample_data():
 
     cg_secure, _ = CollectionGroup.objects.get_or_create(
         name='Secure Zone Collectors',
-        defaults={'description': 'Collectors for secure/internal zone', 'rabbitmq_queue_id': 'secure_zone_queue'},
+        defaults={'description': 'Collectors for secure/internal zone'},
     )
     cg_dmz, _ = CollectionGroup.objects.get_or_create(
         name='DMZ Zone Collectors',
-        defaults={'description': 'Collectors for DMZ/external zone', 'rabbitmq_queue_id': 'dmz_zone_queue'},
+        defaults={'description': 'Collectors for DMZ/external zone'},
     )
 
     collectors = [cg_secure, cg_dmz]

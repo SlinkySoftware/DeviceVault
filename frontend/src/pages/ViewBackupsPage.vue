@@ -83,10 +83,17 @@
             :to="compareWithPrevious(props.row)"
             class="change-link"
           >
-            {{ changeLabel(props.row) }}
+            <template v-if="hasLineCounts(props.row)">
+              <span class="text-positive">+{{ props.row.lines_added }}</span>
+              {{ ' ' }}
+              <span class="text-negative">−{{ props.row.lines_removed }}</span>
+            </template>
+            <span v-else class="text-warning">{{ changeLabel(props.row) }}</span>
             <q-tooltip>Compare with the previous backup</q-tooltip>
           </router-link>
-          <span v-else-if="changeLabel(props.row)" :class="{ 'text-grey': !props.row.changed }">{{ changeLabel(props.row) }}</span>
+          <span v-else-if="changeLabel(props.row)" :class="props.row.changed ? 'text-warning' : 'text-grey'">{{
+            changeLabel(props.row)
+          }}</span>
           <span v-else class="text-grey">
             —
             <q-tooltip v-if="props.row.summary_error">{{ props.row.summary_error }}</q-tooltip>
@@ -259,6 +266,7 @@ const columns: QTableColumn<BackupJob>[] = [
 // Stored and not deleted by retention, so its content can be read.
 const available = (job: BackupJob) => job.state === 'stored' && !job.pruned
 const comparable = (job: BackupJob) => available(job) && !job.is_binary
+const hasLineCounts = (job: BackupJob) => job.lines_added !== null && job.lines_removed !== null
 const compareWithPrevious = (job: BackupJob): RouteLocationRaw => ({
   name: 'device-backups-compare',
   params: { id: deviceId.value },

@@ -45,7 +45,7 @@
           <q-item v-bind="scope.itemProps">
             <q-item-section>
               <q-item-label>{{ scope.opt.name }}</q-item-label>
-              <q-item-label caption>collector.group.{{ scope.opt.rabbitmq_queue_id }}</q-item-label>
+              <q-item-label v-if="scope.opt.description" caption>{{ scope.opt.description }}</q-item-label>
             </q-item-section>
           </q-item>
         </template>
