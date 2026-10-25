@@ -103,7 +103,9 @@ device group, collection group, credential reference, schedule and push settings
 ### Q8. Pin, label and annotate backups
 A `pinned` flag, free-text label ("pre-upgrade 17.9", "approved baseline") and note on a backup. Pinned
 backups are exempt from retention (Q1): the `BackupJob.pinned` flag and its handling already exist (phase 14),
-so Q8 adds the API and UI to set it, the label and note, and auditing. Needs only the `view_contents`-level permission plus `admin` to pin.
+so Q8 adds the API and UI to set it, the label and note, and auditing. Pinning needs the group's `admin` grant,
+labels and notes `view_contents`. Designed in [ARCHITECTURE.md section 7.4](ARCHITECTURE.md#74-pins-labels-and-notes-phase-19)
+(phase 19).
 
 ### Q9. Personal API tokens
 Scoped, expiring, revocable tokens for scripts and CI, hashed at rest, shown once, audited on use, and
@@ -132,7 +134,8 @@ file as the "latest good" config. Also guards against a truncated SSH session.
 ### Q13. Dashboard upgrades
 Success-rate and duration trend over time, oldest backup per device group, top-N failing devices, push
 refusals, storage usage by target, change counts per day. Data already exists; this is a query and chart
-exercise in the existing dashboard page.
+exercise in the existing dashboard page. Designed in [ARCHITECTURE.md section 7.3](ARCHITECTURE.md#73-dashboard-phase-18)
+(phase 18).
 
 ### Q14. Scheduled digest report
 A weekly/daily summary (success rate, failures, devices with no backup, changes, storage growth) rendered
