@@ -366,7 +366,7 @@ This makes enabling search, rotating keys and upgrading drivers self-healing, wi
 
 Every search runs under a statement timeout (`SET LOCAL statement_timeout`, 5 s; on SQLite, which has none, the line matching stops after 10 s) and returns at most 200 devices. Each device comes with its name, group, driver, backup time and job id, the number of matching lines, and up to 20 of them (line number and text, tokens included).
 
-**Audit.** Every search is recorded (`search.query`: mode, filters, the number of devices matched). A text query is recorded in its tokenised form, so a secret typed into it is not written to the log. A secret search records neither the value nor its token.
+**Audit.** Every search is recorded (`search.query`: mode, filters, the number of devices matched and their ids, since results show configuration lines as content views do). A text query is recorded in its tokenised form, so a secret typed into it is not written to the log. A secret search records neither the value nor its token.
 
 **Saved searches (phase 17).** `SavedSearch`: owner, name, query, mode, filters. They are private to their owner and run on demand, a seed for compliance rules (ROADMAP D2). Secret searches cannot be saved, since that would store the value or a token that goes stale at key rotation.
 

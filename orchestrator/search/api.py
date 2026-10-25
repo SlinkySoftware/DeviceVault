@@ -51,6 +51,8 @@ class SearchView(APIView):
                 'device_group': search.device_group,
                 'driver': search.driver,
                 'devices': len(result['results']),
+                # Results show configuration lines, so record whose (as content views are).
+                'device_ids': [match['device'] for match in result['results']],
                 'truncated': result['truncated'],
             },
         )

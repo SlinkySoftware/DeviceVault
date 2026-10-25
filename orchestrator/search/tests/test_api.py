@@ -157,7 +157,7 @@ def test_results_are_capped(admin_client, indexed, search_on, monkeypatch):
 
 
 def test_searches_are_audited_without_the_secrets_typed(admin_client, indexed, search_on):
-    indexed('edge-01')
+    edge = indexed('edge-01')
 
     search(admin_client, 'snmp-server community public RO')
     search(admin_client, r'^hostname', mode='regex')
@@ -171,6 +171,7 @@ def test_searches_are_audited_without_the_secrets_typed(admin_client, indexed, s
         'device_group': None,
         'driver': None,
         'devices': 1,
+        'device_ids': [edge.pk],
         'truncated': False,
     }
 
