@@ -39,6 +39,13 @@
         <q-td :props="props">
           <StatusLabel :status="props.row.state" />
           <q-tooltip v-if="props.row.error">{{ props.row.error }}</q-tooltip>
+          <q-badge v-if="props.row.pruned" color="grey" class="q-ml-xs">
+            Deleted
+            <q-tooltip>Deleted by its retention policy{{ props.row.pruned_at ? ` on ${formatDateTime(props.row.pruned_at)}` : '' }}</q-tooltip>
+          </q-badge>
+          <q-icon v-if="props.row.pinned" name="push_pin" color="primary" size="xs" class="q-ml-xs">
+            <q-tooltip>Pinned: kept whatever the retention policy says</q-tooltip>
+          </q-icon>
         </q-td>
       </template>
       <template #body-cell-trigger="props">
@@ -50,7 +57,7 @@
       <template #body-cell-encrypted="props">
         <q-td :props="props">
           <q-icon
-            v-if="props.row.state === 'stored'"
+            v-if="available(props.row)"
             :name="props.row.encrypted ? 'lock' : 'lock_open'"
             :color="props.row.encrypted ? 'primary' : 'grey-5'"
             size="sm"
@@ -65,7 +72,7 @@
             <q-tooltip>View</q-tooltip>
           </q-btn>
           <q-btn
-            v-if="mayDownload && props.row.state === 'stored'"
+            v-if="mayDownload && available(props.row)"
             dense
             round
             flat
@@ -153,7 +160,9 @@ const columns: QTableColumn<BackupJob>[] = [
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]
 
-const comparable = (job: BackupJob) => job.state === 'stored' && !job.is_binary
+// Stored and not deleted by retention, so its content can be read.
+const available = (job: BackupJob) => job.state === 'stored' && !job.pruned
+const comparable = (job: BackupJob) => available(job) && !job.is_binary
 const canCompare = computed(
   () => selectedA.value !== null && selectedB.value !== null && selectedA.value !== selectedB.value,
 )

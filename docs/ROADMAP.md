@@ -21,7 +21,7 @@ What an enterprise still finds missing is mostly **the layer above the bytes**: 
 was supposed to*, *whether it is compliant*, *who must hear about it*, and *how to get a dead device back*. The
 data path is strong. The intelligence on top of it is where the value is.
 
-Already planned and not repeated in detail below: retention enforcement, Redis Sentinel, further vendor
+Already planned and not repeated in detail below: Redis Sentinel, further vendor
 drivers (ARCHITECTURE.md section 10, "later").
 
 ## 2. How to read this
@@ -49,7 +49,7 @@ Small, self-contained, and each one removes a reason for an evaluator to say "no
 
 | # | Item | Effort | Impact |
 |---|---|---|---|
-| Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | Storage stops growing without bound; already modelled and planned. |
+| Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | **Scheduled: phase 14.** Storage stops growing without bound. |
 | Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M | Failures and changes reach people instead of waiting to be noticed. |
 | Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | "What changed?" answered at a glance, with added/removed line counts. |
 | Q4 | [Zabbix and Prometheus monitoring](#monitoring-integration-zabbix-and-prometheus) | S-M | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
@@ -65,11 +65,7 @@ Small, self-contained, and each one removes a reason for an evaluator to say "no
 | Q14 | [Scheduled digest report](#q14-scheduled-digest-report) | S | A weekly "state of the estate" email for managers. |
 
 ### Q1. Retention enforcement
-`policies` already holds retention policies and the scheduler already has the leader loop. Add a
-retention pass that selects expired `BackupJob` content, sends signed `storage.delete` tasks to the target's
-workers, and records the result. Keep **safety rails**: never delete the newest N backups, never delete
-a pinned backup (Q8), dry-run mode that audits what *would* go, and per-target delete support in the
-storage driver interface (git: no-op or squash; S3: delete object; PostgreSQL: delete row).
+Scheduled as phase 14 (`feat/retention`); see ARCHITECTURE.md section 10 and decisions 30-31.
 
 ### Q2. Notifications: webhooks and email
 A `notifications` app: channels (SMTP email, generic signed webhook, Slack/Teams-style incoming webhook),
@@ -110,7 +106,8 @@ device group, collection group, credential reference, schedule and push settings
 
 ### Q8. Pin, label and annotate backups
 A `pinned` flag, free-text label ("pre-upgrade 17.9", "approved baseline") and note on a backup. Pinned
-backups are exempt from retention (Q1). Needs only the `view_contents`-level permission plus `admin` to pin.
+backups are exempt from retention (Q1): the `BackupJob.pinned` flag and its handling already exist (phase 14),
+so Q8 adds the API and UI to set it, the label and note, and auditing. Needs only the `view_contents`-level permission plus `admin` to pin.
 
 ### Q9. Personal API tokens
 Scoped, expiring, revocable tokens for scripts and CI, hashed at rest, shown once, audited on use, and

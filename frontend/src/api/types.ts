@@ -31,12 +31,48 @@ export interface CollectionGroup {
   updated_at: IsoDateTime
 }
 
+/** What the last retention pass of a policy found and did. */
+export interface RetentionResult {
+  dry_run: boolean
+  /** Expired backups retention can delete. */
+  expired: number
+  expired_bytes: number
+  /** Expired, but on a target whose driver keeps everything (git). */
+  kept_undeletable: number
+  /** Deletions sent to storage workers (0 in a dry run). */
+  requested: number
+}
+
+/** Any limit that is set applies; the newest `min_backups` and pinned backups are always kept. */
 export interface RetentionPolicy {
   id: Id
   name: string
   max_backups: number | null
   max_days: number | null
   max_size_bytes: number | null
+  min_backups: number
+  /** Only report what would be deleted. */
+  dry_run: boolean
+  last_run_at: IsoDateTime | null
+  /** Empty until the first pass. */
+  last_result: Partial<RetentionResult>
+}
+
+export type RetentionPolicyWrite = Omit<RetentionPolicy, 'id' | 'last_run_at' | 'last_result'>
+
+/** What a policy expires now, by device. */
+export interface RetentionPreview {
+  expired: number
+  expired_bytes: number
+  kept_undeletable: number
+  devices: {
+    device: Id
+    device_name: string
+    backups: number
+    bytes: number
+    oldest: IsoDateTime
+    newest: IsoDateTime
+  }[]
 }
 
 export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'custom_cron'
@@ -68,6 +104,8 @@ export interface StorageDriver {
   description: string
   /** Whether several workers can serve one target (a bucket), or only one (a local directory). */
   shareable: boolean
+  /** Whether retention can delete its backups (git keeps its history). */
+  deletes: boolean
   params_schema: JsonSchema | null
   version: string
   versions: string[]
@@ -242,6 +280,11 @@ export interface BackupJob {
   /** Names of the workers that collected and stored it. */
   collector: string
   storage_worker: string
+  /** Exempt from retention. */
+  pinned: boolean
+  /** Deleted (or being deleted) by retention: the content is gone. */
+  pruned: boolean
+  pruned_at: IsoDateTime | null
   attempts: number
   error: string
   created_at: IsoDateTime

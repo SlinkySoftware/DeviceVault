@@ -220,6 +220,26 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
   where it writes (path, bucket, prefix, database) makes earlier backups unreadable unless their
   data moves too.
 
+### Retention
+
+Under **Admin Settings > Retention Policies**, a policy sets how long the backups of the devices
+using it are kept. Any limit that is set applies: keep at most N backups, delete backups older
+than N days, and a total size limit (counted from the newest). Whatever the limits, the newest N
+(**Always keep**, at least 1) stay, and pinned backups are never counted or deleted. A device with
+no policy keeps everything.
+
+The scheduler's leader applies every policy every `DV_RETENTION_INTERVAL_MIN` minutes and sends
+signed `storage.delete` tasks to the storage targets holding expired backups; their workers delete
+them and report back. A deleted backup stays in the backup list, marked deleted, as a record. At most
+1000 deletions are requested per pass, so a new policy over a long history takes a few passes.
+Git targets keep every backup (their history is the changelog).
+
+New policies start in **dry run**: each pass records what it would delete (shown on the page, and
+audited as `retention.dry_run` whenever that changes) and deletes nothing. **Preview** lists what
+a policy expires now, by device. Turn dry run off once the preview looks right; deletions are
+audited as `retention.delete`, and policy changes as `retention_policy.*`. Deleted backups cannot
+be recovered.
+
 ### Push receivers
 
 Devices can also upload their configuration themselves, for example a Cisco
@@ -432,6 +452,7 @@ secrets). The file takes precedence.
 | `DV_COLLECT_TIMEOUT_SEC` | `120` | Time a collector driver gets to reach and read a device, per attempt |
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
 | `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules (and renews its lease) |
+| `DV_RETENTION_INTERVAL_MIN` | `60` | How often the scheduler's leader applies retention policies |
 
 ### Worker
 
@@ -468,5 +489,8 @@ Everything else (protocols, ports, login, size limit) is set per receiver in the
   Workers stream backups through temporary files, so they need little memory
   but some free space in `/tmp`; the PostgreSQL storage driver holds each backup in
   memory while writing it.
-- Retention policies are stored but not yet applied.
+- Retention never deletes from git targets (their history is the point), so a device on one keeps every
+  backup whatever its policy says.
+- Deleting a device deletes its job records but not its stored backups; remove those from the target
+  by hand.
 - Redis is a single endpoint; Redis Sentinel URLs are not supported yet.

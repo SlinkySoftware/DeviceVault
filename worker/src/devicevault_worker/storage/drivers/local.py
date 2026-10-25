@@ -96,6 +96,7 @@ class GitDriver(StorageDriver):
     key = 'git'
     name = 'Git repository'
     description = 'One file per device in a git repository, one commit per backup: the history is the changelog.'
+    deletes = False
     Params = GitParams
     _lock = threading.Lock()  # one commit at a time per process
 
@@ -135,7 +136,7 @@ class GitDriver(StorageDriver):
             raise StorageError(f'backup not found in git: {ref}') from exc
 
     def delete(self, ref, params):
-        # History is the point of this driver; retention prunes by rewriting it (later).
+        # History is the point of this driver, so retention leaves git targets alone (``deletes``).
         raise StorageError('git targets keep every backup in their history')
 
     def check(self, params):

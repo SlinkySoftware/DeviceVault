@@ -74,6 +74,7 @@ class WorkerKeys:
                         'key': key,
                         'name': key.title(),
                         'shareable': key == 's3',
+                        'deletes': key != 'git',
                         'params_schema': STORAGE_SCHEMAS.get(key),
                     }
                     for key in storage

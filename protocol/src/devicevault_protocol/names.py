@@ -4,6 +4,7 @@ COLLECT_TASK = 'job.collect'
 STORE_TASK = 'job.store'
 READ_TASK = 'storage.read'
 CHECK_TASK = 'storage.check'
+DELETE_TASK = 'storage.delete'
 
 
 def collection_queue_name(queue_id: str) -> str:

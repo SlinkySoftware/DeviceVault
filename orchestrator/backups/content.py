@@ -19,6 +19,10 @@ class ContentUnavailable(Exception):
     """The backup could not be read back."""
 
 
+class ContentDeleted(ContentUnavailable):
+    """Retention deleted the backup."""
+
+
 @cache
 def _redis() -> Redis:
     return Redis.from_url(settings.DEVICEVAULT_BUS.redis_url)
@@ -28,6 +32,8 @@ def read_raw(job: BackupJob, *, timeout: int = 60) -> bytes:
     """The stored bytes of a successful job, exactly as written (possibly encrypted)."""
     if not job.succeeded or not job.storage_ref:
         raise ContentUnavailable('this backup was not stored')
+    if job.pruned:
+        raise ContentDeleted('this backup was deleted by its retention policy')
     target = job.storage_target
     try:
         result = ask(target, READ_TASK, target_spec(target, storage_ref=job.storage_ref), timeout=timeout)

@@ -174,6 +174,7 @@ DEVICEVAULT_WORKER_ONLINE_TIMEOUT_SEC = env_int('DV_WORKER_ONLINE_TIMEOUT_SEC', 
 DEVICEVAULT_COLLECT_TIMEOUT_SEC = env_int('DV_COLLECT_TIMEOUT_SEC', 120, minimum=5)
 DEVICEVAULT_JOB_TIMEOUT_MIN = env_int('DV_JOB_TIMEOUT_MIN', 120, minimum=1)
 DEVICEVAULT_SCHEDULER_INTERVAL_SEC = env_int('DV_SCHEDULER_INTERVAL_SEC', 30, minimum=5)
+DEVICEVAULT_RETENTION_INTERVAL_MIN = env_int('DV_RETENTION_INTERVAL_MIN', 60, minimum=1)
 # Ed25519 key that signs everything sent to workers; see core.signing.
 DEVICEVAULT_SIGNING_KEY = env_str('DV_SIGNING_KEY')
 # Encryption keys; see core.keys. Data keys encrypt secrets at rest (always on).

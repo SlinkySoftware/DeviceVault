@@ -68,6 +68,13 @@ class BackupJob(models.Model):
     size_bytes = models.BigIntegerField(null=True, blank=True)
     encrypted = models.BooleanField(default=False)
 
+    # Retention (backups.retention). A pinned backup is never deleted by it. Once a
+    # deletion is requested the content is treated as gone; ``pruned_at`` is set when
+    # the storage worker confirms it. The job row stays as the record.
+    pinned = models.BooleanField(default=False, help_text='Exempt from retention')
+    prune_requested_at = models.DateTimeField(null=True, blank=True)
+    pruned_at = models.DateTimeField(null=True, blank=True)
+
     attempts = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     log = models.JSONField(default=list, blank=True, help_text='Structured log entries from every stage')
@@ -93,6 +100,11 @@ class BackupJob(models.Model):
     @property
     def succeeded(self) -> bool:
         return self.state == self.STORED
+
+    @property
+    def pruned(self) -> bool:
+        """Deleted (or being deleted) by retention, so its content can no longer be read."""
+        return bool(self.prune_requested_at or self.pruned_at)
 
     @property
     def duration_ms(self) -> int | None:

@@ -49,7 +49,7 @@ No component talks to another directly. Everything goes over AMQP or Redis. The 
 | `api` | active/active | REST API, auth, RBAC |
 | `web` | active/active | nginx serving the built SPA, `/api` → api, `/flower/<id>/` → Flower (via `auth_request`) |
 | `events` | active/active (competing consumers) | Celery worker on `dv.orchestrator`. Handles `worker.register`, `job.collected`, `job.stored`, `job.failed`. Replaces `consume_device_results`, `consume_storage_results`, and `monitor_worker_registry`. |
-| `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and (later) triggers retention. Replaces celery beat, whose local schedule file isn't HA-safe. |
+| `scheduler` | runs everywhere, **one leader** (Redis lock with TTL and renewal) | Reads `BackupSchedule` from the DB and dispatches due jobs. Sends liveness pings, times out stale jobs, and applies retention policies. Replaces celery beat, whose local schedule file isn't HA-safe. |
 
 Both are in place since phase 5: `events` handles worker registration, heartbeats and the signed job events (`orchestrator.job_event`: started, retrying, collected, stored, failed); `scheduler` holds the Redis lease `dv:scheduler:leader` (60 s or twice the tick interval, renewed every tick, released on shutdown) and creates `BackupJob`s for due schedules. Backup content travels collector → Redis (`dv:blob:job:<id>`, 24 h TTL) → storage worker; a job is `stored` only when the collector and storage worker report the same SHA-256.
 
@@ -247,6 +247,8 @@ events:     BackupJob state machine: queued→collecting→collected→stored | 
 read (UI):  api → storage.read task → storage.target.<t> → blob dv:blob:read:<uuid> (10 min TTL)
             → Celery result {key, sha256, size} → api checks the hash, decrypts
 check (UI): api → storage.check task → storage.target.<t> → Celery result
+retention:  scheduler leader → expired BackupJobs → storage.delete task (batched) → storage.target.<t>
+            → deleted | delete_failed event per backup → dv.orchestrator (job kept, marked pruned)
 ```
 
 Push (section 7.1) joins this path at the store step:
@@ -289,6 +291,8 @@ Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a com
 Push collection is not a collector driver mode; it is a separate receiver component (section 7.1).
 
 **Storage driver** (`worker/storage/drivers/`): `store(data, name, params) → ref`, `read(ref, params) → bytes`, `delete(ref, params)`, `check(params)`, plus `Params`, `shareable`. Drivers (phase 6): filesystem and git (paths relative to the worker's `/srv/devicevault` volume, not shareable) and S3 (shareable); PostgreSQL (shareable, psycopg 3, one `bytea` row per backup in `<schema>.devicevault_backups`, with discrete connection and TLS settings). Other databases get drivers of their own rather than a generic SQLAlchemy URL, since TLS and connection settings differ for each.
+
+A storage driver also declares `deletes`: whether `delete` removes a backup. Retention only prunes targets whose driver does; git does not (phase 14).
 
 Drivers are discovered through Python entry points, so a new driver can ship as a separate package without editing core.
 
@@ -344,7 +348,8 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 11 | `refactor/shared-agent` | Identity, registration agent, task trust and blob staging move from `worker/` into `protocol/`; chunked, streamed blob staging (section 5). No behaviour change otherwise | yes |
 | 12 | `feat/push-receiver` | `receiver/` package, `receiver` image target and `deploy/receiver`; receiver role and settings; SCP/SFTP listener; `push.received`/`push.rejected` events → BackupJob; device push settings and unique IP; UI (section 7.1) | yes |
 | 13 | `feat/push-tftp` | TFTP write-only listener and the per-device TFTP opt-in | yes |
-| later | — | Retention enforcement, new vendor drivers, Redis Sentinel | — |
+| 14 | `feat/retention` | Retention enforcement (ROADMAP Q1): policy limits plus an always-kept minimum and dry run, the scheduler's retention pass, signed `storage.delete` tasks and deletion events, `deletes` driver capability, policy preview and audit, the `pinned` flag that Q8 builds on, UI | yes |
+| later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
 
@@ -383,4 +388,5 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 27 | (phase 12) Pushing is a per-device setting alongside polling, not a backup method. Each accepted file is its own `BackupJob(trigger=push)`, exempt from the one-active-job rule. Rejected pushes are refused at the protocol level and reported (audited, shown per receiver), never quarantined. |
 | 28 | (phase 11) Pushed files may be up to 512 MiB, beyond Redis's 512 MB value cap with encryption overhead, so blobs are staged in 32 MiB chunks and streamed. |
 | 29 | The repository is public, which makes GitHub Actions free. `ci.yml` runs `make check` on every pull request and is required to merge to `master`. Pushing a `vX.Y.Z` tag runs `release.yml`, which checks the tag against the `VERSION` file, runs `make check`, publishes signed multi-arch images to GHCR and creates the GitHub Release. `VERSION` is the single source of the release version; `make set-version` copies it into each package, and a test fails if any package disagrees. |
-| — | Retention enforcement: in scope, designed in a later phase. |
+| 30 | (phase 14) Retention keeps the job row and marks it pruned (`prune_requested_at`, then `pruned_at` when the storage worker confirms), so history, dashboard counts and the audit trail survive; content is refused as soon as deletion is requested. A failed deletion clears the request and a later pass retries; an unanswered one is re-sent after a day (deleting is idempotent). Deletion events are accepted only for a requested deletion and from a worker serving that backup's target. |
+| 31 | (phase 14) Safety rails: the newest `min_backups` (at least 1) are always kept, **pinned backups are outside the policy** (neither counted towards its limits nor deleted, so pinning does not shorten the history of the rest), new policies start in dry run (audited when the would-delete set changes), at most 1000 deletions per pass, and targets whose driver does not declare `deletes` (git) are left alone rather than rewriting history. `pinned` lands with retention; Q8 adds setting it, labels and notes. |

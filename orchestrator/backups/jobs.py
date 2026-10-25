@@ -19,6 +19,8 @@ from devicevault.celery import app as celery_app
 from devicevault_protocol import signing
 from devicevault_protocol.jobs import (
     EVENT_COLLECTED,
+    EVENT_DELETE_FAILED,
+    EVENT_DELETED,
     EVENT_FAILED,
     EVENT_RETRYING,
     EVENT_STARTED,
@@ -26,7 +28,7 @@ from devicevault_protocol.jobs import (
     STAGE_STORE,
 )
 from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, collection_queue_name
-from devicevault_protocol.registration import ROLE_COLLECTOR, STATUS_APPROVED
+from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
 from storage.service import target_spec, target_workers
 
 logger = logging.getLogger('devicevault.jobs')
@@ -169,6 +171,10 @@ def handle_job_event(envelope: Any) -> BackupJob | None:
         if job is None:
             logger.warning('job_event_for_unknown_job', extra={'job_id': payload['job_id']})
             return None
+        if payload.get('event') in (EVENT_DELETED, EVENT_DELETE_FAILED):
+            _apply_deletion(job, payload, worker)
+            job.save()
+            return job
         _apply(job, payload, worker)
         job.save()
         if job.state in BackupJob.TERMINAL_STATES:
@@ -221,6 +227,30 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
         job.state = BackupJob.FAILED
         job.error = str(payload.get('error') or 'failed')
         job.finished_at = now
+
+
+def _apply_deletion(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
+    """A storage worker reports on a deletion retention asked for (see backups.retention)."""
+    if not job.prune_requested_at or job.pruned_at:
+        logger.warning('deletion_event_ignored', extra={'job_id': str(job.id), 'reason': 'no deletion pending'})
+        return
+    if not job.storage_target.workers.filter(pk=worker.pk, role=ROLE_STORAGE).exists():
+        logger.warning('deletion_event_ignored', extra={'job_id': str(job.id), 'reason': 'not its storage worker'})
+        return
+    entries = [e for e in payload.get('log') or [] if isinstance(e, dict)]
+    if payload['event'] == EVENT_DELETED:
+        job.pruned_at = timezone.now()
+    else:
+        # Still stored: readable again, and retention will ask again on a later pass.
+        job.prune_requested_at = None
+        error = str(payload.get('error') or 'failed')
+        entries.append(_log_entry('ERROR', f'retention could not delete the backup: {error}'))
+        logger.warning('retention_delete_failed', extra={'job_id': str(job.id), 'error': error})
+    job.log = (job.log + entries)[-MAX_LOG_ENTRIES:]
+
+
+def _log_entry(severity: str, message: str) -> dict[str, str]:
+    return {'source': 'retention', 'timestamp': timezone.now().isoformat(), 'severity': severity, 'message': message}
 
 
 def _finish_if_complete(job: BackupJob, now) -> None:

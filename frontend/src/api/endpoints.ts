@@ -34,6 +34,8 @@ import type {
   LoginResponse,
   Manufacturer,
   RetentionPolicy,
+  RetentionPolicyWrite,
+  RetentionPreview,
   StorageDriver,
   StorageTarget,
   StorageTargetWrite,
@@ -90,7 +92,14 @@ export const collectionGroupsApi = resource<
   CollectionGroup,
   Pick<CollectionGroup, 'name' | 'description' | 'rabbitmq_queue_id'>
 >('/collection-groups/')
-export const retentionPoliciesApi = resource<RetentionPolicy>('/retention-policies/')
+const retentionPolicies = resource<RetentionPolicy, RetentionPolicyWrite>('/retention-policies/')
+
+export const retentionPoliciesApi = {
+  ...retentionPolicies,
+  /** What the policy expires now (global administrators). */
+  preview: async (id: Id) => (await http.get<RetentionPreview>(`/retention-policies/${id}/preview/`)).data,
+}
+
 export const backupSchedulesApi = resource<
   BackupSchedule,
   Omit<BackupSchedule, 'id' | 'created_at' | 'updated_at' | 'last_run_at' | 'next_run'>
