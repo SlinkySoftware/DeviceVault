@@ -372,6 +372,56 @@ Every search runs under a statement timeout (`SET LOCAL statement_timeout`, 5 s;
 
 **Frontend.** A Search page, shown when `GET /api/auth/user/` reports `config_search` and the user holds `view_contents` somewhere. The last search is kept in memory (a Pinia store, cleared at sign-out), never in the URL or browser storage, so going back from a backup shows the same results. It has a query box, a mode switch (Text, Regex, and Secret with a password input), and group and driver filters. Results are grouped by device, with matching lines and tokens shown as a "secret" chip; each line links to the backup view at that line (`?view=<job>&line=<n>` on the device's backups page). Phase 17 adds a saved-search list beside it.
 
+### 7.3 Dashboard (phase 18)
+
+The dashboard answers, for the devices the user can see: is collection healthy, is it getting better or worse, what is stale, what keeps failing, how much is stored, and (for global administrators) what the receivers refuse. Everything comes from rows that already exist (`BackupJob`, `Device`, `PushRejection`). There is no new model and no background aggregation: each card is a query run when the page asks for it.
+
+**Endpoints** (`backups/dashboard.py`, under `/api/dashboard/`, replacing `dashboard-stats/` and `recent-backup-activity/`). Each card has its own endpoint, so a slow card does not hold up the others. Each states `IsAuthenticated` and filters with `access.devices_for(user, 'view')`, so hidden devices neither appear nor count. `days` is 7, 14, 30 or 90 (default 30).
+- `summary/`: the existing tiles (devices by type; stored, failed and in progress in the last 24 h; average duration; device success rate).
+- `activity/?window=1h|24h|7d`: recent jobs, as now.
+- `trend/?days=`: one row per calendar day in the orchestrator's time zone, as now. Each row has stored and failed counts, the success rate, the average and longest request-to-stored duration, the average collection time, and the number of stored backups that changed (`changed=True`). It is one grouped query (`TruncDate` in the local zone) rather than one query per day, so 90 days costs the same as 7.
+- `freshness/`: one row per device group the user can view (devices without a group form one more row). Each row has the number of enabled devices, how many were never backed up, how many have a latest *successful* backup older than 24 hours and older than 7 days, and the device whose successful backup is oldest (id, name, time). Rows are sorted stalest first. "Latest successful" is the newest stored job, not `Device.last_backup_status`, which a failure overwrites. The 24 h and 7 d thresholds are fixed; ROADMAP Q5 (stale detection) replaces them with each device's schedule.
+- `failing/?days=&limit=10` (at most 50): the devices with the most failed or timed-out jobs in the window. Each row has its failed and stored counts, when it last failed and last succeeded, the latest error (first 200 characters, as already shown to `view` in the job list), and `recovered` when its newest finished job succeeded.
+- `storage/?days=`: one row per storage target holding backups of devices the user can view. Each row has the number of stored, unpruned backups, the sum of their `size_bytes`, and how much of that was added in the window. Target names are already readable by every user (`IsGlobalAdminOrReadOnly`). The figure is the logical size the collector reported; targets that deduplicate or compress (git, some S3 setups) use less on disk, and the card says so.
+- `push-refusals/?days=`: **global administrators only** (403 for others). Refusals have no device, so no device-group grant covers them, and the per-receiver list is already admin-only. It returns daily counts by reason, and the top 10 source addresses with their latest reason and receiver. Receivers rate-limit refusal reports, so the counts are a lower bound, and the card says so. To make a 90-day trend possible, `PushRejection` rows are kept by age (90 days, at most 5000 per receiver) instead of the newest 200.
+
+A migration adds an index on `BackupJob (state, finished_at)` for the trend, failing and storage queries; freshness uses the existing `(device, -created_at)` index. That is enough for a few thousand devices over 90 days. A daily rollup table can be added if an estate outgrows it.
+
+**Frontend.** The Dashboard page keeps the tiles and the activity feed, and gains a page-wide period selector. The period is kept in the URL (`?days=30`), so a view can be shared. New cards:
+- Success rate and volume: a line for the rate over daily stored and failed bars.
+- Duration: average and longest per day.
+- Changes per day.
+- Freshness: a table per group, linking the stalest device to its backups.
+- Top failing devices: a table linking to each device's backups, with the latest error as a tooltip.
+- Storage by target: horizontal bars.
+- Push refusals: global administrators only. Bars by reason plus the top sources.
+
+Charts are small in-house SVG components (`components/charts/`: `TimeSeriesChart` for lines and bars on a daily axis, `BarList` for horizontal bars). They replace the canvas `SuccessChart`, take their colours from the Quasar theme variables so they follow light and dark mode, show values on hover and keyboard focus, and carry a text alternative. Each card loads separately and shows its own loading, empty and error states; the tiles and activity keep polling as now. The `DashboardLayout` model, unused since the frontend rewrite, is removed together with the duplicate `core/dashboard_layout.py`.
+
+### 7.4 Pins, labels and notes (phase 19)
+
+Engineers mark known-good backups ("pre-upgrade 17.9", "approved baseline") and keep them whatever the retention policy says. Retention already leaves pinned backups outside the policy (decision 31). This phase lets people set the pin, a label and a note, and audits them. Pins are also what ROADMAP D3 (golden reference) will build on.
+
+**Model.** `BackupJob` gains:
+- `pinned_by` and `pinned_at`: who pinned it, and when.
+- `label`: up to 64 characters, single line, blank by default.
+- `note`: free text, at most 2000 characters.
+- `annotated_by` and `annotated_at`: who last changed the label or note, and when.
+
+**API.** The job list stays read-only. The two changes are separate actions because they need different grants and are audited differently:
+- `POST /api/backups/{id}/pin/` `{pinned}` needs `HasDeviceGroupPermission('admin')`, because a pin overrides the group's retention policy (storage cost, and holding data the policy meant to delete). Only a stored backup can be pinned, and only while retention has not asked for its deletion, so a pruned backup gives 400. The check runs under `select_for_update` on the row. Retention claims rows under the same lock and re-checks `pinned`, so a pin and a deletion cannot both win. Unpinning is always allowed. The backup then rejoins its policy and may be deleted at the next pass that is not a dry run, so the UI asks first. Pinning does not protect a backup from deleting its device.
+- `POST /api/backups/{id}/annotate/` `{label, note}` needs `HasDeviceGroupPermission('view_contents')`, since a label describes the content. It works on any finished job, including failed and pruned ones: "device was being replaced" on a failure is useful, and a pruned job row stays as the record.
+- The serializer adds `pinned_by_username`, `pinned_at`, `label`, `note`, `annotated_by_username` and `annotated_at`. Anyone with `view` sees them, as they see the rest of the job row. The list gains `?pinned=true` and `?labelled=true` filters.
+
+**Audit.** `backup.pin` and `backup.unpin` record the device, the job and its label. `backup.annotate` records the new label and whether the note changed, not the note text. The audit log is not the place for free text that may grow to 2000 characters.
+
+**Frontend.** On a device's backups page:
+- A label appears as a chip beside the backup's time, and a note as an icon with the note in a tooltip.
+- Group administrators get a pin/unpin action. Unpinning confirms with the retention warning.
+- Users with `view_contents` get a "Label and note" action (`FormDialog`).
+- A "Pinned only" toggle sits next to "Only changes".
+- The compare page and the backup viewer show both backups' labels, and config search results show the label of the backup that matched.
+
 ## 8. HA
 
 - Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lease leader acts. The standby takes over at its next tick when the leader stops cleanly (the lease is released), or once the lease expires (60 s by default) when it dies. The leader re-checks the lease before each due schedule, so one that stalled past its lease stops scheduling.
@@ -406,6 +456,8 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 15 | `feat/change-summary` | Change summary on every backup (ROADMAP Q3): compared with the device's previous backup after decrypting and dropping the driver's volatile lines; `changed`, lines added and removed; backfill command; `?changed=` filter; Changes column and "Only changes" filter in the UI | yes |
 | 16 | `feat/config-search` | Config search (ROADMAP Q6, section 7.2): `search` app and `SearchDocument`; `secret_lines` and encodings in the driver framework (Cisco IOS and MikroTik patterns, `cisco7`), validated in the catalogue; tokens keyed from the data key; indexing in the post-store task; the scheduler's catch-up pass and `reindex_search`; PostgreSQL (`pg_trgm`) and SQLite backends; text and regex search with RE2, timeouts, caps and audit; `DV_CONFIG_SEARCH`; Search page. The search backend tests also run against PostgreSQL in `make check` | yes |
 | 17 | `feat/secret-search` | Secret search mode (audited without the value) and private saved searches, with their UI | yes |
+| 18 | `feat/dashboard` | Dashboard upgrades (ROADMAP Q13, section 7.3): per-card `/api/dashboard/` endpoints (summary, activity, trend, freshness, failing, storage, push refusals for global admins); one grouped query per trend; `(state, finished_at)` index; push refusals kept by age; in-house SVG chart components replacing the canvas chart; page-wide period in the URL; dead `DashboardLayout` removed | yes |
+| 19 | `feat/backup-pins` | Pin, label and annotate backups (ROADMAP Q8, section 7.4): `pin/` (group `admin`, locked against retention) and `annotate/` (`view_contents`) actions, who and when, `?pinned=`/`?labelled=` filters, audit, UI on the backups, compare and search pages | yes |
 | later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
@@ -452,3 +504,6 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 34 | (phase 16) Search is **opt-in** (`DV_CONFIG_SEARCH`) and covers only each device's **latest** backup: one `SearchDocument` per device, built by the post-store task from bytes it already decrypted, so no backup is read twice. A catch-up pass in the scheduler builds missing or stale documents, so enabling search, key rotation and driver upgrades need no manual step. |
 | 35 | (phase 16) Secret values are replaced by **keyed tokens** before indexing: drivers declare `secret_lines` (with optional encodings the orchestrator reverses, such as `cisco7`), and each value becomes an HMAC whose key is derived from the data key and never stored in the database. Queries are tokenised by the same patterns on the server, so a full line or a bare secret value (phase 17) still finds its devices, while a dump shows only which devices share a secret, which is accepted. Secret values cannot be matched by substring or regex. |
 | 36 | (phase 16) Regex search uses RE2, matched per line, so a user's pattern runs in linear time; PostgreSQL only narrows the candidates, under a statement timeout. Results are capped, and searches are audited with secrets in tokenised form. |
+| 37 | (phase 18) Dashboard figures are **computed on request** from job rows, one endpoint per card, filtered by `access.devices_for(user, 'view')`. No rollup table and no scheduled aggregation: the data is small at the expected scale, and a rollup would be a second copy to keep consistent with retention and device deletion. Push refusals are shown to global administrators only, since they belong to no device group. |
+| 38 | (phase 18) Charts are **in-house SVG components**, not a charting library. The dashboard needs only daily lines, bars and horizontal bars. SVG follows the theme through CSS variables, gives hover and keyboard values and a text alternative without extra work, and adds no dependency to keep pinned. |
+| 39 | (phase 19) Pinning needs the group's **`admin`** grant, because it overrides that group's retention policy. Labels and notes need **`view_contents`**, because they describe content. They are separate actions with separate audit entries. Pinning takes the same row lock as retention's deletion claim, so a backup is never both pinned and deleted. |
