@@ -220,6 +220,22 @@ queue, `storage.target.<id>`. **Test** asks one of its workers to check the sett
   where it writes (path, bucket, prefix, database) makes earlier backups unreadable unless their
   data moves too.
 
+### Change summaries
+
+Each stored backup is compared with the device's previous one shortly after it is stored, and the
+backup list shows the result: lines added and removed (`+3 −1`, a link to the diff), **No change**,
+**First backup**, or **Changed** for binary backups. **Only changes** hides the rest.
+
+The `events` service does the comparison: it reads both backups back through the storage worker and,
+with payload encryption on, decrypts them in memory (as viewing a backup does; nothing decrypted is
+stored). Lines the device's collector driver marks as volatile (timestamps, "Last configuration
+change" banners) are ignored, which keeps pushed files quiet too; a device whose driver settings keep
+volatile lines (`strip_volatile` off) is compared as is. Backups over 16 MiB are not compared.
+
+Backups stored before an upgrade have no summary; queue them with
+`docker compose exec api dv-orchestrator manage summarise_changes` (`--device <id>` for one device,
+`--redo` to recompute). It returns at once and the `events` service works through the queue.
+
 ### Retention
 
 Under **Admin Settings > Retention Policies**, a policy sets how long the backups of the devices

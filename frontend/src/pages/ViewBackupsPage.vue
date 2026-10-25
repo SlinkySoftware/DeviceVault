@@ -3,6 +3,7 @@
   <PageCard :title="`Backups for ${deviceName}`" caption="Select an A and a B backup to compare them">
     <template #actions>
       <q-btn flat icon="arrow_back" label="Devices" :to="{ name: 'devices' }" />
+      <q-toggle v-model="onlyChanges" label="Only changes" @update:model-value="reload" />
       <q-btn
         v-if="mayRead"
         color="primary"
@@ -46,6 +47,23 @@
           <q-icon v-if="props.row.pinned" name="push_pin" color="primary" size="xs" class="q-ml-xs">
             <q-tooltip>Pinned: kept whatever the retention policy says</q-tooltip>
           </q-icon>
+        </q-td>
+      </template>
+      <template #body-cell-changes="props">
+        <q-td :props="props">
+          <router-link
+            v-if="mayRead && props.row.changed && props.row.compared_to && comparable(props.row)"
+            :to="compareWithPrevious(props.row)"
+            class="change-link"
+          >
+            {{ changeLabel(props.row) }}
+            <q-tooltip>Compare with the previous backup</q-tooltip>
+          </router-link>
+          <span v-else-if="changeLabel(props.row)" :class="{ 'text-grey': !props.row.changed }">{{ changeLabel(props.row) }}</span>
+          <span v-else class="text-grey">
+            —
+            <q-tooltip v-if="props.row.summary_error">{{ props.row.summary_error }}</q-tooltip>
+          </span>
         </q-td>
       </template>
       <template #body-cell-trigger="props">
@@ -125,7 +143,7 @@ import { useNotify } from '@/composables/useNotify'
 import { usePolling } from '@/composables/usePolling'
 import { filenameTimestamp, formatDateTime } from '@/utils/datetime'
 import { safeFilename, saveFile } from '@/utils/download'
-import { capitalise, formatBytes, formatDuration, isActiveJob, statusLabel } from '@/utils/format'
+import { capitalise, changeLabel, formatBytes, formatDuration, isActiveJob, statusLabel } from '@/utils/format'
 
 type Pagination = NonNullable<QTableProps['pagination']>
 
@@ -140,6 +158,7 @@ const pagination = ref<Pagination>({ page: 1, rowsPerPage: 20, rowsNumber: 0 })
 const selectedA = ref<string | null>(null)
 const selectedB = ref<string | null>(null)
 const downloading = reactive(new Set<string>())
+const onlyChanges = ref(false)
 
 // What the user may do with this device's backups (hidden otherwise; the API enforces it).
 const permissions = ref<GrantFlag[]>([])
@@ -151,6 +170,7 @@ const columns: QTableColumn<BackupJob>[] = [
   { name: 'select-b', label: 'B', field: 'id', align: 'center', style: 'width: 48px' },
   { name: 'created_at', label: 'Requested', field: 'created_at', format: formatDateTime, align: 'left' },
   { name: 'state', label: 'Status', field: 'state', align: 'left' },
+  { name: 'changes', label: 'Changes', field: 'changed', align: 'left' },
   { name: 'trigger', label: 'Trigger', field: 'trigger', format: capitalise, align: 'left' },
   { name: 'type', label: 'Type', field: 'is_binary', format: (binary: boolean) => (binary ? 'Binary' : 'Text'), align: 'center' },
   { name: 'size', label: 'Size', field: 'size_bytes', format: formatBytes, align: 'right' },
@@ -163,6 +183,11 @@ const columns: QTableColumn<BackupJob>[] = [
 // Stored and not deleted by retention, so its content can be read.
 const available = (job: BackupJob) => job.state === 'stored' && !job.pruned
 const comparable = (job: BackupJob) => available(job) && !job.is_binary
+const compareWithPrevious = (job: BackupJob): RouteLocationRaw => ({
+  name: 'device-backups-compare',
+  params: { id: deviceId.value },
+  query: { a: job.compared_to ?? '', b: job.id },
+})
 const canCompare = computed(
   () => selectedA.value !== null && selectedB.value !== null && selectedA.value !== selectedB.value,
 )
@@ -175,12 +200,24 @@ const compareTarget = computed<RouteLocationRaw>(() => ({
 async function load(): Promise<void> {
   const { page = 1, rowsPerPage = 20 } = pagination.value
   try {
-    const result = await backupJobsApi.list({ device: deviceId.value, page, page_size: rowsPerPage })
+    const result = await backupJobsApi.list({
+      device: deviceId.value,
+      page,
+      page_size: rowsPerPage,
+      ...(onlyChanges.value ? { changed: true } : {}),
+    })
     jobs.value = result.results
     pagination.value = { ...pagination.value, rowsNumber: result.count }
   } catch (error) {
     notify.error(error, 'Failed to load backups')
   }
+}
+
+async function reload(): Promise<void> {
+  pagination.value = { ...pagination.value, page: 1 }
+  loading.value = true
+  await load()
+  loading.value = false
 }
 
 async function onRequest(request: { pagination: Pagination }): Promise<void> {
@@ -244,6 +281,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.change-link {
+  text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .backup-content {
   margin: 0;
   padding: 16px;

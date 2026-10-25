@@ -10,6 +10,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from backups.changes import request_summary
 from backups.models import BackupJob
 from core import keys
 from core.models import Worker
@@ -175,10 +176,13 @@ def handle_job_event(envelope: Any) -> BackupJob | None:
             _apply_deletion(job, payload, worker)
             job.save()
             return job
+        was = job.state
         _apply(job, payload, worker)
         job.save()
         if job.state in BackupJob.TERMINAL_STATES:
             _record_on_device(job)
+        if job.state == BackupJob.STORED and was != BackupJob.STORED:
+            transaction.on_commit(lambda: request_summary(job))
     return job
 
 

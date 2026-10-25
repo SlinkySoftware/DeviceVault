@@ -75,6 +75,17 @@ class BackupJob(models.Model):
     prune_requested_at = models.DateTimeField(null=True, blank=True)
     pruned_at = models.DateTimeField(null=True, blank=True)
 
+    # Change summary (backups.changes), filled in shortly after the job is stored: how it
+    # differs from the device's previous backup, ignoring the driver's volatile lines.
+    # ``changed`` is None until summarised (or if it could not be); line counts are None
+    # for binary backups. The first backup of a device has no ``compared_to`` and counts
+    # every line as added.
+    compared_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    changed = models.BooleanField(null=True, blank=True, db_index=True)
+    lines_added = models.PositiveIntegerField(null=True, blank=True)
+    lines_removed = models.PositiveIntegerField(null=True, blank=True)
+    summary_error = models.CharField(max_length=255, blank=True, help_text='Why no change summary could be made')
+
     attempts = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     log = models.JSONField(default=list, blank=True, help_text='Structured log entries from every stage')

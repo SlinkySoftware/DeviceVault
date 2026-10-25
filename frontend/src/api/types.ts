@@ -285,6 +285,15 @@ export interface BackupJob {
   /** Deleted (or being deleted) by retention: the content is gone. */
   pruned: boolean
   pruned_at: IsoDateTime | null
+  /** Change summary against `compared_to` (the previous backup): null until made, or if it could not be. */
+  changed: boolean | null
+  /** Null for binary backups. */
+  lines_added: number | null
+  lines_removed: number | null
+  /** The previous backup; null for the device's first. */
+  compared_to: string | null
+  /** Why there is no summary. */
+  summary_error: string
   attempts: number
   error: string
   created_at: IsoDateTime

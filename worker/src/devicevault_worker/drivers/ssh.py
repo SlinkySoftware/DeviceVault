@@ -29,9 +29,7 @@ class SshParams(DriverParams):
 class NetmikoDriver(CollectorDriver):
     device_type: ClassVar[str]
     Params = SshParams
-    # Lines matching any of these (re.match, leading spaces ignored) are dropped
-    # when params.strip_volatile is set.
-    volatile_lines: ClassVar[tuple[str, ...]] = ()
+    # ``volatile_lines`` (see CollectorDriver) are also dropped here when params.strip_volatile is set.
 
     def commands(self, params: SshParams) -> list[str]:
         raise NotImplementedError

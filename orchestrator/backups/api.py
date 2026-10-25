@@ -49,6 +49,11 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'pinned',
             'pruned',
             'pruned_at',
+            'changed',
+            'lines_added',
+            'lines_removed',
+            'compared_to',
+            'summary_error',
             'attempts',
             'error',
             'created_at',
@@ -77,7 +82,8 @@ class JobPagination(PageNumberPagination):
 class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
     """Backup jobs of the devices the user can view (``view``: state, history, sizes, errors and logs).
 
-    Paginated (``?page=``, ``?page_size=``). Filters: ``?device=<id>``, ``?state=<state>``. The backups
+    Paginated (``?page=``, ``?page_size=``). Filters: ``?device=<id>``, ``?state=<state>``,
+    ``?changed=true|false`` (the change summary; see backups.changes). The backups
     themselves: ``{id}/content/`` (``view_contents``), ``{id}/download/`` (``download``) and
     ``compare/?a=<id>&b=<id>`` (``view_contents``, two backups of one device). Each is audited.
     """
@@ -94,6 +100,8 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
             jobs = jobs.filter(device_id=params['device'])
         if params.get('state'):
             jobs = jobs.filter(state=params['state'])
+        if params.get('changed') in ('true', 'false'):
+            jobs = jobs.filter(changed=params['changed'] == 'true')
         return jobs
 
     def _audit(self, action: str, job: BackupJob, **details):

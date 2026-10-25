@@ -77,3 +77,17 @@ const PUSH_PROTOCOLS: Record<string, string> = { ssh: 'SCP/SFTP', tftp: 'TFTP' }
 export function pushProtocolLabel(protocol: string): string {
   return PUSH_PROTOCOLS[protocol] ?? protocol.toUpperCase()
 }
+
+/** A backup's change summary for display: "+3 −1", "No change", "First backup", "Changed", or "" when unknown. */
+export function changeLabel(job: {
+  changed: boolean | null
+  lines_added: number | null
+  lines_removed: number | null
+  compared_to: string | null
+}): string {
+  if (job.changed === null) return ''
+  if (!job.changed) return 'No change'
+  if (job.compared_to === null) return 'First backup'
+  if (job.lines_added === null || job.lines_removed === null) return 'Changed'
+  return `+${job.lines_added} −${job.lines_removed}`
+}

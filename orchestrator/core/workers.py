@@ -4,6 +4,7 @@ See devicevault_protocol.registration for the message formats.
 """
 
 import logging
+import re
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -267,13 +268,35 @@ def _version_key(version: str) -> tuple:
     return tuple((0, int(part), '') if part.isdigit() else (1, 0, part) for part in version.split('.'))
 
 
+# Patterns come from workers and run in the orchestrator, so they are bounded.
+MAX_VOLATILE_PATTERNS = 50
+MAX_VOLATILE_PATTERN_LENGTH = 200
+
+
+def _volatile_lines(patterns: Any) -> list[str]:
+    """A driver's volatile-line regexes, keeping only valid ones of a sane size."""
+    if not isinstance(patterns, list):
+        return []
+    valid = []
+    for pattern in patterns[:MAX_VOLATILE_PATTERNS]:
+        if not isinstance(pattern, str) or not pattern or len(pattern) > MAX_VOLATILE_PATTERN_LENGTH:
+            continue
+        try:
+            re.compile(pattern)
+        except re.error:
+            continue
+        valid.append(pattern)
+    return valid
+
+
 def _catalogue(role: str, capability: str, *flags: str) -> dict[str, dict[str, Any]]:
     """Drivers advertised under ``capabilities[capability]`` by approved workers of ``role``.
 
     Each entry: key, name, description, the ``flags`` (is_binary; shareable and deletes),
     params_schema (JSON schema of its settings), ``workers`` (how many
-    approved workers offer it) and ``versions``. When workers run different
-    versions of a driver, the newest one describes it.
+    approved workers offer it) and ``versions``; collector drivers also have
+    ``volatile_lines``. When workers run different versions of a driver, the
+    newest one describes it.
     """
     catalogue: dict[str, dict[str, Any]] = {}
     for capabilities in Worker.objects.filter(status=STATUS_APPROVED, role=role).values_list('capabilities', flat=True):
@@ -294,6 +317,8 @@ def _catalogue(role: str, capability: str, *flags: str) -> dict[str, dict[str, A
                     'workers': entry['workers'] if entry else 0,
                     'versions': entry['versions'] if entry else set(),
                 }
+                if role == ROLE_COLLECTOR:
+                    entry['volatile_lines'] = _volatile_lines(driver.get('volatile_lines'))
             entry['workers'] += 1
             entry['versions'].add(version)
     for entry in catalogue.values():

@@ -191,3 +191,17 @@ def test_an_approved_storage_worker_can_be_given_targets(admin, storage_worker, 
 
     admin.patch(f'/api/workers/{worker.id}/', {'role': 'collector'}, format='json')
     assert not target.workers.exists()
+
+
+def test_storage_requests_can_be_waited_on_from_orchestrator_tasks(setup, monkeypatch):
+    """Change summaries read backups from inside a Celery task, where Celery refuses result.get() by default."""
+
+    class Pending:
+        def get(self, timeout, disable_sync_subtasks=True):
+            if disable_sync_subtasks:
+                raise RuntimeError('Never call result.get() within a task!')
+            return {'status': 'success', 'message': 'ok'}
+
+    monkeypatch.setattr(service.celery_app, 'send_task', lambda *args, **kwargs: Pending())
+
+    assert service.ask(setup['target'], 'storage.check', {})['message'] == 'ok'

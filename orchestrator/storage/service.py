@@ -28,9 +28,15 @@ def target_spec(target: StorageTarget, **fields: Any) -> dict[str, Any]:
 
 
 def ask(target: StorageTarget, task: str, spec: dict[str, Any], *, timeout: int = 60) -> dict[str, Any]:
-    """Send a request/response storage task to ``target``'s queue and return the successful result."""
+    """Send a request/response storage task to ``target``'s queue and return the successful result.
+
+    Also called from orchestrator tasks (change summaries). Celery refuses to wait on a
+    result inside a task unless told otherwise, to avoid a pool waiting on itself; storage
+    tasks run on the storage workers, never in the orchestrator's pool, so it is safe.
+    """
     try:
-        result = celery_app.send_task(task, args=[sign_task(spec)], queue=target.queue).get(timeout=timeout)
+        pending = celery_app.send_task(task, args=[sign_task(spec)], queue=target.queue)
+        result = pending.get(timeout=timeout, disable_sync_subtasks=False)
     except Exception as exc:  # timeouts and broker errors alike
         raise TargetUnavailable(f'no storage worker of "{target.name}" answered: {exc}') from exc
     if result.get('status') != 'success':

@@ -80,6 +80,10 @@ class CollectorDriver(ABC):
     version: ClassVar[str] = '1'
     is_binary: ClassVar[bool] = False
     Params: ClassVar[type[DriverParams]] = DriverParams
+    # Regexes (re.match, leading spaces ignored) for lines that change on every read
+    # (timestamps, counters). The orchestrator ignores them when it summarises what
+    # changed between backups, including files the device pushed.
+    volatile_lines: ClassVar[tuple[str, ...]] = ()
 
     @abstractmethod
     def collect(
@@ -102,6 +106,7 @@ class CollectorDriver(ABC):
             'description': cls.description,
             'version': cls.version,
             'is_binary': cls.is_binary,
+            'volatile_lines': list(cls.volatile_lines),
             'params_schema': cls.Params.model_json_schema(),
         }
 
