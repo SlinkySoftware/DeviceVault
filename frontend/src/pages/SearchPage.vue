@@ -146,11 +146,12 @@
           >
             <span class="number">{{ line.number }}</span>
             <span class="text">
-              <template v-for="(segment, index) in splitSecretTokens(line.text)" :key="index">
-                <span v-if="segment.secret" class="secret">
+              <template v-for="(segment, index) in highlightLine(line.text, highlight)" :key="index">
+                <span v-if="segment.secret" class="secret" :class="{ 'secret--match': segment.match }">
                   <q-icon name="key" size="xs" /> secret
                   <q-tooltip>A secret value; open the backup to see it</q-tooltip>
                 </span>
+                <mark v-else-if="segment.match" class="match">{{ segment.text }}</mark>
                 <template v-else>{{ segment.text }}</template>
               </template>
             </span>
@@ -177,7 +178,7 @@ import { useNotify } from '@/composables/useNotify'
 import { useSearchStore } from '@/stores/search'
 import { formatDateTime } from '@/utils/datetime'
 import { required } from '@/utils/rules'
-import { splitSecretTokens } from '@/utils/search'
+import { highlightLine, highlightPattern } from '@/utils/search'
 
 const QUERY_LABELS: Record<SearchMode, string> = {
   text: 'Text (a line typed with its secret in it matches)',
@@ -209,7 +210,10 @@ const summary = computed(() => {
   return `${matched} of ${searched} ${searched === 1 ? 'device' : 'devices'} matched`
 })
 
-const lineTarget = (result: SearchResult, line: number): RouteLocationRaw => ({
+// Highlights follow the search the results are for, not what is being typed.
+const highlight = computed(() => (reply.value ? highlightPattern(reply.value.mode, reply.value.query) : null))
+
+const lineTarget =(result: SearchResult, line: number): RouteLocationRaw => ({
   name: 'device-backups',
   params: { id: result.device },
   query: { view: result.job, line },
@@ -353,6 +357,18 @@ onMounted(async () => {
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.2);
   font-family: inherit;
+}
+
+.match {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #ffeb3b;
+  color: #222;
+}
+
+.secret--match {
+  background: #ffeb3b;
+  color: #222;
 }
 
 .saved-query {
