@@ -5,7 +5,7 @@ orchestrator's own queue, run by the ``events`` process). ``summarise`` reads bo
 backups back, decrypting them when payload encryption is on (the orchestrator is the
 only place that can), drops the lines the device's collector driver declares volatile
 (so a pushed file's "Last configuration change" banner is not a change), and records
-whether anything changed and how many lines were added and removed.
+whether anything changed and how many lines were added, removed and modified.
 
 The previous backup is the device's newest stored backup before this one that
 retention has not deleted. Binary backups are only compared for equality. Two
@@ -33,6 +33,7 @@ logger = logging.getLogger('devicevault.changes')
 # Larger backups (pushed archives, say) are not read back just to be compared.
 MAX_SUMMARY_BYTES = 16 * 1024 * 1024
 TASK_MAX_AGE = timedelta(days=1)
+_NO_SUMMARY = {'changed': None, 'lines_added': None, 'lines_removed': None, 'lines_modified': None}
 
 
 def request_summary(job: BackupJob) -> None:
@@ -84,15 +85,21 @@ def text_lines(data: bytes, volatile: re.Pattern | None = None) -> list[str]:
     return lines
 
 
-def count_changes(old: list[str], new: list[str]) -> tuple[int, int]:
-    """Lines added and removed going from ``old`` to ``new`` (a changed line is one of each)."""
-    added = removed = 0
+def count_changes(old: list[str], new: list[str]) -> tuple[int, int, int]:
+    """Lines added, removed and modified going from ``old`` to ``new``.
+
+    As in the compare view, a run of removed lines replaced by a run of added ones pairs up line by
+    line as modified; whatever is left over on either side is removed or added.
+    """
+    added = removed = modified = 0
     for tag, i1, i2, j1, j2 in SequenceMatcher(None, old, new).get_opcodes():
+        paired = min(i2 - i1, j2 - j1) if tag == 'replace' else 0
+        modified += paired
         if tag in ('replace', 'delete'):
-            removed += i2 - i1
+            removed += i2 - i1 - paired
         if tag in ('replace', 'insert'):
-            added += j2 - j1
-    return added, removed
+            added += j2 - j1 - paired
+    return added, removed, modified
 
 
 def reader() -> Callable[[BackupJob], bytes]:
@@ -116,10 +123,11 @@ def summarise(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) 
     read = read or read_content
     previous = previous_backup(job)
     binary = job.is_binary or bool(previous and previous.is_binary)
-    summary = {'compared_to': previous, 'changed': None, 'lines_added': None, 'lines_removed': None}
+    summary = {'compared_to': previous, **_NO_SUMMARY}
 
     if previous and not (job.encrypted or previous.encrypted) and job.stored_sha256 == previous.stored_sha256:
-        summary.update(changed=False, lines_added=None if binary else 0, lines_removed=None if binary else 0)
+        count = None if binary else 0
+        summary.update(changed=False, lines_added=count, lines_removed=count, lines_modified=count)
     elif any((backup.size_bytes or 0) > MAX_SUMMARY_BYTES for backup in (job, previous) if backup):
         return _save(job, summary, error=f'larger than {MAX_SUMMARY_BYTES // (1024 * 1024)} MiB, not compared')
     else:
@@ -129,10 +137,15 @@ def summarise(job: BackupJob, read: Callable[[BackupJob], bytes] | None = None) 
             summary['changed'] = old != new
         else:
             volatile = volatile_pattern(job.device)
-            added, removed = count_changes(
+            added, removed, modified = count_changes(
                 text_lines(old, volatile) if old is not None else [], text_lines(new, volatile)
             )
-            summary.update(changed=previous is None or bool(added or removed), lines_added=added, lines_removed=removed)
+            summary.update(
+                changed=previous is None or bool(added or removed or modified),
+                lines_added=added,
+                lines_removed=removed,
+                lines_modified=modified,
+            )
     return _save(job, summary)
 
 
@@ -145,4 +158,4 @@ def _save(job: BackupJob, summary: dict, error: str = '') -> BackupJob:
 
 def record_failure(job: BackupJob, error: str) -> None:
     """Give up on ``job``'s summary, saying why."""
-    _save(job, {'compared_to': None, 'changed': None, 'lines_added': None, 'lines_removed': None}, error=error)
+    _save(job, {'compared_to': None, **_NO_SUMMARY}, error=error)

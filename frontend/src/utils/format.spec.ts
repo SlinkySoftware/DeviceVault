@@ -37,16 +37,16 @@ describe('push protocols', () => {
 })
 
 describe('changeLabel', () => {
-  const job = { changed: true, lines_added: 3, lines_removed: 1, compared_to: 'prev' }
+  const job = { changed: true, lines_added: 3, lines_removed: 1, lines_modified: 2, compared_to: 'prev' }
 
   it('summarises a change against the previous backup', () => {
-    expect(changeLabel(job)).toBe('+3 −1')
-    expect(changeLabel({ ...job, changed: false, lines_added: 0, lines_removed: 0 })).toBe('No change')
+    expect(changeLabel(job)).toBe('+3 −1 ~2')
+    expect(changeLabel({ ...job, changed: false, lines_added: 0, lines_removed: 0, lines_modified: 0 })).toBe('No change')
   })
 
   it('names first and binary backups, and is empty until summarised', () => {
     expect(changeLabel({ ...job, compared_to: null })).toBe('First backup')
-    expect(changeLabel({ ...job, lines_added: null, lines_removed: null })).toBe('Changed')
+    expect(changeLabel({ ...job, lines_added: null, lines_removed: null, lines_modified: null })).toBe('Changed')
     expect(changeLabel({ ...job, changed: null })).toBe('')
   })
 })

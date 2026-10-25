@@ -76,7 +76,7 @@ dead site does not send 400 emails.
 
 ### Q3. Change summary on every backup
 Scheduled as phase 15 (`feat/change-summary`); see ARCHITECTURE.md section 10 and decision 32. Notifications on
-changes (Q2) and change counts in monitoring (Q4) can use `BackupJob.changed`, `lines_added` and `lines_removed`.
+changes (Q2) and change counts in monitoring (Q4) can use `BackupJob.changed`, `lines_added`, `lines_removed` and `lines_modified`.
 
 ### Q4. Monitoring endpoints: Zabbix first, Prometheus second
 Enterprises already have a monitoring stack, and meeting them there is worth more than building charts.

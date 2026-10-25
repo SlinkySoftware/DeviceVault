@@ -251,7 +251,7 @@ retention:  scheduler leader → expired BackupJobs → storage.delete task (bat
             → deleted | delete_failed event per backup → dv.orchestrator (job kept, marked pruned)
             (an inactive device past its hold: every unpinned backup; a purged one: every backup, section 7.5)
 summary:    job stored → orchestrator.change_summary (signed, dv.orchestrator) → read it and the previous backup
-            → decrypt, drop volatile lines, diff → changed, lines_added, lines_removed on the job
+            → decrypt, drop volatile lines, diff → changed, lines_added, lines_removed, lines_modified on the job
 search:     same task, same bytes (when DV_CONFIG_SEARCH is on) → replace secrets with tokens
             → the device's SearchDocument (section 7.2)
 ```

@@ -84,13 +84,14 @@ export function changeLabel(job: {
   changed: boolean | null
   lines_added: number | null
   lines_removed: number | null
+  lines_modified: number | null
   compared_to: string | null
 }): string {
   if (job.changed === null) return ''
   if (!job.changed) return 'No change'
   if (job.compared_to === null) return 'First backup'
-  if (job.lines_added === null || job.lines_removed === null) return 'Changed'
-  return `+${job.lines_added} −${job.lines_removed}`
+  if (job.lines_added === null || job.lines_removed === null || job.lines_modified === null) return 'Changed'
+  return `+${job.lines_added} −${job.lines_removed} ~${job.lines_modified}`
 }
 
 const PUSH_REASONS: Record<PushRejectionReason, string> = {

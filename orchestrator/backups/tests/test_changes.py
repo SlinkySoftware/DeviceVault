@@ -71,26 +71,37 @@ def backup(setup, contents, catalogue):
 
 def summary(job):
     job.refresh_from_db()
-    return job.changed, job.lines_added, job.lines_removed
+    return job.changed, job.lines_added, job.lines_removed, job.lines_modified
 
 
 def test_the_first_backup_counts_every_line_as_added(backup):
     job = changes.summarise(backup(b'hostname edge\ninterface Gi0/1\n'))
 
-    assert summary(job) == (True, 2, 0) and job.compared_to is None
+    assert summary(job) == (True, 2, 0, 0) and job.compared_to is None
 
 
 def test_changed_lines_are_counted_against_the_previous_backup(backup):
     old = backup(b'a\nb\nc\n', hours=2)
     job = changes.summarise(backup(b'a\nB\nc\nd\n'))
 
-    assert summary(job) == (True, 2, 1) and job.compared_to == old
+    assert summary(job) == (True, 1, 0, 1) and job.compared_to == old
+
+
+def test_replaced_runs_pair_up_as_modified_lines():
+    # Two lines renamed in place and one dropped, as the compare view shows it: ~2 -1, not +2 -3.
+    old = ['name=eoip-173crs', 'keep', 'interface=eoip-173crs', 'keep', 'drop me', 'end']
+    new = ['name=eoip-nbn-via-173crs', 'keep', 'interface=eoip-nbn-via-173crs', 'keep', 'end']
+    assert changes.count_changes(old, new) == (0, 1, 2)
+
+    # A replaced run longer on one side leaves the rest added or removed.
+    assert changes.count_changes(['a', 'x', 'b'], ['a', 'y', 'z', 'b']) == (1, 0, 1)
+    assert changes.count_changes(['a', 'x', 'y', 'b'], ['a', 'z', 'b']) == (0, 1, 1)
 
 
 def test_identical_backups_are_unchanged(backup):
     backup(b'a\nb\n', hours=1)
 
-    assert summary(changes.summarise(backup(b'a\r\nb\r\n\r\n'))) == (False, 0, 0)
+    assert summary(changes.summarise(backup(b'a\r\nb\r\n\r\n'))) == (False, 0, 0, 0)
 
 
 def test_unencrypted_backups_with_the_same_hash_are_not_read(backup, contents):
@@ -98,7 +109,7 @@ def test_unencrypted_backups_with_the_same_hash_are_not_read(backup, contents):
     new = backup(b'', encrypted=False)
     del contents[old.pk], contents[new.pk]
 
-    assert summary(changes.summarise(new)) == (False, 0, 0)
+    assert summary(changes.summarise(new)) == (False, 0, 0, 0)
 
 
 def test_volatile_lines_of_the_devices_driver_are_ignored(setup, backup):
@@ -106,11 +117,11 @@ def test_volatile_lines_of_the_devices_driver_are_ignored(setup, backup):
     backup(b'Building configuration...\n! Last configuration change at 01:00\nhostname edge\n', hours=1)
     pushed = backup(b'Building configuration...\n  ! Last configuration change at 02:00\nhostname edge\n')
 
-    assert summary(changes.summarise(pushed)) == (False, 0, 0)
+    assert summary(changes.summarise(pushed)) == (False, 0, 0, 0)
 
     setup['device'].driver_params = {'strip_volatile': False}
     setup['device'].save()
-    assert summary(changes.summarise(pushed)) == (True, 1, 1)
+    assert summary(changes.summarise(pushed)) == (True, 0, 0, 1)
 
 
 def test_binary_backups_are_compared_for_equality_only(backup):
@@ -118,8 +129,8 @@ def test_binary_backups_are_compared_for_equality_only(backup):
     same = backup(b'\x00\x01', hours=1, is_binary=True)
     other = backup(b'\x00\x02', is_binary=True)
 
-    assert summary(changes.summarise(same)) == (False, None, None)
-    assert summary(changes.summarise(other)) == (True, None, None)
+    assert summary(changes.summarise(same)) == (False, None, None, None)
+    assert summary(changes.summarise(other)) == (True, None, None, None)
 
 
 def test_backups_deleted_by_retention_are_skipped(backup):
@@ -127,7 +138,7 @@ def test_backups_deleted_by_retention_are_skipped(backup):
     backup(b'gone\n', hours=2, pruned_at=NOW)
     backup(b'going\n', hours=1, prune_requested_at=NOW)
 
-    assert summary(changes.summarise(backup(b'a\n'))) == (False, 0, 0)
+    assert summary(changes.summarise(backup(b'a\n'))) == (False, 0, 0, 0)
 
 
 def test_large_backups_are_not_compared(backup, monkeypatch):
@@ -135,7 +146,7 @@ def test_large_backups_are_not_compared(backup, monkeypatch):
     backup(b'a\n', hours=1)
     job = changes.summarise(backup(b'a\nb\nc\n'))
 
-    assert summary(job) == (None, None, None) and 'not compared' in job.summary_error
+    assert summary(job) == (None, None, None, None) and 'not compared' in job.summary_error
 
 
 def test_workers_volatile_patterns_are_bounded():
@@ -169,10 +180,10 @@ def test_the_task_summarises_only_what_the_orchestrator_signed(backup):
     forged = sign_with({'job_id': str(job.id)}, signing.generate_signing_key())
 
     change_summary.apply(args=[forged])
-    assert summary(job) == (None, None, None)
+    assert summary(job) == (None, None, None, None)
 
     change_summary.apply(args=[sign_task({'job_id': str(job.id)})])
-    assert summary(job) == (True, 1, 0)
+    assert summary(job) == (True, 1, 0, 0)
 
 
 def test_the_task_gives_up_on_unreadable_backups_saying_why(backup):
