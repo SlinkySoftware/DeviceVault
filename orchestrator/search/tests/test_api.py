@@ -219,3 +219,40 @@ def test_candidate_lookups_use_the_trigram_index(db, lookup):
         cursor.execute(f'EXPLAIN {sql}', params)
         plan = '\n'.join(row[0] for row in cursor.fetchall())
     assert 'search_document_text_trgm' in plan
+
+
+def test_secret_search_finds_a_value_wherever_it_is_used(admin_client, indexed, search_on):
+    indexed('edge-01')  # snmp community "public", and "cisco" as a type 7 password
+    indexed('edge-02', b'username admin secret cisco\nsnmp-server community private RO\n')
+    indexed('edge-03', b'snmp-server location public library\n')
+
+    assert names(search(admin_client, 'public', mode='secret')) == ['edge-01']
+    reply = search(admin_client, 'cisco', mode='secret').json()
+    assert [r['device_name'] for r in reply['results']] == ['edge-01', 'edge-02']
+    assert reply['results'][0]['lines'] == [{'number': 6, 'text': f'username ops password 7 {token("cisco")}'}]
+    # Secrets are case-sensitive and exact.
+    assert names(search(admin_client, 'Public', mode='secret')) == []
+    assert names(search(admin_client, 'publi', mode='secret')) == []
+
+
+def test_a_type_7_value_typed_as_a_secret_finds_its_plaintext(admin_client, indexed, search_on):
+    indexed('edge-02', b'username admin secret cisco\n')
+
+    assert names(search(admin_client, '0822455D0A16', mode='secret')) == ['edge-02']
+
+
+def test_secret_searches_are_neither_echoed_nor_recorded(admin_client, indexed, search_on):
+    indexed('edge-01')
+
+    reply = search(admin_client, 'public', mode='secret').json()
+
+    assert reply['query'] == '' and len(reply['results']) == 1
+    [entry] = AuditLog.objects.filter(action='search.query')
+    assert 'query' not in entry.details and entry.details['mode'] == 'secret' and entry.details['devices'] == 1
+    assert 'public' not in str(entry.details) and token('public') not in str(entry.details)
+
+
+def test_secret_search_needs_a_value(admin_client, search_on):
+    reply = search(admin_client, '', mode='secret')
+
+    assert reply.status_code == 400

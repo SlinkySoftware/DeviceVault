@@ -50,6 +50,7 @@ router.register(r'auth-provider-kinds', provider_api.AuthProviderKindViewSet, ba
 router.register(r'audit-logs', audit_api.AuditLogViewSet, basename='audit-logs')
 router.register(r'workers', views.WorkerViewSet)
 router.register(r'flower-endpoints', monitoring_api.FlowerEndpointViewSet)
+router.register(r'saved-searches', search_api.SavedSearchViewSet, basename='saved-searches')
 
 urlpatterns = [
     path('api/', include(router.urls)),

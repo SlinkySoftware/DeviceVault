@@ -16,11 +16,13 @@ from accounts import access
 from core.workers import driver_catalogue
 from search.indexing import driver_patterns
 from search.models import SearchDocument
-from search.tokens import tokenise_line
+from search.tokens import secret_tokens, tokenise_line
 
 MODE_TEXT = 'text'
 MODE_REGEX = 'regex'
-MODES = (MODE_TEXT, MODE_REGEX)
+# A bare secret value, found wherever it is used (any driver, any line). Never echoed or recorded.
+MODE_SECRET = 'secret'
+MODES = (MODE_TEXT, MODE_REGEX, MODE_SECRET)
 
 MAX_QUERY_LENGTH = 256
 MIN_TEXT_LENGTH = 3
@@ -100,6 +102,8 @@ def validate(search: Search) -> None:
         raise SearchError(f'Search for at least {MIN_TEXT_LENGTH} characters.')
     if search.mode == MODE_REGEX and not search.query:
         raise SearchError('Enter a regular expression.')
+    if search.mode == MODE_SECRET and not search.query:
+        raise SearchError('Enter the secret value to look for.')
 
 
 def visible_documents(user, search: Search):
@@ -123,8 +127,11 @@ def text_needles(documents, query: str) -> dict[str, list[str]]:
     return needles
 
 
-def recorded_query(search: Search, needles: dict[str, list[str]] | None) -> str:
-    """The query as the audit log keeps it: secret values typed into a text search are tokenised."""
+def recorded_query(search: Search, needles: dict[str, list[str]] | None) -> str | None:
+    """The query as the audit log keeps it: secret values typed into a text search are tokenised,
+    and a secret search keeps nothing of its value (not even its token, which would identify it)."""
+    if search.mode == MODE_SECRET:
+        return None
     if search.mode == MODE_TEXT and needles:
         return next((needle for needle in needles if needle != search.query), search.query)
     return search.query
@@ -135,6 +142,9 @@ def _matcher(search: Search, needles: dict[str, list[str]] | None):
     if search.mode == MODE_REGEX:
         regex = compile_regex(search.query)
         return lambda document, line: regex.search(line) is not None
+    if search.mode == MODE_SECRET:
+        tokens = secret_tokens(search.query)
+        return lambda document, line: any(token in line for token in tokens)
     lowered = {driver: needle.lower() for needle, drivers in (needles or {}).items() for driver in drivers}
     return lambda document, line: lowered.get(document.driver, '\0') in line.lower()
 
@@ -147,6 +157,11 @@ def _candidates(documents, search: Search, needles: dict[str, list[str]] | None)
         for needle, drivers in needles.items():
             condition |= Q(driver__in=drivers, text__dv_like=f'%{_escape_like(needle)}%')
         return documents.filter(condition)
+    if search.mode == MODE_SECRET:
+        condition = Q()
+        for token in secret_tokens(search.query):
+            condition |= Q(text__dv_like=f'%{_escape_like(token)}%')
+        return documents.filter(condition)
     if connection.vendor == 'postgresql':
         # Newline-sensitive, so "." and "^"/"$" work per line as RE2 does here.
         pattern = '(?n)' + postgres_regex(search.query)
@@ -155,7 +170,7 @@ def _candidates(documents, search: Search, needles: dict[str, list[str]] | None)
     return documents
 
 
-def run(user, search: Search) -> tuple[dict, str]:
+def run(user, search: Search) -> tuple[dict, str | None]:
     """Search the latest backups of the devices ``user`` may read: the response and the query to audit.
 
     Raises ``SearchError``.
@@ -193,7 +208,7 @@ def run(user, search: Search) -> tuple[dict, str]:
         raise SearchError('The search took too long; make it more specific or filter it.') from exc
     response = {
         'mode': search.mode,
-        'query': search.query,
+        'query': '' if search.mode == MODE_SECRET else search.query,
         'results': results,
         'truncated': truncated,
         'timed_out': timed_out,

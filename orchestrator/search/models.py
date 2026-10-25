@@ -58,3 +58,23 @@ class SearchDocument(models.Model):
 
     def __str__(self):
         return f'search document of device {self.device_id}'
+
+
+class SavedSearch(models.Model):
+    """A search a user keeps to run again; private to its owner. Secret searches cannot be saved."""
+
+    owner = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='saved_searches')
+    name = models.CharField(max_length=128)
+    query = models.CharField(max_length=256)
+    mode = models.CharField(max_length=16, choices=[('text', 'Text'), ('regex', 'Regular expression')], default='text')
+    device_group = models.ForeignKey('devices.DeviceGroup', null=True, blank=True, on_delete=models.SET_NULL)
+    driver = models.CharField(max_length=128, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        constraints = [models.UniqueConstraint(fields=['owner', 'name'], name='saved_search_unique_name')]
+
+    def __str__(self):
+        return self.name

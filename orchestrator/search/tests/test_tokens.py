@@ -2,7 +2,7 @@ import pytest
 
 from core import keys
 from core.workers import _secret_lines
-from search.tokens import TOKEN_RE, compile_patterns, decode_cisco7, token, tokenise_line, tokenise_text
+from search.tokens import TOKEN_RE, compile_patterns, decode_cisco7, secret_tokens, token, tokenise_line, tokenise_text
 
 from .conftest import CISCO_SECRETS
 
@@ -106,3 +106,15 @@ def test_the_fingerprint_changes_with_the_patterns():
 )
 def test_advertised_secret_lines_are_validated(advertised, kept):
     assert _secret_lines(advertised) == kept
+
+
+def test_quoted_values_are_hashed_unquoted(db):
+    patterns = compile_patterns([{'pattern': r'(?:^|\s)password=("(?:[^"\\]|\\.)*"|\S+)', 'encoding': None}])
+
+    assert tokenise_line('add password="pa ss\\"w"', patterns) == f'add password={token("pa ss" + chr(34) + "w")}'
+    assert tokenise_line('add password=plain', patterns) == f'add password={token("plain")}'
+
+
+def test_a_typed_secret_covers_its_type_7_plaintext(db):
+    assert secret_tokens('cisco') == {token('cisco')}
+    assert secret_tokens('0822455D0A16') == {token('0822455D0A16'), token('cisco')}
