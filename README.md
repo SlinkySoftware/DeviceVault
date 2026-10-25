@@ -68,7 +68,7 @@ ideas for what comes next are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Known gaps
 
-Retention policies are stored but not yet enforced, and Redis Sentinel is not supported.
+Redis Sentinel is not supported yet.
 Both are scheduled work; see [docs/ROADMAP.md](docs/ROADMAP.md) and the limitations in
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
