@@ -117,9 +117,20 @@
           <q-btn v-close-popup icon="close" flat round dense aria-label="Close" />
         </q-card-section>
         <q-separator />
-        <q-card-section class="col scroll">
+        <q-card-section class="col column no-wrap">
           <q-inner-loading :showing="viewer.loading" />
-          <pre class="backup-content">{{ viewer.content }}</pre>
+          <q-virtual-scroll
+            ref="scroller"
+            v-slot="{ item, index }"
+            class="col backup-content"
+            :items="viewerLines"
+            :virtual-scroll-item-size="18"
+          >
+            <div :key="index" class="content-line" :class="{ target: index + 1 === viewer.line }">
+              <span class="line-number">{{ index + 1 }}</span>
+              <span class="line-text">{{ item }}</span>
+            </div>
+          </q-virtual-scroll>
         </q-card-section>
       </q-card>
     </q-dialog>
@@ -129,9 +140,9 @@
 </template>
 
 <script setup lang="ts">
-import type { QTableColumn, QTableProps } from 'quasar'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, type RouteLocationRaw } from 'vue-router'
+import type { QTableColumn, QTableProps, QVirtualScroll } from 'quasar'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import { backupJobsApi, devicesApi } from '@/api/endpoints'
 import type { BackupJob, GrantFlag } from '@/api/types'
@@ -148,6 +159,7 @@ import { capitalise, changeLabel, formatBytes, formatDuration, isActiveJob, stat
 type Pagination = NonNullable<QTableProps['pagination']>
 
 const route = useRoute()
+const router = useRouter()
 const notify = useNotify()
 const deviceId = computed(() => Number(route.params.id))
 
@@ -231,10 +243,19 @@ async function onRequest(request: { pagination: Pagination }): Promise<void> {
 const interval = computed(() => (jobs.value.some((job) => isActiveJob(job.state)) ? 5_000 : 60_000))
 usePolling(load, interval)
 
-const viewer = reactive({ open: false, loading: false, title: '', content: '' })
+const viewer = reactive<{ open: boolean; loading: boolean; title: string; content: string; line: number | null }>({
+  open: false,
+  loading: false,
+  title: '',
+  content: '',
+  line: null,
+})
+const viewerLines = computed(() => viewer.content.split('\n'))
+const scroller = ref<QVirtualScroll | null>(null)
 
-async function view(job: BackupJob): Promise<void> {
-  Object.assign(viewer, { open: true, loading: true, title: formatDateTime(job.created_at), content: '' })
+/** Show a backup's content; `line` (1-based) is highlighted and scrolled to. */
+async function view(job: BackupJob, line: number | null = null): Promise<void> {
+  Object.assign(viewer, { open: true, loading: true, title: formatDateTime(job.created_at), content: '', line })
   try {
     viewer.content = (await backupJobsApi.contentText(job.id)) || '(empty backup)'
   } catch (error) {
@@ -243,7 +264,30 @@ async function view(job: BackupJob): Promise<void> {
   } finally {
     viewer.loading = false
   }
+  if (viewer.open && line) {
+    await nextTick()
+    scroller.value?.scrollTo(line - 1, 'center-force')
+  }
 }
+
+/** Config search links here with ?view=<job>&line=<n>. */
+async function viewFromRoute(): Promise<void> {
+  const { view: jobId, line } = route.query
+  if (typeof jobId !== 'string' || !jobId) return
+  try {
+    await view(await backupJobsApi.get(jobId), Number(line) || null)
+  } catch (error) {
+    notify.error(error, 'Failed to load backup')
+  }
+}
+
+// Closing a viewer opened from a link drops the link, so a reload does not reopen it.
+watch(
+  () => viewer.open,
+  (open) => {
+    if (!open && route.query.view) void router.replace({ query: {} })
+  },
+)
 
 async function download(job: BackupJob): Promise<void> {
   downloading.add(job.id)
@@ -277,6 +321,7 @@ onMounted(async () => {
   } catch (error) {
     notify.error(error, 'Failed to load device')
   }
+  await viewFromRoute()
 })
 </script>
 
@@ -288,14 +333,34 @@ onMounted(async () => {
 
 .backup-content {
   margin: 0;
-  padding: 16px;
+  padding: 16px 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
   background: #1e1e1e;
   color: #e0e0e0;
   border-radius: 4px;
+}
+
+.content-line {
+  display: flex;
+  padding: 0 16px 0 0;
+}
+
+.content-line.target {
+  background: rgba(255, 213, 79, 0.25);
+}
+
+.line-number {
+  flex: 0 0 4.5em;
+  padding-right: 1em;
+  text-align: right;
+  color: #777;
+  user-select: none;
+}
+
+.line-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

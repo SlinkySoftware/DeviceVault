@@ -18,6 +18,12 @@ class MikrotikExportDriver(NetmikoDriver):
     Params = MikrotikExportParams
     # The export starts with "# <date> <time> by RouterOS <version>".
     volatile_lines = (r'# .* by RouterOS ',)
+    # With show-sensitive the export holds secrets as properties (quoted or not), such as
+    # password, auth-password, secret, ipsec-secret, wpa2-pre-shared-key and private-key.
+    secret_lines = (
+        r'(?:^|\s)(?:[a-z0-9-]+-)?(?:password|secret|passphrase|pre-shared-key|private-key|authentication-key)='
+        r'("(?:[^"\\]|\\.)*"|\S+)',
+    )
 
     def commands(self, params: MikrotikExportParams) -> list[str]:
         return ['/export show-sensitive' if params.show_sensitive else '/export']

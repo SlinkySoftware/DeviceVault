@@ -19,6 +19,9 @@ export const MAIN_LINKS: NavLink[] = [
   { label: 'Devices', icon: 'devices', to: '/devices' },
 ]
 
+/** Shown when config search is available to the user (auth.searchAvailable). */
+export const SEARCH_LINK: NavLink = { label: 'Config Search', icon: 'manage_search', to: '/search' }
+
 export const ADMIN_SECTIONS: NavSection[] = [
   {
     label: 'User Settings',

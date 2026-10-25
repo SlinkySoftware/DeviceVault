@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from netmiko import NetmikoAuthenticationException, NetmikoTimeoutException
 
@@ -142,3 +144,46 @@ def test_drivers_advertise_their_volatile_lines():
 
     assert r'! Last configuration change at' in cisco['volatile_lines']
     assert get_driver('noop').describe()['volatile_lines'] == []
+
+
+def first_secrets(key, line):
+    """The secret values the first matching ``secret_lines`` pattern captures, as the orchestrator applies them."""
+    for entry in get_driver(key).describe()['secret_lines']:
+        matches = list(re.finditer(entry['pattern'], line.lstrip(), re.IGNORECASE))
+        if matches:
+            return [(value, entry['encoding']) for match in matches for value in match.groups() if value]
+    return []
+
+
+@pytest.mark.parametrize(
+    ('line', 'secrets'),
+    [
+        ('snmp-server community public RO', [('public', None)]),
+        ('snmp-server host 10.0.0.9 version 2c s3cret', [('s3cret', None)]),
+        ('snmp-server host 10.0.0.9 version 3 priv monitor', []),
+        ('enable secret 9 $9$abc$def', [('$9$abc$def', None)]),
+        ('enable password 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        ('username admin privilege 15 secret 9 $9$xyz', [('$9$xyz', None)]),
+        ('username ops password 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        (' password 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        (' key-string 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        (' key 1', []),
+        (' key 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        ('tacacs-server key s3cret', [('s3cret', None)]),
+        ('crypto isakmp key 6 Vpn!Key address 192.0.2.1', [('Vpn!Key', None)]),
+        (' neighbor 192.0.2.2 password 7 0822455D0A16', [('0822455D0A16', 'cisco7')]),
+        ('ntp authentication-key 1 md5 104D000A0618 7', [('104D000A0618', 'cisco7')]),
+        ('interface GigabitEthernet0/1', []),
+    ],
+)
+def test_cisco_secret_lines(line, secrets):
+    assert first_secrets('cisco_ios', line) == secrets
+
+
+def test_mikrotik_secret_lines():
+    line = 'add name=vpn password="pa ss\\"word" secret=abc123 comment=x'
+
+    assert first_secrets('mikrotik_ssh_export', line) == [('"pa ss\\"word"', None), ('abc123', None)]
+    assert first_secrets('mikrotik_ssh_export', 'set enabled=yes ipsec-secret=l2tp use-ipsec=yes') == [('l2tp', None)]
+    assert first_secrets('mikrotik_ssh_export', 'add private-key="abc=" public-key="def="') == [('"abc="', None)]
+    assert get_driver('noop').describe()['secret_lines'] == []

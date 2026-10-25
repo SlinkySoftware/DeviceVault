@@ -23,6 +23,9 @@ function fakeAuth(user: CurrentUser | null, session: CurrentUser | null = user):
     get isGlobalAdmin() {
       return !!this.user?.is_global_admin
     },
+    get searchAvailable() {
+      return !!this.user?.config_search
+    },
     get administersAny() {
       return !!this.user && (this.user.is_global_admin || Object.values(this.user.grants).some((f) => f.includes('admin')))
     },
@@ -90,6 +93,13 @@ describe('auth guard', () => {
 
     expect(await navigate(fakeAuth(GROUP_ADMIN), credentials)).toBe(true)
     expect(await navigate(fakeAuth(MEMBER), credentials)).toEqual({ name: 'dashboard' })
+  })
+
+  it('keeps users out of config search unless it is available to them', async () => {
+    const search = route('/search', { requiresSearch: true })
+
+    expect(await navigate(fakeAuth({ ...MEMBER, config_search: true }), search)).toBe(true)
+    expect(await navigate(fakeAuth(MEMBER), search)).toEqual({ name: 'dashboard' })
   })
 
   it('lets global administrators everywhere', async () => {

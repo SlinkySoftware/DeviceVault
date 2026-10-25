@@ -27,7 +27,7 @@
     <q-drawer v-model="drawerOpen" show-if-above side="left" bordered>
       <div class="column no-wrap full-height">
         <q-list class="nav">
-          <q-item v-for="link in MAIN_LINKS" :key="link.to" clickable :to="link.to" :exact="link.to === '/'">
+          <q-item v-for="link in mainLinks" :key="link.to" clickable :to="link.to" :exact="link.to === '/'">
             <q-item-section avatar><q-icon :name="link.icon" /></q-item-section>
             <q-item-section>{{ link.label }}</q-item-section>
           </q-item>
@@ -79,7 +79,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { useThemeStore } from '@/stores/theme'
 
-import { adminSectionsFor, MAIN_LINKS } from './navigation'
+import { adminSectionsFor, MAIN_LINKS, SEARCH_LINK } from './navigation'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -89,6 +89,7 @@ const router = useRouter()
 const notify = useNotify()
 
 const drawerOpen = ref(false)
+const mainLinks = computed(() => (auth.searchAvailable ? [...MAIN_LINKS, SEARCH_LINK] : MAIN_LINKS))
 const adminSections = computed(() => adminSectionsFor(auth.isGlobalAdmin, auth.administersAny))
 const onAdminRoute = computed(() => route.path.startsWith('/vaultadmin/'))
 

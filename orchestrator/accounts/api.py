@@ -57,6 +57,7 @@ def current_user(user) -> dict:
         'providers': sorted(user.external_identities.values_list('provider__name', flat=True)),
         'editable': user_source(user) == 'local',
         'is_global_admin': access.is_global_admin(user),
+        'config_search': settings.DEVICEVAULT_CONFIG_SEARCH,
         'grants': {
             str(group_id): [f for f in FLAGS if f in flags] for group_id, flags in access.grants_for(user).items()
         },

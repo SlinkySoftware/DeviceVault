@@ -9,6 +9,8 @@ declare module 'vue-router' {
     requiresGlobalAdmin?: boolean
     /** Global administrators and administrators of any device group. */
     requiresGroupAdmin?: boolean
+    /** Config search is on and the user may read some device's backups. */
+    requiresSearch?: boolean
     title?: string
   }
 }
@@ -52,6 +54,12 @@ const routes: RouteRecordRaw[] = [
         name: 'device-backups-compare',
         component: () => import('@/pages/CompareBackupsPage.vue'),
         meta: { title: 'Compare Backups' },
+      },
+      {
+        path: 'search',
+        name: 'search',
+        component: () => import('@/pages/SearchPage.vue'),
+        meta: { requiresSearch: true, title: 'Config Search' },
       },
       { path: 'profile', name: 'profile', component: () => import('@/pages/ProfilePage.vue'), meta: { title: 'Profile' } },
 

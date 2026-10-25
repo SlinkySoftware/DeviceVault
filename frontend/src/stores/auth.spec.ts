@@ -21,6 +21,7 @@ const USER: CurrentUser = {
   providers: [],
   editable: true,
   is_global_admin: false,
+  config_search: false,
   grants: { '3': ['view', 'backup_now'], '4': ['view', 'backup_now', 'view_contents', 'download', 'admin'] },
 }
 
@@ -60,6 +61,20 @@ describe('auth store', () => {
 
     expect(auth.can('admin', null)).toBe(true)
     expect(auth.administersAny).toBe(true)
+  })
+
+  it('offers config search only when it is on and the user may read some backups', async () => {
+    const auth = useAuthStore()
+    await auth.login('alice', 'pw', false)
+    expect(auth.searchAvailable).toBe(false)
+
+    vi.mocked(authApi.login).mockResolvedValue({ user: { ...USER, config_search: true } })
+    await auth.login('alice', 'pw', false)
+    expect(auth.searchAvailable).toBe(true)
+
+    vi.mocked(authApi.login).mockResolvedValue({ user: { ...USER, config_search: true, grants: { '3': ['view'] } } })
+    await auth.login('alice', 'pw', false)
+    expect(auth.searchAvailable).toBe(false)
   })
 
   it('remembers the username only when asked', async () => {

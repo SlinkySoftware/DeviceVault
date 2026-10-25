@@ -19,6 +19,12 @@ export const useAuthStore = defineStore('auth', () => {
   const administersAny = computed(
     () => isGlobalAdmin.value || Object.values(user.value?.grants ?? {}).some((flags) => flags.includes('admin')),
   )
+  /** Config search is on and the user may read some device's backups. */
+  const searchAvailable = computed(
+    () =>
+      !!user.value?.config_search &&
+      (isGlobalAdmin.value || Object.values(user.value.grants).some((flags) => flags.includes('view_contents'))),
+  )
   const rememberedUsername = ref(readString(REMEMBERED_USERNAME_KEY) ?? '')
 
   /** Whether the user holds `flag` on a device group (null: ungrouped, global administrators only). */
@@ -68,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isGlobalAdmin,
     administersAny,
+    searchAvailable,
     rememberedUsername,
     can,
     fetchUser,

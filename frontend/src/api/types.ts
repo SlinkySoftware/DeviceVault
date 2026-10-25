@@ -390,6 +390,8 @@ export interface CurrentUser {
   /** False for users managed by an external identity provider. */
   editable: boolean
   is_global_admin: boolean
+  /** Whether config search is on (DV_CONFIG_SEARCH). */
+  config_search: boolean
   /** Device group id -> flags held on it. */
   grants: Record<string, GrantFlag[]>
 }
@@ -717,3 +719,47 @@ export interface FlowerEndpoint {
 }
 
 export type FlowerEndpointWrite = Pick<FlowerEndpoint, 'name' | 'slug' | 'url' | 'proxied'>
+
+// --- Config search ----------------------------------------------------------------
+
+export type SearchMode = 'text' | 'regex'
+
+export interface SearchQuery {
+  q: string
+  mode: SearchMode
+  device_group?: Id
+  driver?: string
+}
+
+export interface SearchLine {
+  number: number
+  /** The line as indexed: secret values appear as `{{secret:<hex>}}` tokens. */
+  text: string
+}
+
+export interface SearchResult {
+  device: Id
+  device_name: string
+  device_group: Id | null
+  device_group_name: string | null
+  driver: string
+  /** The backup searched: the device's newest stored one. */
+  job: string
+  backup_at: string
+  indexed_at: string
+  match_count: number
+  /** The first matching lines (match_count may be more). */
+  lines: SearchLine[]
+}
+
+export interface SearchResponse {
+  mode: SearchMode
+  query: string
+  results: SearchResult[]
+  /** More devices matched than are returned. */
+  truncated: boolean
+  /** The search stopped before looking at every device. */
+  timed_out: boolean
+  /** Devices with a searchable backup that the search covered. */
+  searched_devices: number
+}
