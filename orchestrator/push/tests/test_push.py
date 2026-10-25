@@ -240,6 +240,22 @@ def test_rejections_are_recorded_audited_and_pruned(receiver, monkeypatch):
     assert audit.first().outcome == AuditLog.DENIED and audit.first().actor_name == 'receiver-1'
 
 
+def test_old_rejections_are_pruned_by_age(receiver):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    keys_, worker = receiver
+    old = PushRejection.objects.create(
+        worker=worker, at=timezone.now() - timedelta(days=91), source_ip='198.51.100.1', protocol='ssh', reason='error'
+    )
+
+    handle_push_event(push_event(keys_, EVENT_REJECTED, source_ip='198.51.100.2', reason='unknown_source'))
+
+    assert not PushRejection.objects.filter(pk=old.pk).exists()
+    assert PushRejection.objects.filter(worker=worker).count() == 1
+
+
 def test_tftp_pushes_need_a_tftp_device(setup, receiver, broker, django_capture_on_commit_callbacks):
     keys_, worker = receiver
     enable_push(setup['device'], push_mode='tftp')

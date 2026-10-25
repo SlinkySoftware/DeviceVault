@@ -1,20 +1,33 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <q-page padding>
-    <div class="text-h5 q-mb-md">Dashboard</div>
+    <div class="row items-center q-mb-md q-gutter-sm">
+      <div class="text-h5 col-auto q-mr-md">Dashboard</div>
+      <q-btn-toggle
+        :model-value="days"
+        :options="PERIOD_OPTIONS"
+        dense
+        no-caps
+        unelevated
+        toggle-color="primary"
+        class="period-toggle"
+        aria-label="Period"
+        @update:model-value="setDays"
+      />
+    </div>
 
     <div class="row q-col-gutter-md">
       <div class="col-12 col-sm-6 col-lg-3">
-        <DashboardCard title="Configured Devices">
+        <DashboardCard title="Configured Devices" :failed="summaryCard.failed.value" @retry="summaryCard.refresh">
           <div class="column no-wrap q-gutter-y-sm">
             <StatBox label="Total" :value="totalDevices" />
             <div>
               <q-list dense separator class="type-list">
-                <q-item v-for="(entry, type) in stats.devicesByType" :key="type" class="q-px-sm">
+                <q-item v-for="entry in summary?.devices_by_type ?? []" :key="entry.name" class="q-px-sm">
                   <q-item-section avatar style="min-width: 32px">
                     <q-icon :name="entry.icon || 'router'" color="primary" />
                   </q-item-section>
-                  <q-item-section>{{ type }}</q-item-section>
+                  <q-item-section>{{ entry.name || 'No type' }}</q-item-section>
                   <q-item-section side class="text-subtitle1 text-weight-bold text-primary">{{ entry.count }}</q-item-section>
                 </q-item>
               </q-list>
@@ -28,11 +41,11 @@
         <DashboardCard title="Backups (24h)">
           <div class="row q-col-gutter-sm full-height">
             <div class="col-5 column no-wrap">
-              <StatBox label="Success" :value="stats.success24h" color="positive" large />
+              <StatBox label="Stored" :value="summary?.stored_24h ?? 0" color="positive" large />
             </div>
             <div class="col-7 column no-wrap q-gutter-y-sm">
-              <StatBox label="Failed" :value="stats.failed24h" color="negative" />
-              <StatBox label="In progress" :value="stats.inProgress24h" color="warning" />
+              <StatBox label="Failed" :value="summary?.failed_24h ?? 0" color="negative" />
+              <StatBox label="In progress" :value="summary?.in_progress ?? 0" color="warning" />
             </div>
           </div>
         </DashboardCard>
@@ -41,7 +54,7 @@
       <div class="col-12 col-sm-6 col-lg-3">
         <DashboardCard title="Average Backup Time">
           <div class="column no-wrap full-height">
-            <StatBox label="Last 24h" :value="`${stats.avgDuration.toFixed(1)}s`" large />
+            <StatBox label="Last 24h" :value="`${(summary?.avg_duration_s ?? 0).toFixed(1)}s`" large />
           </div>
         </DashboardCard>
       </div>
@@ -49,30 +62,88 @@
       <div class="col-12 col-sm-6 col-lg-3">
         <DashboardCard title="Device Success Rate">
           <div class="column no-wrap full-height">
-            <StatBox label="Last 24h" :value="`${stats.successRate}%`" color="positive" large />
+            <StatBox
+              label="Latest backup succeeded"
+              :value="summary?.device_success_rate == null ? '—' : `${summary.device_success_rate}%`"
+              color="positive"
+              large
+            />
           </div>
         </DashboardCard>
       </div>
 
-      <div class="col-12 col-lg-5">
-        <DashboardCard title="Backup Success Rate">
-          <template #actions>
-            <q-select
-              v-model="chartDays"
-              :options="DAY_OPTIONS"
-              dense
-              outlined
-              options-dense
-              emit-value
-              map-options
-              style="min-width: 140px"
-            />
-          </template>
-          <SuccessChart :data="chartData" />
+      <div class="col-12 col-lg-6">
+        <DashboardCard
+          title="Backups per Day"
+          :caption="`Stored and failed, last ${days} days`"
+          :loading="trendCard.loading.value"
+          :failed="trendCard.failed.value"
+          @retry="trendCard.refresh"
+        >
+          <TimeSeriesChart :dates="dates" :series="volume" kind="bar" integer label="Stored and failed backups per day" />
         </DashboardCard>
       </div>
 
-      <div class="col-12 col-lg-7">
+      <div class="col-12 col-lg-6">
+        <DashboardCard
+          title="Success Rate"
+          caption="Stored backups of those finished each day"
+          :loading="trendCard.loading.value"
+          :failed="trendCard.failed.value"
+          @retry="trendCard.refresh"
+        >
+          <TimeSeriesChart :dates="dates" :series="rate" :max="100" :format="percent" label="Backup success rate per day" />
+        </DashboardCard>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <DashboardCard
+          title="Backup Duration"
+          caption="Request to stored"
+          :loading="trendCard.loading.value"
+          :failed="trendCard.failed.value"
+          @retry="trendCard.refresh"
+        >
+          <TimeSeriesChart :dates="dates" :series="duration" :format="seconds" label="Average and longest backup duration per day" />
+        </DashboardCard>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <DashboardCard
+          title="Changes per Day"
+          caption="Stored backups that differ from the device's previous one"
+          :loading="trendCard.loading.value"
+          :failed="trendCard.failed.value"
+          @retry="trendCard.refresh"
+        >
+          <TimeSeriesChart
+            :dates="dates"
+            :series="changes"
+            kind="bar"
+            integer
+            label="Changed backups per day"
+            empty-text="No changes in this period"
+          />
+        </DashboardCard>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <FreshnessCard />
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <FailingCard :days="days" />
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <StorageCard :days="days" />
+      </div>
+
+      <div v-if="auth.isGlobalAdmin" class="col-12 col-lg-6">
+        <PushRefusalsCard :days="days" />
+      </div>
+
+      <div class="col-12">
         <DashboardCard title="Recent Backup Activity">
           <template #actions>
             <q-select
@@ -96,48 +167,77 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { dashboardApi } from '@/api/endpoints'
-import type { ActivityItem, ActivityWindow, DailyStat, DashboardStats } from '@/api/types'
+import type { ActivityItem, ActivityWindow, DashboardPeriod } from '@/api/types'
 import BackupLogViewer from '@/components/BackupLogViewer.vue'
+import TimeSeriesChart from '@/components/charts/TimeSeriesChart.vue'
+import type { ChartSeries } from '@/components/charts/types'
 import ActivityFeed from '@/components/dashboard/ActivityFeed.vue'
 import DashboardCard from '@/components/dashboard/DashboardCard.vue'
+import FailingCard from '@/components/dashboard/FailingCard.vue'
+import FreshnessCard from '@/components/dashboard/FreshnessCard.vue'
+import PushRefusalsCard from '@/components/dashboard/PushRefusalsCard.vue'
 import StatBox from '@/components/dashboard/StatBox.vue'
-import SuccessChart from '@/components/dashboard/SuccessChart.vue'
+import StorageCard from '@/components/dashboard/StorageCard.vue'
 import type { BackupLogInfo } from '@/components/types'
-import { useNotify } from '@/composables/useNotify'
+import { useCardData } from '@/composables/useCardData'
+import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/datetime'
 import { statusLabel } from '@/utils/format'
 
-const DAY_OPTIONS = [
-  { label: 'Last 7 days', value: 7 },
-  { label: 'Last 14 days', value: 14 },
-  { label: 'Last 30 days', value: 30 },
-]
+const PERIODS: DashboardPeriod[] = [7, 14, 30, 90]
+const DEFAULT_PERIOD: DashboardPeriod = 30
+const PERIOD_OPTIONS = PERIODS.map((value) => ({ label: `${value} days`, value }))
 const WINDOW_OPTIONS: { label: string; value: ActivityWindow }[] = [
   { label: 'Last hour', value: '1h' },
   { label: 'Last 24 hours', value: '24h' },
   { label: 'Last 7 days', value: '7d' },
 ]
 
-const notify = useNotify()
-const stats = ref<DashboardStats>({
-  devicesByType: {},
-  success24h: 0,
-  failed24h: 0,
-  inProgress24h: 0,
-  avgDuration: 0,
-  successRate: 0,
-  dailyStats: [],
-  timezone: '',
+const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
+// The period lives in the URL (?days=30) so a view can be shared.
+const days = computed<DashboardPeriod>(() => {
+  const value = Number(route.query.days)
+  return PERIODS.includes(value as DashboardPeriod) ? (value as DashboardPeriod) : DEFAULT_PERIOD
 })
-const chartDays = ref(7)
-const chartData = ref<DailyStat[]>([])
+function setDays(value: DashboardPeriod): void {
+  void router.replace({ query: { ...route.query, days: String(value) } })
+}
+
+const summaryCard = useCardData(() => dashboardApi.summary())
+const summary = summaryCard.data
+const totalDevices = computed(() => (summary.value?.devices_by_type ?? []).reduce((sum, e) => sum + e.count, 0))
+
+const trendCard = useCardData(
+  () => dashboardApi.trend(days.value),
+  () => days.value,
+)
+const trend = computed(() => trendCard.data.value?.days ?? [])
+const dates = computed(() => trend.value.map((day) => day.date))
+const volume = computed<ChartSeries[]>(() => [
+  { key: 'stored', label: 'Stored', color: 'var(--chart-1)', values: trend.value.map((day) => day.stored) },
+  { key: 'failed', label: 'Failed', color: 'var(--chart-failed)', values: trend.value.map((day) => day.failed) },
+])
+const rate = computed<ChartSeries[]>(() => [
+  { key: 'rate', label: 'Success rate', color: 'var(--chart-1)', values: trend.value.map((day) => day.rate) },
+])
+const duration = computed<ChartSeries[]>(() => [
+  { key: 'avg', label: 'Average', color: 'var(--chart-1)', values: trend.value.map((day) => day.avg_duration_s) },
+  { key: 'max', label: 'Longest', color: 'var(--chart-2)', values: trend.value.map((day) => day.max_duration_s) },
+])
+const changes = computed<ChartSeries[]>(() => [
+  { key: 'changed', label: 'Changed', color: 'var(--chart-1)', values: trend.value.map((day) => day.changed) },
+])
+const percent = (value: number) => `${Math.round(value)}%`
+const seconds = (value: number) => (value >= 60 ? `${Math.round(value / 6) / 10} min` : `${Math.round(value * 10) / 10} s`)
+
 const activityWindow = ref<ActivityWindow>('1h')
-
-const totalDevices = computed(() => Object.values(stats.value.devicesByType).reduce((sum, e) => sum + e.count, 0))
-
 const logsOpen = ref(false)
 const logsBackupId = ref<string | null>(null)
 const logsInfo = ref<BackupLogInfo | null>(null)
@@ -147,23 +247,6 @@ function openLogs(item: ActivityItem): void {
   logsInfo.value = { deviceName: item.device_name, timestamp: formatDateTime(item.created_at), status: statusLabel(item.state) }
   logsOpen.value = true
 }
-
-onMounted(async () => {
-  try {
-    stats.value = await dashboardApi.stats()
-    chartData.value = stats.value.dailyStats
-  } catch (error) {
-    notify.error(error, 'Failed to load dashboard statistics')
-  }
-})
-
-watch(chartDays, async (days) => {
-  try {
-    chartData.value = (await dashboardApi.stats(days)).dailyStats
-  } catch (error) {
-    notify.error(error, 'Failed to load chart data')
-  }
-})
 </script>
 
 <style scoped>
@@ -171,5 +254,9 @@ watch(chartDays, async (days) => {
   border: var(--nested-border);
   background: var(--nested-bg);
   border-radius: 8px;
+}
+
+.period-toggle {
+  border: 1px solid var(--border-color-muted);
 }
 </style>

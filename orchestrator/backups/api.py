@@ -1,23 +1,16 @@
-"""API for backup jobs: history, content, logs, dashboard statistics and activity."""
-
-from datetime import timedelta
+"""API for backup jobs: history, content and logs. The dashboard is in backups.dashboard."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q
 from django.http import HttpResponse
-from django.utils import timezone
 from rest_framework import decorators, response, serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
 
 from accounts import access
 from accounts.access import HasDeviceGroupPermission
 from audit.log import record
 from backups.content import ContentDeleted, ContentUnavailable, read_content
 from backups.models import BackupJob
-from core.timezone_utils import get_day_bounds_local, get_timezone_name, local_now
-from devices.models import Device
 
 
 class BackupJobSerializer(serializers.ModelSerializer):
@@ -188,89 +181,4 @@ def device_backup_now(request, device) -> response.Response:
     return response.Response(
         {'job': BackupJobSerializer(job).data, 'created': created},
         status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
-    )
-
-
-FAILED_STATES = (BackupJob.FAILED, BackupJob.TIMED_OUT)
-ACTIVITY_WINDOWS = {'1h': timedelta(hours=1), '24h': timedelta(hours=24), '7d': timedelta(days=7)}
-
-
-@decorators.api_view(['GET'])
-@decorators.permission_classes([IsAuthenticated])
-def dashboard_stats(request):
-    days = min(max(int(request.GET.get('days', 7)), 1), 90)
-    now = timezone.now()
-    since = now - timedelta(hours=24)
-    devices = access.devices_for(request.user, 'view', Device.objects.all())
-    jobs = BackupJob.objects.filter(device__in=devices)
-    recent = jobs.filter(finished_at__gte=since)
-
-    by_type = devices.values('device_type__name', 'device_type__icon').annotate(count=Count('id'))
-    duration = ExpressionWrapper(F('finished_at') - F('created_at'), output_field=DurationField())
-    average = recent.filter(state=BackupJob.STORED).annotate(d=duration).aggregate(avg=Avg('d'))['avg']
-    with_status = devices.exclude(last_backup_status='')
-    healthy = with_status.filter(last_backup_status='success').count()
-
-    daily = []
-    today = local_now().date()
-    for offset in range(days - 1, -1, -1):
-        day = today - timedelta(days=offset)
-        start, end = get_day_bounds_local(day)
-        counts = jobs.filter(finished_at__gte=start, finished_at__lt=end).aggregate(
-            success=Count('id', filter=Q(state=BackupJob.STORED)),
-            failed=Count('id', filter=Q(state__in=FAILED_STATES)),
-        )
-        total = counts['success'] + counts['failed']
-        daily.append(
-            {
-                'date': day.isoformat(),
-                'success': counts['success'],
-                'failed': counts['failed'],
-                'rate': counts['success'] / total * 100 if total else 0,
-            }
-        )
-
-    return response.Response(
-        {
-            'devicesByType': {
-                row['device_type__name']: {'count': row['count'], 'icon': row['device_type__icon']} for row in by_type
-            },
-            'success24h': recent.filter(state=BackupJob.STORED).count(),
-            'failed24h': recent.filter(state__in=FAILED_STATES).count(),
-            'inProgress24h': jobs.filter(state__in=BackupJob.ACTIVE_STATES).count(),
-            'avgDuration': round(average.total_seconds(), 1) if average else 0.0,
-            # Devices whose latest finished backup succeeded, of those backed up at all.
-            'successRate': round(healthy / with_status.count() * 100, 1) if with_status.exists() else 0,
-            'dailyStats': daily,
-            'timezone': get_timezone_name(),
-        }
-    )
-
-
-@decorators.api_view(['GET'])
-@decorators.permission_classes([IsAuthenticated])
-def recent_backup_activity(request):
-    window = ACTIVITY_WINDOWS.get(request.GET.get('time_filter', '1h'), ACTIVITY_WINDOWS['1h'])
-    devices = access.devices_for(request.user, 'view', Device.objects.all())
-    jobs = (
-        BackupJob.objects.filter(device__in=devices, created_at__gte=timezone.now() - window)
-        .select_related('device')
-        .order_by('-created_at')[:200]
-    )
-    return response.Response(
-        [
-            {
-                'id': str(job.id),
-                'device_id': job.device_id,
-                'device_name': job.device.name,
-                'state': job.state,
-                'trigger': job.trigger,
-                'created_at': job.created_at,
-                'finished_at': job.finished_at,
-                'duration_ms': job.duration_ms,
-                'error': job.error,
-                'has_log': bool(job.log),
-            }
-            for job in jobs
-        ]
     )

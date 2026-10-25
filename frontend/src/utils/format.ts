@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { PushRejectionReason } from '@/api/types'
 
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined) return ''
@@ -90,4 +91,19 @@ export function changeLabel(job: {
   if (job.compared_to === null) return 'First backup'
   if (job.lines_added === null || job.lines_removed === null) return 'Changed'
   return `+${job.lines_added} −${job.lines_removed}`
+}
+
+const PUSH_REASONS: Record<PushRejectionReason, string> = {
+  unknown_source: 'Unknown source address',
+  auth_failed: 'Login failed',
+  wrong_protocol: 'Wrong protocol for the device',
+  filename: 'File name not accepted',
+  too_large: 'File too large',
+  device_changed: 'Device changed meanwhile',
+  error: 'Could not be stored',
+}
+
+/** Why a receiver refused a push, for people. */
+export function pushReasonLabel(reason: PushRejectionReason): string {
+  return PUSH_REASONS[reason] ?? reason
 }

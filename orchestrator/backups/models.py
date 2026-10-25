@@ -99,7 +99,8 @@ class BackupJob(models.Model):
 
     class Meta:
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['device', '-created_at'])]
+        # (state, finished_at): the dashboard's daily trend, failing devices and storage figures.
+        indexes = [models.Index(fields=['device', '-created_at']), models.Index(fields=['state', 'finished_at'])]
 
     def __str__(self):
         return f'{self.device} {self.created_at:%Y-%m-%d %H:%M} [{self.state}]'

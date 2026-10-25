@@ -1,5 +1,7 @@
 """Receiver settings and the pushes receivers turned away."""
 
+from datetime import timedelta
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -44,9 +46,10 @@ class ReceiverSettings(models.Model):
 
 
 class PushRejection(models.Model):
-    """A push a receiver refused, or the orchestrator discarded. Only the latest ``KEEP`` per receiver are kept."""
+    """A push a receiver refused, or the orchestrator discarded. Kept for ``MAX_AGE``, at most ``KEEP`` per receiver."""
 
-    KEEP = 200
+    KEEP = 5000
+    MAX_AGE = timedelta(days=90)
     REASON_CHOICES = [(reason, reason.replace('_', ' ')) for reason in REASONS]
 
     worker = models.ForeignKey('core.Worker', on_delete=models.CASCADE, related_name='push_rejections')

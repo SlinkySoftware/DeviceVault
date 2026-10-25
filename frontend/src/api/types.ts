@@ -667,25 +667,87 @@ export interface OrchestratorIdentity {
   online_timeout_seconds: number
 }
 
-export interface DailyStat {
-  /** Calendar date in the display timezone, `YYYY-MM-DD`. */
-  date: string
-  success: number
-  failed: number
-  /** Success rate, 0-100. */
-  rate: number
+/** Days a dashboard period may cover. */
+export type DashboardPeriod = 7 | 14 | 30 | 90
+
+export interface DashboardSummary {
+  devices_by_type: { name: string; icon: string | null; count: number }[]
+  stored_24h: number
+  failed_24h: number
+  in_progress: number
+  /** Seconds, request to stored. */
+  avg_duration_s: number
+  /** Percent of backed-up devices whose latest backup succeeded; null when none was backed up. */
+  device_success_rate: number | null
+  timezone: string
 }
 
-export interface DashboardStats {
-  devicesByType: Record<string, { count: number; icon: string | null }>
-  success24h: number
-  failed24h: number
-  inProgress24h: number
-  /** Seconds. */
-  avgDuration: number
-  successRate: number
-  dailyStats: DailyStat[]
+export interface TrendDay {
+  /** Calendar date in the display timezone, `YYYY-MM-DD`. */
+  date: string
+  stored: number
+  failed: number
+  /** Success rate, 0-100; null on a day without finished backups. */
+  rate: number | null
+  /** Stored backups that differed from the device's previous one. */
+  changed: number
+  avg_duration_s: number | null
+  max_duration_s: number | null
+  avg_collect_s: number | null
+}
+
+export interface DashboardTrend {
+  days: TrendDay[]
   timezone: string
+}
+
+export interface GroupFreshness {
+  /** Null for devices without a group. */
+  device_group: Id | null
+  device_group_name: string
+  /** Enabled devices. */
+  devices: number
+  never: number
+  /** Devices whose latest successful backup is older than this. */
+  older_24h: number
+  older_7d: number
+  stalest: { id: Id; name: string; last_success: IsoDateTime | null }
+}
+
+export interface FailingDevice {
+  device: Id
+  device_name: string
+  failed: number
+  stored: number
+  last_failed: IsoDateTime
+  last_success: IsoDateTime | null
+  /** The latest failure's error, cut to 200 characters. */
+  error: string
+  /** Its newest finished backup succeeded. */
+  recovered: boolean
+}
+
+export interface TargetUsage {
+  storage_target: string
+  name: string
+  driver: string
+  backups: number
+  /** Logical size reported by the collectors. */
+  size_bytes: number
+  added_backups: number
+  added_bytes: number
+}
+
+export interface PushRefusals {
+  days: { date: string; count: number }[]
+  by_reason: { reason: PushRejectionReason; count: number }[]
+  sources: {
+    source_ip: string
+    count: number
+    last_at: IsoDateTime
+    last_reason: PushRejectionReason
+    receiver: string
+  }[]
 }
 
 export type ActivityWindow = '1h' | '24h' | '7d'

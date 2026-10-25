@@ -60,6 +60,6 @@ describe('calendarDayLabel', () => {
     setDisplayTimeZone('America/Los_Angeles')
 
     // new Date('2026-10-22') would be the 21st in Los Angeles.
-    expect(calendarDayLabel('2026-10-22')).toEqual({ weekday: 'Thu', day: 22 })
+    expect(calendarDayLabel('2026-10-22')).toEqual({ weekday: 'Thu', day: 22, month: 'Oct' })
   })
 })
