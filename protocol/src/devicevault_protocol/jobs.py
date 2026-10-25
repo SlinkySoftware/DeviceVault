@@ -28,6 +28,12 @@ payload is::
 The orchestrator only accepts a ``stored`` event whose hash matches the one
 the collector reported.
 
+Retention: the orchestrator sends ``storage.delete`` (signed) to a storage
+target's queue with ``items`` (``[{"job_id", "storage_ref"}, ...]``); the
+storage worker reports ``deleted`` or ``delete_failed`` (adds ``error``) per
+item. The orchestrator only accepts them for a deletion it asked for, from a
+worker serving that backup's target.
+
 Log entries: ``{"source", "timestamp", "severity", "message"}``.
 """
 
@@ -38,7 +44,18 @@ EVENT_RETRYING = 'retrying'
 EVENT_COLLECTED = 'collected'
 EVENT_STORED = 'stored'
 EVENT_FAILED = 'failed'
-EVENTS = (EVENT_STARTED, EVENT_RETRYING, EVENT_COLLECTED, EVENT_STORED, EVENT_FAILED)
+# Retention: a storage worker deleted a stored backup, or could not.
+EVENT_DELETED = 'deleted'
+EVENT_DELETE_FAILED = 'delete_failed'
+EVENTS = (
+    EVENT_STARTED,
+    EVENT_RETRYING,
+    EVENT_COLLECTED,
+    EVENT_STORED,
+    EVENT_FAILED,
+    EVENT_DELETED,
+    EVENT_DELETE_FAILED,
+)
 
 STAGE_COLLECT = 'collect'
 STAGE_STORE = 'store'

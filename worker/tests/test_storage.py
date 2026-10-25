@@ -42,6 +42,7 @@ def test_bundled_drivers_describe_themselves():
 
     assert set(described) >= {'filesystem', 'git', 'postgresql', 's3'}
     assert [described[k]['shareable'] for k in ('filesystem', 'git', 'postgresql', 's3')] == [False, False, True, True]
+    assert [described[k]['deletes'] for k in ('filesystem', 'git', 'postgresql', 's3')] == [True, False, True, True]
     secret = described['s3']['params_schema']['properties']['secret_access_key']['anyOf'][0]
     assert secret.get('writeOnly') and secret.get('format') == 'password'
 

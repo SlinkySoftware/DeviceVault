@@ -3,6 +3,7 @@
 - ``job.store``: write a staged backup.
 - ``storage.read``: read one back into Redis for the orchestrator.
 - ``storage.check``: verify a target's settings work.
+- ``storage.delete``: delete stored backups (retention).
 
 Every task carries ``target`` (``{"id", "driver"}``) and the target's
 settings as ``config`` or, with payload encryption, ``config_sealed``.
@@ -18,6 +19,8 @@ from pydantic import ValidationError
 
 from devicevault_protocol import blobs
 from devicevault_protocol.jobs import (
+    EVENT_DELETE_FAILED,
+    EVENT_DELETED,
     EVENT_FAILED,
     EVENT_RETRYING,
     EVENT_STARTED,
@@ -26,7 +29,7 @@ from devicevault_protocol.jobs import (
     STAGE_STORE,
     read_blob_key,
 )
-from devicevault_protocol.names import CHECK_TASK, READ_TASK, STORE_TASK
+from devicevault_protocol.names import CHECK_TASK, DELETE_TASK, READ_TASK, STORE_TASK
 from devicevault_protocol.trust import SignatureError, verified_payload
 from devicevault_worker import events
 from devicevault_worker.app import app, get_logger, redis_client
@@ -47,6 +50,7 @@ MAX_RETRIES = 5
 # Pushed backups can be hundreds of MB.
 STORE_TIME_LIMIT = 1800
 READ_TIME_LIMIT = 600
+DELETE_TIME_LIMIT = 600
 
 
 def spool():
@@ -181,3 +185,37 @@ def check(envelope: dict) -> dict:
         return {'message': driver.check(params), 'worker_id': identity.worker_id}
 
     return _answer(CHECK_TASK, envelope, work)
+
+
+@app.task(name=DELETE_TASK, soft_time_limit=DELETE_TIME_LIMIT, time_limit=DELETE_TIME_LIMIT + 30)
+def delete(envelope: dict) -> None:
+    """Delete the backups in ``items`` (``[{"job_id", "storage_ref"}]``), reporting each one.
+
+    Not retried: an item that fails stays expired, and the orchestrator asks again later.
+    """
+    try:
+        spec = verified_payload(envelope)
+    except SignatureError as exc:
+        logger.error('task_rejected', extra={'task': DELETE_TASK, 'reason': str(exc)})
+        return
+
+    items = spec.get('items') or []
+    try:
+        driver, params = open_target(spec)
+    except StorageError as exc:
+        for item in items:
+            events.send(item['job_id'], EVENT_DELETE_FAILED, error=str(exc))
+        return
+    for item in items:
+        log = CollectionLog(source='storage')
+        try:
+            driver.delete(item['storage_ref'], params)
+        except SoftTimeLimitExceeded:
+            return  # the rest stay unreported; the orchestrator asks again later
+        except Exception as exc:
+            if not isinstance(exc, StorageError | OSError):
+                logger.exception('delete_failed', extra={'job_id': item['job_id']})
+            events.send(item['job_id'], EVENT_DELETE_FAILED, error=str(exc) or exc.__class__.__name__)
+        else:
+            log.info(f'deleted {driver.key}:{item["storage_ref"]} (retention)')
+            events.send(item['job_id'], EVENT_DELETED, log=log.entries)

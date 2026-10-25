@@ -108,11 +108,12 @@ class SummarySerializer(serializers.Serializer):
 
 
 class RetentionPolicySerializer(serializers.ModelSerializer):
-    """Serializes RetentionPolicy model for API responses"""
+    """A retention policy, with what its last retention pass found (see backups.retention)."""
 
     class Meta:
         model = RetentionPolicy
         fields = '__all__'
+        read_only_fields = ('last_run_at', 'last_result')
 
 
 class BackupScheduleSerializer(serializers.ModelSerializer):

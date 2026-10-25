@@ -25,34 +25,34 @@ from zoneinfo import ZoneInfo
 
 from cronsim import CronSim, CronSimError
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 
 class RetentionPolicy(models.Model):
-    """
-    RetentionPolicy Model: Defines how long to keep backups and cleanup rules
+    """How long the backups of the devices using it are kept (enforced by backups.retention).
 
-    Fields:
-        - name (CharField): Descriptive name (e.g., "Keep Last 30")
-        - max_backups (IntegerField): Maximum number of backups to retain per device (optional)
-        - max_days (IntegerField): Maximum age of backups in days (optional)
-        - max_size_bytes (BigIntegerField): Maximum total size of backups before cleanup (optional)
-
-    Methods:
-        - __str__(): Returns the policy name
-
-    Usage:
-        Multiple retention policies can be created with different rules. Devices reference
-        a retention policy to determine how old backups are cleaned up. At least one
-        condition (max_backups, max_days, or max_size) should be specified.
+    A stored backup expires when any limit that is set says so: beyond the newest
+    ``max_backups``, older than ``max_days``, or beyond ``max_size_bytes`` counted from
+    the newest. Whatever the limits, the newest ``min_backups`` are always kept, and
+    pinned backups are neither counted nor deleted. A policy in ``dry_run`` only
+    reports (and audits) what it would delete.
     """
 
     name = models.CharField(max_length=128, help_text='Descriptive name for this retention policy')
-    max_backups = models.IntegerField(null=True, blank=True, help_text='Keep only last N backups')
-    max_days = models.IntegerField(null=True, blank=True, help_text='Delete backups older than N days')
-    max_size_bytes = models.BigIntegerField(
-        null=True, blank=True, help_text='Delete oldest backups when total size exceeds N bytes'
+    max_backups = models.PositiveIntegerField(null=True, blank=True, help_text='Keep only the newest N backups')
+    max_days = models.PositiveIntegerField(null=True, blank=True, help_text='Delete backups older than N days')
+    max_size_bytes = models.PositiveBigIntegerField(
+        null=True, blank=True, help_text='Delete the oldest backups once the total size exceeds N bytes'
     )
+    min_backups = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text='Always keep the newest N backups, whatever the limits say',
+    )
+    dry_run = models.BooleanField(default=True, help_text='Only report what would be deleted; delete nothing')
+    last_run_at = models.DateTimeField(null=True, blank=True, help_text='When retention last applied this policy')
+    last_result = models.JSONField(default=dict, blank=True, help_text='What the last retention pass found and did')
 
     def __str__(self):
         """Return the policy name for admin display"""

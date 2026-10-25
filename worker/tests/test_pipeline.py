@@ -9,6 +9,8 @@ from devicevault_protocol import blobs, signing
 from devicevault_protocol import identity as identity_store
 from devicevault_protocol.jobs import (
     EVENT_COLLECTED,
+    EVENT_DELETE_FAILED,
+    EVENT_DELETED,
     EVENT_FAILED,
     EVENT_RETRYING,
     EVENT_STARTED,
@@ -301,3 +303,47 @@ def test_check_reports_whether_a_target_works(pipeline):
     assert bad['status'] == 'failure' and 'invalid storage target settings' in bad['error']
     assert 'no "tape" storage driver' in unknown['error']
     assert 'task rejected' in forged['error']
+
+
+# --- retention -----------------------------------------------------------------------
+
+
+def delete_task(items, driver='filesystem', key=ORCHESTRATOR):
+    return sign_task({'target': {'id': 't1', 'driver': driver}, 'config': {'path': 'store'}, 'items': items}, key)
+
+
+def test_retention_deletes_stored_backups_and_reports_each(pipeline, tmp_path):
+    from devicevault_worker.collect import collect
+    from devicevault_worker.storage.tasks import delete
+
+    _, sent = pipeline
+    job_id, envelope = collect_job(tmp_path)
+    collect.run(envelope)
+    ref = run_store(sent)[-1][1]['storage_ref']
+    sent.tasks.clear()
+
+    delete.run(delete_task([{'job_id': job_id, 'storage_ref': ref}, {'job_id': 'gone', 'storage_ref': 'x/y.cfg'}]))
+
+    assert not (volume_path() / 'store' / ref).exists()
+    events = sent.events()
+    assert [(event, payload['job_id']) for event, payload in events] == [
+        (EVENT_DELETED, job_id),
+        (EVENT_DELETED, 'gone'),  # already gone is not an error
+    ]
+    assert 'retention' in events[0][1]['log'][0]['message']
+
+
+def test_retention_deletions_that_fail_are_reported(pipeline):
+    from devicevault_worker.storage.tasks import delete
+
+    _, sent = pipeline
+    delete.run(delete_task([{'job_id': 'j1', 'storage_ref': 'main:x.cfg@abc'}], driver='git'))
+    delete.run(delete_task([{'job_id': 'j2', 'storage_ref': 'x'}], driver='tape'))
+    delete.run(delete_task([{'job_id': 'j3', 'storage_ref': 'x'}], key=signing.generate_signing_key()))
+
+    events = sent.events()
+    assert [(event, payload['job_id']) for event, payload in events] == [
+        (EVENT_DELETE_FAILED, 'j1'),
+        (EVENT_DELETE_FAILED, 'j2'),
+    ]
+    assert 'history' in events[0][1]['error'] and 'no "tape" storage driver' in events[1][1]['error']

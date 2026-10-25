@@ -297,10 +297,59 @@ class WorkerViewSet(
         )
 
 
+def _changes(serializer) -> dict:
+    """The fields a write set, as the API renders them."""
+    return {field: serializer.data[field] for field in serializer.validated_data}
+
+
 class RetentionPolicyViewSet(viewsets.ModelViewSet):
+    """Retention policies. Changes are audited, since they decide what is deleted.
+
+    ``{id}/preview/`` (global administrators): what the policy expires now, by device.
+    """
+
     queryset = RetentionPolicy.objects.all()
     permission_classes = [IsGlobalAdminOrReadOnly]
     serializer_class = RetentionPolicySerializer
+
+    def _audit(self, action: str, policy: RetentionPolicy, data: dict):
+        record(self.request, action, resource=str(policy.pk), details={'policy': policy.name, **data})
+
+    def perform_create(self, serializer):
+        policy = serializer.save()
+        self._audit('retention_policy.create', policy, _changes(serializer))
+
+    def perform_update(self, serializer):
+        policy = serializer.save()
+        self._audit('retention_policy.update', policy, _changes(serializer))
+
+    def perform_destroy(self, instance):
+        self._audit('retention_policy.delete', instance, {})
+        instance.delete()
+
+    @decorators.action(detail=True, methods=['get'], permission_classes=[IsGlobalAdmin])
+    def preview(self, request, pk=None):
+        from backups import retention
+
+        found = retention.plan(self.get_object())
+        return response.Response(
+            {
+                'expired': len(found.jobs),
+                'expired_bytes': found.bytes,
+                'kept_undeletable': found.kept,
+                'devices': [
+                    {
+                        'device': device.pk,
+                        'device_name': device.name,
+                        'backups': len(jobs),
+                        'bytes': sum(job.size_bytes or 0 for job in jobs),
+                        'oldest': jobs[-1].created_at,
+                        'newest': jobs[0].created_at,
+                    }
+                    for device, jobs in found.expired.items()
+                ],
+            }
+        )
 
 
 class BackupScheduleViewSet(viewsets.ModelViewSet):

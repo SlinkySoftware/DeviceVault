@@ -267,10 +267,10 @@ def _version_key(version: str) -> tuple:
     return tuple((0, int(part), '') if part.isdigit() else (1, 0, part) for part in version.split('.'))
 
 
-def _catalogue(role: str, capability: str, flag: str) -> dict[str, dict[str, Any]]:
+def _catalogue(role: str, capability: str, *flags: str) -> dict[str, dict[str, Any]]:
     """Drivers advertised under ``capabilities[capability]`` by approved workers of ``role``.
 
-    Each entry: key, name, description, ``flag`` (is_binary or shareable),
+    Each entry: key, name, description, the ``flags`` (is_binary; shareable and deletes),
     params_schema (JSON schema of its settings), ``workers`` (how many
     approved workers offer it) and ``versions``. When workers run different
     versions of a driver, the newest one describes it.
@@ -288,7 +288,7 @@ def _catalogue(role: str, capability: str, flag: str) -> dict[str, dict[str, Any
                     'key': driver['key'],
                     'name': driver.get('name') or driver['key'],
                     'description': driver.get('description', ''),
-                    flag: bool(driver.get(flag)),
+                    **{flag: bool(driver.get(flag)) for flag in flags},
                     'params_schema': schema if isinstance(schema, dict) else None,
                     'version': version,
                     'workers': entry['workers'] if entry else 0,
@@ -308,4 +308,4 @@ def driver_catalogue() -> dict[str, dict[str, Any]]:
 
 def storage_driver_catalogue() -> dict[str, dict[str, Any]]:
     """Storage drivers offered by approved storage workers, by key (see ``_catalogue``)."""
-    return _catalogue(ROLE_STORAGE, 'storage_drivers', 'shareable')
+    return _catalogue(ROLE_STORAGE, 'storage_drivers', 'shareable', 'deletes')

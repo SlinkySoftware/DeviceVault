@@ -12,6 +12,9 @@ which ``read`` writes exactly those bytes to a binary file.
 ``shareable`` says whether several workers can serve one target (a bucket
 can be; a directory on one worker's volume cannot).
 
+``deletes`` says whether ``delete`` removes a backup. Retention only prunes
+targets whose driver does; others keep everything (git keeps its history).
+
 Register drivers in ``devicevault_worker.storage.drivers`` or through the
 ``devicevault.storage`` entry point.
 """
@@ -51,6 +54,7 @@ class StorageDriver(ABC):
     description: ClassVar[str] = ''
     version: ClassVar[str] = '1'
     shareable: ClassVar[bool] = False
+    deletes: ClassVar[bool] = True
     Params: ClassVar[type[StorageParams]] = StorageParams
 
     @abstractmethod
@@ -62,7 +66,8 @@ class StorageDriver(ABC):
         """Write the backup ``ref`` names to ``sink``."""
 
     @abstractmethod
-    def delete(self, ref: str, params: StorageParams) -> None: ...
+    def delete(self, ref: str, params: StorageParams) -> None:
+        """Remove the backup ``ref`` names. Removing one that is already gone is not an error."""
 
     @abstractmethod
     def check(self, params: StorageParams) -> str:
@@ -76,6 +81,7 @@ class StorageDriver(ABC):
             'description': cls.description,
             'version': cls.version,
             'shareable': cls.shareable,
+            'deletes': cls.deletes,
             'params_schema': cls.Params.model_json_schema(),
         }
 

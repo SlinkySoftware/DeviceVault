@@ -14,7 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from accounts import access
 from accounts.access import HasDeviceGroupPermission
 from audit.log import record
-from backups.content import ContentUnavailable, read_content
+from backups.content import ContentDeleted, ContentUnavailable, read_content
 from backups.models import BackupJob
 from core.timezone_utils import get_day_bounds_local, get_timezone_name, local_now
 from devices.models import Device
@@ -25,6 +25,7 @@ class BackupJobSerializer(serializers.ModelSerializer):
     requested_by_username = serializers.CharField(source='requested_by.username', read_only=True, default=None)
     storage_target_name = serializers.CharField(source='storage_target.name', read_only=True, default=None)
     duration_ms = serializers.IntegerField(read_only=True)
+    pruned = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = BackupJob
@@ -45,6 +46,9 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'storage_target_name',
             'collector',
             'storage_worker',
+            'pinned',
+            'pruned',
+            'pruned_at',
             'attempts',
             'error',
             'created_at',
@@ -56,6 +60,12 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'duration_ms',
         ]
         read_only_fields = fields
+
+
+def _unavailable(exc: ContentUnavailable) -> response.Response:
+    """410 for a backup retention deleted, 502 when storage could not provide it."""
+    code = status.HTTP_410_GONE if isinstance(exc, ContentDeleted) else status.HTTP_502_BAD_GATEWAY
+    return response.Response({'error': str(exc)}, status=code)
 
 
 class JobPagination(PageNumberPagination):
@@ -99,7 +109,7 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             data = read_content(job)
         except ContentUnavailable as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            return _unavailable(exc)
         content_type = 'application/octet-stream' if job.is_binary else 'text/plain; charset=utf-8'
         reply = HttpResponse(data, content_type=content_type)
         if attachment:
@@ -136,7 +146,7 @@ class BackupJobViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             contents = [read_content(job) for job in pair]
         except ContentUnavailable as exc:
-            return response.Response({'error': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            return _unavailable(exc)
         self._audit('backup.diff', pair[0], other_job=str(pair[1].id))
         return response.Response(
             {
