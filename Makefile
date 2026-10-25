@@ -20,14 +20,14 @@ PY_PACKAGES = protocol worker receiver orchestrator
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
 .PHONY: help dev-image lock lint fmt test test-postgres check frontend-install frontend-lint frontend-test frontend-build \
-	images version set-version dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve
+	images version set-version dev-up dev-down dev-start dev-stop dev-status dev-reset dev-ps dev-logs dev-seed dev-approve
 
 help:
 	@echo "Quality:   lint fmt test test-postgres frontend-lint frontend-test check"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
 	@echo "Release:   version set-version V=X.Y.Z"
-	@echo "Dev stack: dev-up dev-down dev-reset dev-ps dev-logs dev-seed dev-approve"
+	@echo "Dev stack: dev-up dev-down dev-start dev-stop dev-status dev-reset dev-ps dev-logs dev-seed dev-approve"
 
 dev-image:
 	docker build -q -f docker/Dockerfile --target dev -t $(DEV_IMAGE) .
@@ -95,6 +95,15 @@ dev-up: dev-image
 
 dev-down:
 	$(DEV_COMPOSE) down
+
+dev-start: dev-up
+
+dev-stop: dev-down
+
+# Container state plus the API health probe (the process is serving and the database is reachable).
+dev-status:
+	$(DEV_COMPOSE) ps -a
+	@printf "platform: "; curl -fsS --max-time 5 "http://localhost:$${DV_DEV_API_PORT:-8000}/api/health/" || echo "unavailable"; echo
 
 dev-reset:
 	$(DEV_COMPOSE) down --volumes --remove-orphans
