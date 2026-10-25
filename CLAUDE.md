@@ -40,7 +40,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
-  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass), `core`, `credentials`, `devices`,
+  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries), `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `push` (receiver settings and refusals; `service.py` builds receiver assignments and
   re-sends them when push-enabled devices change, `events.py` turns pushed files into jobs), `storage`
@@ -104,6 +104,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 - Retention deletes stored content only through `backups.retention` (signed `storage.delete`, confirmed by a
   `deleted` event); a pruned job row stays as the record. Anything that deletes backups must skip pinned ones
   (`BackupJob.pinned`) and keep the newest `min_backups`.
+- Change summaries (`backups.changes`) run in the `events` process as a signed internal task, never inline in
+  event handling. Collector drivers that produce noisy lines set `volatile_lines`, which the orchestrator also uses
+  to compare pushed files.
 - Configuration is `DV_*` environment variables read through `devicevault_protocol.env`;
   never add config files. Document new variables in `docs/DEPLOYMENT.md` and the
   relevant `*.env.example`.

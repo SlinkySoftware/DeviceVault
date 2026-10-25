@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest'
 
-import { formatDuration, isActiveJob, pushProtocolLabel, statusColor, statusLabel } from './format'
+import { changeLabel, formatDuration, isActiveJob, pushProtocolLabel, statusColor, statusLabel } from './format'
 
 describe('job states', () => {
   it('treats only unfinished states as active', () => {
@@ -33,5 +33,20 @@ describe('push protocols', () => {
     expect(pushProtocolLabel('ssh')).toBe('SCP/SFTP')
     expect(pushProtocolLabel('tftp')).toBe('TFTP')
     expect(pushProtocolLabel('ftp')).toBe('FTP')
+  })
+})
+
+describe('changeLabel', () => {
+  const job = { changed: true, lines_added: 3, lines_removed: 1, compared_to: 'prev' }
+
+  it('summarises a change against the previous backup', () => {
+    expect(changeLabel(job)).toBe('+3 −1')
+    expect(changeLabel({ ...job, changed: false, lines_added: 0, lines_removed: 0 })).toBe('No change')
+  })
+
+  it('names first and binary backups, and is empty until summarised', () => {
+    expect(changeLabel({ ...job, compared_to: null })).toBe('First backup')
+    expect(changeLabel({ ...job, lines_added: null, lines_removed: null })).toBe('Changed')
+    expect(changeLabel({ ...job, changed: null })).toBe('')
   })
 })

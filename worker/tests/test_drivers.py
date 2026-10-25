@@ -134,3 +134,11 @@ def test_missing_credentials_are_permanent(netmiko):
 
     with pytest.raises(PermanentError, match='password'):
         run('cisco_ios', {'username': 'admin'})
+
+
+def test_drivers_advertise_their_volatile_lines():
+    """The orchestrator ignores them when it summarises changes, including pushed files."""
+    cisco = get_driver('cisco_ios').describe()
+
+    assert r'! Last configuration change at' in cisco['volatile_lines']
+    assert get_driver('noop').describe()['volatile_lines'] == []

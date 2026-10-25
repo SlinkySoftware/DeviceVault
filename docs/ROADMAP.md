@@ -51,7 +51,7 @@ Small, self-contained, and each one removes a reason for an evaluator to say "no
 |---|---|---|---|
 | Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | **Scheduled: phase 14.** Storage stops growing without bound. |
 | Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M | Failures and changes reach people instead of waiting to be noticed. |
-| Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | "What changed?" answered at a glance, with added/removed line counts. |
+| Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | **Scheduled: phase 15.** "What changed?" answered at a glance, with added/removed line counts. |
 | Q4 | [Zabbix and Prometheus monitoring](#monitoring-integration-zabbix-and-prometheus) | S-M | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
 | Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S | The classic silent failure: a device that stopped backing up weeks ago. |
 | Q6 | [Config search](#q6-config-search) | S-M | "Which devices still have SNMP community `public`?" in seconds. |
@@ -75,11 +75,8 @@ rules ("a backup in group X failed 3 times", "a config changed on device group Y
 dead site does not send 400 emails.
 
 ### Q3. Change summary on every backup
-At `stored` time, compare with the previous backup of the same device and persist `lines_added`,
-`lines_removed` and a `changed` boolean (after applying the driver's volatile-line regexes). Show it in the
-backup list, as a column, filter ("only backups with changes") and in notifications. This is the
-cheapest feature with the biggest day-to-day payoff: engineers stop opening diffs that are empty.
-With payload encryption on, this is computed in the orchestrator, which already decrypts for view/diff.
+Scheduled as phase 15 (`feat/change-summary`); see ARCHITECTURE.md section 10 and decision 32. Notifications on
+changes (Q2) and change counts in monitoring (Q4) can use `BackupJob.changed`, `lines_added` and `lines_removed`.
 
 ### Q4. Monitoring endpoints: Zabbix first, Prometheus second
 Enterprises already have a monitoring stack, and meeting them there is worth more than building charts.

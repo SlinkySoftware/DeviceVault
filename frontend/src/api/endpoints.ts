@@ -148,6 +148,8 @@ export const devicesApi = {
 export interface JobQuery {
   device?: Id
   state?: string
+  /** Only backups that changed (true) or did not (false). */
+  changed?: boolean
   page?: number
   page_size?: number
 }

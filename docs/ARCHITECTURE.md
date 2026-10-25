@@ -249,6 +249,8 @@ read (UI):  api → storage.read task → storage.target.<t> → blob dv:blob:re
 check (UI): api → storage.check task → storage.target.<t> → Celery result
 retention:  scheduler leader → expired BackupJobs → storage.delete task (batched) → storage.target.<t>
             → deleted | delete_failed event per backup → dv.orchestrator (job kept, marked pruned)
+summary:    job stored → orchestrator.change_summary (signed, dv.orchestrator) → read it and the previous backup
+            → decrypt, drop volatile lines, diff → changed, lines_added, lines_removed on the job
 ```
 
 Push (section 7.1) joins this path at the store step:
@@ -286,6 +288,8 @@ class CollectorDriver(Protocol):
 
     def collect(self, target: Target, creds: Creds, params: Params, timeout: int) -> Collected: ...
 ```
+A driver may declare `volatile_lines` (regexes for lines that change on every read); it advertises them, and the orchestrator ignores those lines when it summarises changes, including in files the device pushed (phase 15). `NetmikoDriver` also drops them at collection.
+
 Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a command list plus a cleanup regex). The first drivers are ported from today's: Mikrotik, plus `noop` and `binary_dummy` for tests. Cisco IOS/ASA etc. come later from your specs.
 
 Push collection is not a collector driver mode; it is a separate receiver component (section 7.1).
@@ -349,6 +353,7 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 12 | `feat/push-receiver` | `receiver/` package, `receiver` image target and `deploy/receiver`; receiver role and settings; SCP/SFTP listener; `push.received`/`push.rejected` events → BackupJob; device push settings and unique IP; UI (section 7.1) | yes |
 | 13 | `feat/push-tftp` | TFTP write-only listener and the per-device TFTP opt-in | yes |
 | 14 | `feat/retention` | Retention enforcement (ROADMAP Q1): policy limits plus an always-kept minimum and dry run, the scheduler's retention pass, signed `storage.delete` tasks and deletion events, `deletes` driver capability, policy preview and audit, the `pinned` flag that Q8 builds on, UI | yes |
+| 15 | `feat/change-summary` | Change summary on every backup (ROADMAP Q3): compared with the device's previous backup after decrypting and dropping the driver's volatile lines; `changed`, lines added and removed; backfill command; `?changed=` filter; Changes column and "Only changes" filter in the UI | yes |
 | later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
@@ -390,3 +395,4 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 29 | The repository is public, which makes GitHub Actions free. `ci.yml` runs `make check` on every pull request and is required to merge to `master`. Pushing a `vX.Y.Z` tag runs `release.yml`, which checks the tag against the `VERSION` file, runs `make check`, publishes signed multi-arch images to GHCR and creates the GitHub Release. `VERSION` is the single source of the release version; `make set-version` copies it into each package, and a test fails if any package disagrees. |
 | 30 | (phase 14) Retention keeps the job row and marks it pruned (`prune_requested_at`, then `pruned_at` when the storage worker confirms), so history, dashboard counts and the audit trail survive; content is refused as soon as deletion is requested. A failed deletion clears the request and a later pass retries; an unanswered one is re-sent after a day (deleting is idempotent). Deletion events are accepted only for a requested deletion and from a worker serving that backup's target. |
 | 31 | (phase 14) Safety rails: the newest `min_backups` (at least 1) are always kept, **pinned backups are outside the policy** (neither counted towards its limits nor deleted, so pinning does not shorten the history of the rest), new policies start in dry run (audited when the would-delete set changes), at most 1000 deletions per pass, and targets whose driver does not declare `deletes` (git) are left alone rather than rewriting history. `pinned` lands with retention; Q8 adds setting it, labels and notes. |
+| 32 | (phase 15) Change summaries are computed in the orchestrator, the only place that can decrypt, by a signed internal task on its own queue (workers can publish there too) run by `events`, not inline in the job event, so a slow read never holds up event handling. It reads both backups back through the storage worker (two request/response reads; two unencrypted backups with equal hashes are unchanged without reading). Collectors advertise `volatile_lines`; the orchestrator bounds and validates them (they run on its side) and applies the device driver's patterns unless the device turned `strip_volatile` off. Binary backups are compared for equality only, backups over 16 MiB are not compared, and the first backup of a device counts every line as added. |
