@@ -1,4 +1,7 @@
-"""Config search API: ``GET /api/search/`` (ARCHITECTURE.md section 7.2)."""
+"""Config search API: ``POST /api/search/`` (ARCHITECTURE.md section 7.2).
+
+A POST, not a GET: a query can hold a secret, which must not end up in a URL (access logs, history).
+"""
 
 from rest_framework import response, serializers, status
 from rest_framework.exceptions import NotFound
@@ -24,10 +27,10 @@ class SearchView(APIView):
 
     permission_classes = [HasDeviceGroupPermission('view_contents')]
 
-    def get(self, request):
+    def post(self, request):
         if not indexing.enabled():
             raise NotFound('Config search is not enabled.')
-        params = SearchParams(data=request.query_params)
+        params = SearchParams(data=request.data)
         params.is_valid(raise_exception=True)
         search = query.Search(
             query=params.validated_data['q'],

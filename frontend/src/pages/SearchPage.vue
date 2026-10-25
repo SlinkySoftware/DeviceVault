@@ -108,28 +108,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
 
 import { backupMethodsApi, deviceGroupsApi, searchApi } from '@/api/endpoints'
-import type { BackupMethod, DeviceGroup, Id, SearchMode, SearchQuery, SearchResponse, SearchResult } from '@/api/types'
+import type { BackupMethod, DeviceGroup, SearchQuery, SearchResult } from '@/api/types'
 import PageCard from '@/components/PageCard.vue'
 import { useNotify } from '@/composables/useNotify'
+import { useSearchStore } from '@/stores/search'
 import { formatDateTime } from '@/utils/datetime'
 import { splitSecretTokens } from '@/utils/search'
 
-const route = useRoute()
-const router = useRouter()
 const notify = useNotify()
+// The last search lives in memory, not the URL: a query may hold a secret.
+const store = useSearchStore()
+const form = store.form
+const reply = computed(() => store.reply)
 
-const form = reactive<{ q: string; mode: SearchMode; device_group: Id | null; driver: string | null }>({
-  q: '',
-  mode: 'text',
-  device_group: null,
-  driver: null,
-})
 const loading = ref(false)
-const reply = ref<SearchResponse | null>(null)
 const groups = ref<DeviceGroup[]>([])
 const methods = ref<BackupMethod[]>([])
 
@@ -149,59 +145,23 @@ const lineTarget = (result: SearchResult, line: number): RouteLocationRaw => ({
   query: { view: result.job, line },
 })
 
-/** The search the route describes, so a search can be linked to and survives going back. */
-function fromRoute(): SearchQuery | null {
-  return fromQuery(route.query)
-}
-
-function fromQuery(params: Record<string, unknown>): SearchQuery | null {
-  const { q, mode, device_group: group, driver } = params
-  if (typeof q !== 'string' || !q) return null
-  return {
-    q,
-    mode: mode === 'regex' ? 'regex' : 'text',
-    ...(typeof group === 'string' && group ? { device_group: Number(group) } : {}),
-    ...(typeof driver === 'string' && driver ? { driver } : {}),
-  }
-}
-
-async function run(query: SearchQuery): Promise<void> {
-  Object.assign(form, { device_group: null, driver: null, ...query })
+async function submit(): Promise<void> {
+  if (!form.q) return
+  const query: SearchQuery = { q: form.q, mode: form.mode }
+  if (form.device_group !== null) query.device_group = form.device_group
+  if (form.driver) query.driver = form.driver
   loading.value = true
   try {
-    reply.value = await searchApi.search(query)
+    store.reply = await searchApi.search(query)
   } catch (error) {
-    reply.value = null
+    store.reply = null
     notify.error(error, 'Search failed')
   } finally {
     loading.value = false
   }
 }
 
-async function submit(): Promise<void> {
-  if (!form.q) return
-  const query: Record<string, string> = { q: form.q, mode: form.mode }
-  if (form.device_group !== null) query.device_group = String(form.device_group)
-  if (form.driver) query.driver = form.driver
-  const current = fromRoute()
-  if (current && JSON.stringify(current) === JSON.stringify(fromQuery(query))) {
-    await run(current) // the same search again: the route does not change
-    return
-  }
-  await router.push({ name: 'search', query })
-}
-
-watch(
-  () => route.query,
-  () => {
-    const query = fromRoute()
-    if (query) void run(query)
-  },
-)
-
 onMounted(async () => {
-  const query = fromRoute()
-  if (query) void run(query)
   try {
     ;[groups.value, methods.value] = await Promise.all([deviceGroupsApi.list(), backupMethodsApi.list()])
   } catch (error) {

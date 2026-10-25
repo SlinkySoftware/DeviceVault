@@ -8,6 +8,8 @@ import { authApi } from '@/api/endpoints'
 import type { CurrentUser, GrantFlag, Id } from '@/api/types'
 import { readString, remove, writeString } from '@/utils/storage'
 
+import { useSearchStore } from './search'
+
 const REMEMBERED_USERNAME_KEY = 'rememberedUsername'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -52,9 +54,10 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /** Forget the user locally (no API call). */
+  /** Forget the user locally (no API call), and what they searched for. */
   function clear(): void {
     user.value = null
+    useSearchStore().clear()
   }
 
   /** Signs out; returns the identity provider's sign-out URL to visit, if the session came from one that asks. */

@@ -174,8 +174,8 @@ export const backupJobsApi = {
 // --- Config search ---------------------------------------------------------------
 
 export const searchApi = {
-  /** The latest backups of devices the user may read (needs view_contents). */
-  search: async (query: SearchQuery) => (await http.get<SearchResponse>('/search/', { params: query })).data,
+  /** The latest backups of devices the user may read (needs view_contents). A POST: queries may hold secrets. */
+  search: async (query: SearchQuery) => (await http.post<SearchResponse>('/search/', query)).data,
 }
 
 // --- Users and access ------------------------------------------------------------

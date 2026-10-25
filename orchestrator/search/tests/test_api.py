@@ -22,7 +22,7 @@ def indexed(estate):
 
 
 def search(client, q, **params):
-    return client.get(URL, {'q': q, **params})
+    return client.post(URL, {'q': q, **params}, format='json')
 
 
 def names(reply):
@@ -103,7 +103,7 @@ def test_regex_search_matches_per_line_case_insensitively(admin_client, indexed,
     ],
 )
 def test_bad_searches_are_refused(admin_client, search_on, params, message):
-    reply = admin_client.get(URL, params)
+    reply = admin_client.post(URL, params, format='json')
 
     assert reply.status_code == 400 and message in reply.json()['detail']
 
@@ -178,7 +178,19 @@ def test_searches_are_audited_without_the_secrets_typed(admin_client, indexed, s
 def test_signed_out_users_cannot_search(db, search_on):
     from rest_framework.test import APIClient
 
-    assert APIClient().get(URL, {'q': 'hostname'}).status_code == 401
+    assert APIClient().post(URL, {'q': 'hostname'}, format='json').status_code == 401
+
+
+def test_searching_needs_the_csrf_token(make_user, search_on):
+    from rest_framework.test import APIClient
+
+    client = APIClient(enforce_csrf_checks=True)
+    client.force_login(make_user('reader', global_admin=True))
+    assert client.post(URL, {'q': 'hostname'}, format='json').status_code == 403
+
+
+def test_searches_are_not_gets(admin_client, search_on):
+    assert admin_client.get(URL, {'q': 'hostname'}).status_code == 405
 
 
 @pytest.mark.parametrize(

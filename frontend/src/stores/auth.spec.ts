@@ -6,6 +6,7 @@ import { authApi } from '@/api/endpoints'
 import type { CurrentUser } from '@/api/types'
 
 import { useAuthStore } from './auth'
+import { useSearchStore } from './search'
 
 vi.mock('@/api/endpoints', () => ({
   authApi: { csrf: vi.fn(), login: vi.fn(), logout: vi.fn(), currentUser: vi.fn() },
@@ -103,6 +104,18 @@ describe('auth store', () => {
 
     expect(await auth.logout()).toBe('https://idp.example.com/logout?x=1')
     expect(auth.isAuthenticated).toBe(false)
+  })
+
+  it('forgets the last config search on logout', async () => {
+    const auth = useAuthStore()
+    await auth.login('alice', 'pw', false)
+    const search = useSearchStore()
+    search.form.q = 'snmp-server community public'
+
+    await auth.logout()
+
+    expect(search.form.q).toBe('')
+    expect(search.reply).toBeNull()
   })
 
   it('keeps nothing about the session in browser storage', async () => {
