@@ -90,11 +90,10 @@ Compute "last successful backup" per device and flag devices that are overdue re
 this is the only way to notice a device that quietly stopped sending.
 
 ### Q6. Config search
-Full-text search over the latest (or all) backups. Without payload encryption the storage layer could index;
-with it, the orchestrator is the only place that can decrypt, so the realistic design is an orchestrator-side
-index built at `stored` time (PostgreSQL full-text or trigram on the plaintext, held to the same permission
-checks as `view_contents`). Make it opt-in because it holds decrypted text in the database, and say so in
-the docs. Add saved searches as a seed for the compliance work in D2.
+Full-text search over the latest backup of each device, with secret values indexed only as keyed tokens so a
+full line or a bare secret still finds its devices. Opt-in, held to `view_contents`, with saved searches as a seed
+for the compliance work in D2. Designed in [ARCHITECTURE.md section 7.2](ARCHITECTURE.md#72-config-search-phases-16-17)
+(phases 16-17).
 
 ### Q7. Bulk device import and export
 CSV/JSON import with a dry-run report (row-by-row errors), and an export of the inventory. Include
