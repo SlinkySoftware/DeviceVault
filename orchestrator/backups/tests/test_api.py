@@ -1,5 +1,4 @@
 import pytest
-from django.utils import timezone
 
 from audit.models import AuditLog
 from backups.models import BackupJob
@@ -113,24 +112,6 @@ def test_content_is_served_as_text(stored, admin):
     assert reply.status_code == 200
     assert reply.content == b'hostname edge-01\n'
     assert reply['Content-Type'].startswith('text/plain')
-
-
-def test_dashboard_counts_finished_jobs(setup, broker, admin):
-    now = timezone.now()
-    for state in (BackupJob.STORED, BackupJob.STORED, BackupJob.FAILED, BackupJob.QUEUED):
-        BackupJob.objects.create(
-            device=setup['device'],
-            storage_target=setup['target'],
-            driver='noop',
-            state=state,
-            finished_at=None if state == 'queued' else now,
-        )
-
-    stats = admin.get('/api/dashboard-stats/?days=1').json()
-
-    assert (stats['success24h'], stats['failed24h'], stats['inProgress24h']) == (2, 1, 1)
-    assert stats['dailyStats'][-1]['success'] == 2
-    assert len(admin.get('/api/recent-backup-activity/?time_filter=24h').json()) == 4
 
 
 def test_the_file_reading_compare_endpoint_is_gone(admin):

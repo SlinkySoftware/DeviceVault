@@ -388,7 +388,8 @@ The dashboard answers, for the devices the user can see: is collection healthy, 
 A migration adds an index on `BackupJob (state, finished_at)` for the trend, failing and storage queries; freshness uses the existing `(device, -created_at)` index. That is enough for a few thousand devices over 90 days. A daily rollup table can be added if an estate outgrows it.
 
 **Frontend.** The Dashboard page keeps the tiles and the activity feed, and gains a page-wide period selector. The period is kept in the URL (`?days=30`), so a view can be shared. New cards:
-- Success rate and volume: a line for the rate over daily stored and failed bars.
+- Backups per day: stored and failed columns, stacked.
+- Success rate: a line, on its own axis (no dual-axis charts).
 - Duration: average and longest per day.
 - Changes per day.
 - Freshness: a table per group, linking the stalest device to its backups.
@@ -396,7 +397,7 @@ A migration adds an index on `BackupJob (state, finished_at)` for the trend, fai
 - Storage by target: horizontal bars.
 - Push refusals: global administrators only. Bars by reason plus the top sources.
 
-Charts are small in-house SVG components (`components/charts/`: `TimeSeriesChart` for lines and bars on a daily axis, `BarList` for horizontal bars). They replace the canvas `SuccessChart`, take their colours from the Quasar theme variables so they follow light and dark mode, show values on hover and keyboard focus, and carry a text alternative. Each card loads separately and shows its own loading, empty and error states; the tiles and activity keep polling as now. The `DashboardLayout` model, unused since the frontend rewrite, is removed together with the duplicate `core/dashboard_layout.py`.
+Charts are small in-house components (`components/charts/`): `TimeSeriesChart` draws lines or stacked columns on a daily axis in SVG, and `BarList` draws horizontal bars in HTML. They replace the canvas `SuccessChart`. Their colours are `--chart-*` theme variables, checked for colour-blind separation in both themes (stored and failed are blue and red, since green and red are not separable). They show values on hover and on keyboard focus (arrow keys), and carry a hidden table of every value. Each card loads separately and shows its own loading, empty and error states; a reload dims the previous figures rather than blanking them. The activity feed keeps polling as now. The `DashboardLayout` model, unused since the frontend rewrite, is removed together with the duplicate `core/dashboard_layout.py`.
 
 ### 7.4 Pins, labels and notes (phase 19)
 
@@ -505,5 +506,5 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 35 | (phase 16) Secret values are replaced by **keyed tokens** before indexing: drivers declare `secret_lines` (with optional encodings the orchestrator reverses, such as `cisco7`), and each value becomes an HMAC whose key is derived from the data key and never stored in the database. Queries are tokenised by the same patterns on the server, so a full line or a bare secret value (phase 17) still finds its devices, while a dump shows only which devices share a secret, which is accepted. Secret values cannot be matched by substring or regex. |
 | 36 | (phase 16) Regex search uses RE2, matched per line, so a user's pattern runs in linear time; PostgreSQL only narrows the candidates, under a statement timeout. Results are capped, and searches are audited with secrets in tokenised form. |
 | 37 | (phase 18) Dashboard figures are **computed on request** from job rows, one endpoint per card, filtered by `access.devices_for(user, 'view')`. No rollup table and no scheduled aggregation: the data is small at the expected scale, and a rollup would be a second copy to keep consistent with retention and device deletion. Push refusals are shown to global administrators only, since they belong to no device group. |
-| 38 | (phase 18) Charts are **in-house SVG components**, not a charting library. The dashboard needs only daily lines, bars and horizontal bars. SVG follows the theme through CSS variables, gives hover and keyboard values and a text alternative without extra work, and adds no dependency to keep pinned. |
+| 38 | (phase 18) Charts are **in-house components** (SVG time series, HTML bar lists), not a charting library. The dashboard needs only daily lines, bars and horizontal bars. SVG follows the theme through CSS variables, gives hover and keyboard values and a text alternative without extra work, and adds no dependency to keep pinned. |
 | 39 | (phase 19) Pinning needs the group's **`admin`** grant, because it overrides that group's retention policy. Labels and notes need **`view_contents`**, because they describe content. They are separate actions with separate audit entries. Pinning takes the same row lock as retention's deletion claim, so a backup is never both pinned and deleted. |

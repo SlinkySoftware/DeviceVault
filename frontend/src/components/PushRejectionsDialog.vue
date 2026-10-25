@@ -30,24 +30,14 @@ import type { QTableColumn } from 'quasar'
 import { ref, watch } from 'vue'
 
 import { workersApi } from '@/api/endpoints'
-import type { PushRejection, PushRejectionReason, Worker } from '@/api/types'
+import type { PushRejection, Worker } from '@/api/types'
 import FormDialog from '@/components/FormDialog.vue'
 import TimeCell from '@/components/TimeCell.vue'
 import { useNotify } from '@/composables/useNotify'
-import { pushProtocolLabel } from '@/utils/format'
+import { pushProtocolLabel, pushReasonLabel as reasonLabel } from '@/utils/format'
 
 const props = defineProps<{ worker: Worker | null }>()
 const open = defineModel<boolean>({ required: true })
-const REASONS: Record<PushRejectionReason, string> = {
-  unknown_source: 'Unknown source address',
-  auth_failed: 'Login failed',
-  wrong_protocol: 'Wrong protocol for the device',
-  filename: 'File name not accepted',
-  too_large: 'File too large',
-  device_changed: 'Device changed meanwhile',
-  error: 'Could not be stored',
-}
-const reasonLabel = (reason: PushRejectionReason) => REASONS[reason] ?? reason
 
 const notify = useNotify()
 const rows = ref<PushRejection[]>([])

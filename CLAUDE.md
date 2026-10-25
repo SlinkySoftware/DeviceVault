@@ -40,7 +40,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
-  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries), `core`, `credentials`, `devices`,
+  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices`,
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
   `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and
@@ -55,7 +55,7 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   production, the Quasar dev proxy in development). `src/api/` (axios client,
   `types.ts` DTOs, `endpoints.ts` typed calls), `src/stores/` (Pinia: auth with `can(flag, group)`,
   theme, settings), `src/router/` (routes + guard), `src/composables/` (`useCrud`,
-  `useNotify`, `usePolling`), `src/components/`, `src/pages/` (admin pages under
+  `useNotify`, `usePolling`, `useCardData`), `src/components/` (`charts/` the SVG and bar-list charts; colours are the `--chart-*` variables), `src/pages/` (admin pages under
   `pages/admin/`), `src/utils/` (datetime, diff, grants, rules...). Original artwork lives in
   `frontend/branding/`; `public/` holds only web-sized assets.
 - `docker/`: `Dockerfile` (targets `orchestrator`, `worker`, `receiver`, `dev`), `web.Dockerfile`,

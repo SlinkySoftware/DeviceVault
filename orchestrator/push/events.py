@@ -186,6 +186,7 @@ def record_rejection(
         filename=filename[:255],
         detail=detail[:255],
     )
+    PushRejection.objects.filter(worker=worker, at__lt=timezone.now() - PushRejection.MAX_AGE).delete()
     stale = PushRejection.objects.filter(worker=worker).values_list('pk', flat=True)[PushRejection.KEEP :]
     PushRejection.objects.filter(pk__in=list(stale)).delete()
     record(

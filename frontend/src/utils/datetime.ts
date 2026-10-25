@@ -107,11 +107,12 @@ export function filenameTimestamp(value: string): string {
  * instant, so it must not be shifted by any timezone (`new Date('2026-10-22')`
  * is UTC midnight and shows as the 21st west of UTC).
  */
-export function calendarDayLabel(isoDate: string): { weekday: string; day: number } {
+export function calendarDayLabel(isoDate: string): { weekday: string; day: number; month: string } {
   const [year, month, day] = isoDate.split('-').map(Number)
   const date = new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1))
   return {
     weekday: new Intl.DateTimeFormat(displayLocale ?? 'en-US', { weekday: 'short', timeZone: 'UTC' }).format(date),
     day: date.getUTCDate(),
+    month: new Intl.DateTimeFormat(displayLocale ?? 'en-US', { month: 'short', timeZone: 'UTC' }).format(date),
   }
 }

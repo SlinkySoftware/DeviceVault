@@ -21,14 +21,18 @@ import type {
   CredentialWrite,
   CredentialType,
   CurrentUser,
-  DashboardStats,
+  DashboardPeriod,
+  DashboardSummary,
+  DashboardTrend,
   Device,
   DeviceDetail,
   DeviceGroup,
   DeviceType,
   DeviceWrite,
+  FailingDevice,
   FlowerEndpoint,
   FlowerEndpointWrite,
+  GroupFreshness,
   Id,
   LogEntry,
   LoginResponse,
@@ -43,6 +47,7 @@ import type {
   StorageDriver,
   StorageTarget,
   StorageTargetWrite,
+  TargetUsage,
   User,
   UserCreate,
   UserDetails,
@@ -52,6 +57,7 @@ import type {
   UserUpdate,
   OrchestratorIdentity,
   Page,
+  PushRefusals,
   PushRejection,
   ReceiverSettings,
   ReceiverSettingsWrite,
@@ -268,8 +274,15 @@ export const workersApi = {
 }
 
 export const dashboardApi = {
-  stats: async (days?: number) =>
-    (await http.get<DashboardStats>('/dashboard-stats/', { params: days ? { days } : undefined })).data,
+  summary: async () => (await http.get<DashboardSummary>('/dashboard/summary/')).data,
   activity: async (window: ActivityWindow) =>
-    (await http.get<ActivityItem[]>('/recent-backup-activity/', { params: { time_filter: window } })).data,
+    (await http.get<ActivityItem[]>('/dashboard/activity/', { params: { window } })).data,
+  trend: async (days: DashboardPeriod) => (await http.get<DashboardTrend>('/dashboard/trend/', { params: { days } })).data,
+  freshness: async () => (await http.get<GroupFreshness[]>('/dashboard/freshness/')).data,
+  failing: async (days: DashboardPeriod) =>
+    (await http.get<FailingDevice[]>('/dashboard/failing/', { params: { days } })).data,
+  storage: async (days: DashboardPeriod) =>
+    (await http.get<TargetUsage[]>('/dashboard/storage/', { params: { days } })).data,
+  pushRefusals: async (days: DashboardPeriod) =>
+    (await http.get<PushRefusals>('/dashboard/push-refusals/', { params: { days } })).data,
 }

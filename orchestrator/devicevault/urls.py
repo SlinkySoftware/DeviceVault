@@ -26,6 +26,7 @@ from accounts import oidc_views, provider_api
 from api import views
 from audit import api as audit_api
 from backups import api as backup_api
+from backups import dashboard
 from monitoring import api as monitoring_api
 from storage import api as storage_api
 
@@ -58,8 +59,13 @@ urlpatterns = [
     path('api/version/', views.version_info),
     path('api/flower-auth/', monitoring_api.flower_auth),
     path('api/onboarding/', views.onboarding),
-    path('api/dashboard-stats/', backup_api.dashboard_stats),
-    path('api/recent-backup-activity/', backup_api.recent_backup_activity),
+    path('api/dashboard/summary/', dashboard.summary),
+    path('api/dashboard/activity/', dashboard.activity),
+    path('api/dashboard/trend/', dashboard.trend),
+    path('api/dashboard/freshness/', dashboard.freshness),
+    path('api/dashboard/failing/', dashboard.failing),
+    path('api/dashboard/storage/', dashboard.storage),
+    path('api/dashboard/push-refusals/', dashboard.push_refusals),
     path('api/search/', search_api.SearchView.as_view()),
     path('api/timezone/', views.timezone_config),
     path('api/auth/config/', accounts_api.AuthConfigView.as_view()),
