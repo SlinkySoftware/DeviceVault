@@ -23,6 +23,7 @@ export interface CollectionGroup {
   id: Id
   name: string
   description: string
+  /** Generated; collectors learn it from their assignment. */
   rabbitmq_queue_id: string
   device_count: number
   /** Approved collectors consuming this group's queue. */

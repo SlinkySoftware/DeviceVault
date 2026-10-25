@@ -115,15 +115,20 @@ def test_revocation_sends_an_empty_assignment(db, worker_keys, published):
     assert (last['status'], last['queues'], last['version']) == (STATUS_REVOKED, [], 2)
 
 
-def test_renaming_a_group_queue_reassigns_its_collectors(db, approved_collector, published, admin_client):
-    group = CollectionGroup.objects.create(name='DMZ', rabbitmq_queue_id='dmz')
-    worker = approved_collector(groups=[group])
-    published.clear()
+def test_group_queue_ids_are_generated_and_read_only(db, admin_client):
+    created = admin_client.post('/api/collection-groups/', {'name': 'DMZ', 'rabbitmq_queue_id': 'dmz'}, format='json')
+    other = CollectionGroup.objects.create(name='Core')
 
-    resp = admin_client.patch(f'/api/collection-groups/{group.id}/', {'rabbitmq_queue_id': 'dmz2'}, format='json')
+    assert created.status_code == 201
+    queue = created.json()['rabbitmq_queue_id']
+    assert queue != 'dmz' and len(queue) == 32 and queue != other.rabbitmq_queue_id
+
+    resp = admin_client.patch(
+        f'/api/collection-groups/{created.json()["id"]}/', {'rabbitmq_queue_id': 'x'}, format='json'
+    )
 
     assert resp.status_code == 200
-    assert assignments(published, worker)[-1]['queues'] == ['collector.group.dmz2']
+    assert resp.json()['rabbitmq_queue_id'] == queue
 
 
 def test_driver_catalogue_only_counts_approved_collectors(db, worker_keys, approved_collector):

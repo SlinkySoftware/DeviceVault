@@ -123,7 +123,7 @@ class CollectionGroupSerializer(serializers.ModelSerializer):
         - id: Primary key
         - name: Collection group name
         - description: Collection group description
-        - rabbitmq_queue_id: RabbitMQ queue ID for task distribution
+        - rabbitmq_queue_id: Generated RabbitMQ queue ID for task distribution (read-only)
         - device_count: Read-only field showing count of devices in group
         - created_at: Timestamp when created
         - updated_at: Timestamp when last updated
@@ -144,7 +144,7 @@ class CollectionGroupSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['rabbitmq_queue_id', 'created_at', 'updated_at']
 
     def get_collector_count(self, obj):
         """Approved collectors consuming this group's queue."""

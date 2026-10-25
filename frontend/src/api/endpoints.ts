@@ -98,10 +98,7 @@ export function resource<T, W = Omit<T, 'id'>>(path: string): ResourceApi<T, W> 
 
 export const deviceTypesApi = resource<DeviceType>('/device-types/')
 export const manufacturersApi = resource<Manufacturer>('/manufacturers/')
-export const collectionGroupsApi = resource<
-  CollectionGroup,
-  Pick<CollectionGroup, 'name' | 'description' | 'rabbitmq_queue_id'>
->('/collection-groups/')
+export const collectionGroupsApi = resource<CollectionGroup, Pick<CollectionGroup, 'name' | 'description'>>('/collection-groups/')
 const retentionPolicies = resource<RetentionPolicy, RetentionPolicyWrite>('/retention-policies/')
 
 export const retentionPoliciesApi = {

@@ -22,6 +22,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import uuid
+
 from django.contrib.auth.models import User
 from django.db import models
 from django.db.models.signals import pre_delete
@@ -34,6 +36,10 @@ PUSH_MODE_CHOICES = [(PUSH_OFF, 'Off'), (PUSH_SSH, 'SCP or SFTP'), (PUSH_TFTP, '
 # ===== Collection Group Models =====
 
 
+def _new_queue_id() -> str:
+    return uuid.uuid4().hex
+
+
 class CollectionGroup(models.Model):
     """
     CollectionGroup Model: Groups devices for collection task assignment
@@ -41,7 +47,7 @@ class CollectionGroup(models.Model):
     Fields:
         - name (CharField): Unique collection group name
         - description (TextField): Description of the collection group's purpose
-        - rabbitmq_queue_id (CharField): RabbitMQ queue ID for task distribution
+        - rabbitmq_queue_id (CharField): Generated RabbitMQ queue ID for task distribution
         - created_at (DateTimeField): When group was created
         - updated_at (DateTimeField): When group was last modified
 
@@ -57,7 +63,14 @@ class CollectionGroup(models.Model):
 
     name = models.CharField(max_length=128, unique=True, help_text='Unique collection group name')
     description = models.TextField(blank=True, help_text='Description of the collection group purpose')
-    rabbitmq_queue_id = models.CharField(max_length=128, help_text='RabbitMQ queue ID for task distribution')
+    # Collectors learn their queues from their assignment, so nobody needs to choose or type the name.
+    rabbitmq_queue_id = models.CharField(
+        max_length=128,
+        unique=True,
+        default=_new_queue_id,
+        editable=False,
+        help_text='RabbitMQ queue ID for task distribution',
+    )
     created_at = models.DateTimeField(auto_now_add=True, help_text='When group was created')
     updated_at = models.DateTimeField(auto_now=True, help_text='When group was last modified')
 
@@ -74,8 +87,6 @@ class CollectionGroup(models.Model):
         # Ensure name is clean and not padded with whitespace
         if self.name is not None:
             self.name = self.name.strip()
-        if self.rabbitmq_queue_id is not None:
-            self.rabbitmq_queue_id = self.rabbitmq_queue_id.strip()
         super().save(*args, **kwargs)
 
     class Meta:
