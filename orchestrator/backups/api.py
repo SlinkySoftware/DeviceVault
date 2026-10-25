@@ -55,6 +55,7 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'changed',
             'lines_added',
             'lines_removed',
+            'lines_modified',
             'compared_to',
             'summary_error',
             'attempts',

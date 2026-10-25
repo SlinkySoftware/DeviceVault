@@ -324,6 +324,8 @@ export interface BackupJob {
   /** Null for binary backups. */
   lines_added: number | null
   lines_removed: number | null
+  /** Lines replaced by another (counted neither as added nor removed). */
+  lines_modified: number | null
   /** The previous backup; null for the device's first. */
   compared_to: string | null
   /** Why there is no summary. */
