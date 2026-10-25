@@ -1,6 +1,6 @@
 # DeviceVault — Target Architecture & Delivery Plan
 
-Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented. Push collection (unsolicited SCP, SFTP and TFTP uploads, section 7.1, phases 11-13) was added on 2026-10-24; phases 11-13 are implemented.
+Status: **Agreed** (2026-10-23). Decisions on the former open questions are recorded in section 11. Phases 8-10 (authentication, authorization and audit, section 4.4) were added on 2026-10-24; phases 8-10 are implemented. Push collection (unsolicited SCP, SFTP and TFTP uploads, section 7.1, phases 11-13) was added on 2026-10-24; phases 11-13 are implemented. Config search (ROADMAP Q6, section 7.2, phases 16-17) was added on 2026-10-25.
 
 ## 1. Goals
 
@@ -251,6 +251,8 @@ retention:  scheduler leader → expired BackupJobs → storage.delete task (bat
             → deleted | delete_failed event per backup → dv.orchestrator (job kept, marked pruned)
 summary:    job stored → orchestrator.change_summary (signed, dv.orchestrator) → read it and the previous backup
             → decrypt, drop volatile lines, diff → changed, lines_added, lines_removed on the job
+search:     same task, same bytes (when DV_CONFIG_SEARCH is on) → replace secrets with tokens
+            → the device's SearchDocument (section 7.2)
 ```
 
 Push (section 7.1) joins this path at the store step:
@@ -288,7 +290,7 @@ class CollectorDriver(Protocol):
 
     def collect(self, target: Target, creds: Creds, params: Params, timeout: int) -> Collected: ...
 ```
-A driver may declare `volatile_lines` (regexes for lines that change on every read); it advertises them, and the orchestrator ignores those lines when it summarises changes, including in files the device pushed (phase 15). `NetmikoDriver` also drops them at collection.
+A driver may declare `volatile_lines` (regexes for lines that change on every read); it advertises them, and the orchestrator ignores those lines when it summarises changes, including in files the device pushed (phase 15). `NetmikoDriver` also drops them at collection. A driver may also declare `secret_lines` (regexes whose groups are secret values, each with an optional known encoding), which config search replaces with tokens before indexing (phase 16, section 7.2).
 
 Bases: `NetmikoDriver` and `ScrapliDriver` (a vendor driver is then mostly a command list plus a cleanup regex). The first drivers are ported from today's: Mikrotik, plus `noop` and `binary_dummy` for tests. Cisco IOS/ASA etc. come later from your specs.
 
@@ -322,6 +324,54 @@ Devices upload their configuration unprompted (for example Cisco `archive` on `w
 
 **Libraries.** `asyncssh` serves SCP and SFTP from one SSH server (upload only: no shell, exec, port forwarding, reads or listings beyond what clients need to write). TFTP is a small asyncio server for write requests only (RFC 1350 with blksize/tsize options, RFC 2347-2349), as `tftpy` is unmaintained and synchronous.
 
+### 7.2 Config search (phases 16-17)
+
+"Which devices still have SNMP community `public`?" answered in seconds, over the **latest** backup of every device whose contents the user may see. Reading backups back through storage and decrypting them at query time would take minutes on a real estate, so the orchestrator keeps a search index, built when a backup is stored.
+
+**Opt-in.** `DV_CONFIG_SEARCH` (default `false`). The index holds decrypted configuration in the orchestrator database, which nothing else there does: credentials and storage settings are encrypted with the data keys, backup content with the vault key. Secret values inside configs are not held in plaintext (see *Secret tokens*), but everything else in a config is. DEPLOYMENT.md says so.
+
+**Engine: the orchestrator database.** On PostgreSQL, a `pg_trgm` GIN index on the document text speeds up both substring (`ILIKE`) and regex (`~*`) candidate queries. Engineers search for literals such as `10.12.4.`, `Gi1/0/2` or `ip helper-address`, which word-based full-text search handles badly (stemming, IP addresses and interface names split into tokens). On SQLite (single node, small estates) there is no index and candidates are scanned. Both sit behind `search/backend.py`, so an external engine could be added if an estate ever outgrows PostgreSQL. A separate engine (Solr, OpenSearch) is not used: an indexed-but-not-stored field still keeps every term and its positions in plaintext, so it protects nothing a database row doesn't, and it would add a service to run and a second copy of the permission model.
+
+**Model** (new app `search`). `SearchDocument`, one per device (one-to-one, deleted with the device):
+- `job`: the backup it was built from.
+- `text`: the backup decoded as UTF-8 (invalid bytes replaced), `\r\n` normalised to `\n`, secret values replaced by tokens. Volatile lines are kept, so line numbers match the backup viewer.
+- `token_kid`: the data key id the tokens were made with.
+- `patterns_hash`: a fingerprint of the secret patterns (and encodings) applied.
+- `indexed_at`.
+
+Only the latest backup is indexed. Searching history is a possible later extension; it would key documents by content so that unchanged backups share one.
+
+**Indexing.** The post-store task (`orchestrator.change_summary`, run by `events`, decision 32) already reads and decrypts the new backup. When search is on, it also builds the device's document from the same bytes, so a backup is read once. The task replaces the document only if its job is newer than the document's (tasks can run out of order). When the summary skips the read (two unencrypted backups with equal hashes), the document just moves to the new job. Binary backups and backups over 16 MiB are not indexed: the device's document is removed rather than left describing an older config, and the job records why. A read that fails is retried like the summary's.
+
+**Catch-up pass.** Each tick, the scheduler leader queues signed index-only tasks (at most 200 per pass) for devices whose newest stored backup:
+- has no document (search just turned on, or a failed read), or
+- has a document built with another `token_kid` (data key rotated), or
+- has a document whose `patterns_hash` differs from the current driver catalogue (driver upgraded).
+
+This makes enabling search, rotating keys and upgrading drivers self-healing, without a command. `manage.py reindex_search` forces every device. With search turned off, the pass deletes every document and the search endpoints answer 404.
+
+**Secret tokens.**
+- Drivers declare `secret_lines` next to `volatile_lines`: regexes matched per line (after `lstrip`, like volatile lines), whose capture groups are secret values. Each pattern can name an `encoding` for reversible encodings. Collectors advertise them; the orchestrator bounds and validates them like volatile lines: they must compile and have at least one group.
+- Encodings are a fixed orchestrator-side list (first `cisco7`), since the orchestrator never runs worker code. A value with a known encoding is decoded before hashing, so typing `cisco` finds `password 7 0822455D0A16`.
+- Each value is replaced by `{{secret:<32 hex>}}`: HMAC-SHA256 of the value, truncated to 128 bits. The HMAC key is derived from the current data key (HKDF-SHA256, info `devicevault/search-token`). It is never stored in the database or sent to the browser, so a database dump alone cannot be brute-forced against a dictionary of likely secrets.
+- Equal secrets give equal tokens, so a dump shows which devices share a secret without revealing it. This is accepted; it is also what makes secret search work.
+- Salted hashes (Cisco type 5/8/9, `$6$`...) are tokenised as their literal string; they are only found by pasting the exact hash.
+- Secret patterns apply whatever the device's `strip_volatile` setting is.
+- Cisco IOS starts with SNMP communities, `username ... secret|password`, `enable secret|password`, `key 7`, TACACS+ and RADIUS keys, ISAKMP and IKEv2 pre-shared keys, and BGP neighbour passwords; MikroTik with the `password=`/`secret=`-style export properties. Each driver owns its list.
+
+**Searching.** `GET /api/search/?q=&mode=&device_group=&driver=&limit=`, with `HasDeviceGroupPermission('view_contents')`. The query joins `access.devices_for(user, 'view_contents')`, so hidden devices neither appear nor count. Modes:
+- `text`: case-insensitive substring, at least 3 characters (the trigram index needs them). The query goes through each driver's secret patterns (per driver, since their patterns differ) and searches that driver's documents with the result. A whole line with its secret in it therefore matches: `snmp-server community public RO` finds the devices. A secret matches only when typed in full, and case-sensitively.
+- `regex`: RE2 syntax (`google-re2`, linear time, so a query cannot hang the API), matched per line, case-insensitive by default. PostgreSQL first narrows the candidates with `~*` in newline-sensitive mode (`(?n)`) under the statement timeout. RE2 then decides which lines match, and a pattern either engine rejects is a 400. Tokens are part of the text, so `snmp-server community \S+ RW` works; secret values themselves cannot be matched by a regex.
+- `secret` (phase 17): the user types a value, the orchestrator tokenises it, and the search returns every line holding that token, on any driver. This finds reuse: "which devices still have the old TACACS key".
+
+Every search runs under a statement timeout (`SET LOCAL statement_timeout`, 5 s) and returns at most 200 devices. Each device comes with its name, group, driver, backup time and job id, the number of matching lines, and up to 20 of them (line number and text, tokens included).
+
+**Audit.** Every search is recorded (`search.query`: mode, filters, the number of devices matched). A text query is recorded in its tokenised form, so a secret typed into it is not written to the log. A secret search records neither the value nor its token.
+
+**Saved searches (phase 17).** `SavedSearch`: owner, name, query, mode, filters. They are private to their owner and run on demand, a seed for compliance rules (ROADMAP D2). Secret searches cannot be saved, since that would store the value or a token that goes stale at key rotation.
+
+**Frontend.** A Search page, shown when the settings endpoint reports search on and the user holds `view_contents` somewhere. It has a query box, a mode switch (Text, Regex, and Secret with a password input), and group and driver filters. Results are grouped by device, with matching lines and tokens shown as a "secret" chip; each line links to the backup view at that line. Phase 17 adds a saved-search list beside it.
+
 ## 8. HA
 
 - Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lease leader acts. The standby takes over at its next tick when the leader stops cleanly (the lease is released), or once the lease expires (60 s by default) when it dies. The leader re-checks the lease before each due schedule, so one that stalled past its lease stops scheduling.
@@ -354,6 +404,8 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 13 | `feat/push-tftp` | TFTP write-only listener and the per-device TFTP opt-in | yes |
 | 14 | `feat/retention` | Retention enforcement (ROADMAP Q1): policy limits plus an always-kept minimum and dry run, the scheduler's retention pass, signed `storage.delete` tasks and deletion events, `deletes` driver capability, policy preview and audit, the `pinned` flag that Q8 builds on, UI | yes |
 | 15 | `feat/change-summary` | Change summary on every backup (ROADMAP Q3): compared with the device's previous backup after decrypting and dropping the driver's volatile lines; `changed`, lines added and removed; backfill command; `?changed=` filter; Changes column and "Only changes" filter in the UI | yes |
+| 16 | `feat/config-search` | Config search (ROADMAP Q6, section 7.2): `search` app and `SearchDocument`; `secret_lines` and encodings in the driver framework (Cisco IOS and MikroTik patterns, `cisco7`), validated in the catalogue; tokens keyed from the data key; indexing in the post-store task; the scheduler's catch-up pass and `reindex_search`; PostgreSQL (`pg_trgm`) and SQLite backends; text and regex search with RE2, timeouts, caps and audit; `DV_CONFIG_SEARCH`; Search page. The search backend tests also run against PostgreSQL in `make check` | yes |
+| 17 | `feat/secret-search` | Secret search mode (audited without the value) and private saved searches, with their UI | yes |
 | later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
@@ -396,3 +448,7 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 30 | (phase 14) Retention keeps the job row and marks it pruned (`prune_requested_at`, then `pruned_at` when the storage worker confirms), so history, dashboard counts and the audit trail survive; content is refused as soon as deletion is requested. A failed deletion clears the request and a later pass retries; an unanswered one is re-sent after a day (deleting is idempotent). Deletion events are accepted only for a requested deletion and from a worker serving that backup's target. |
 | 31 | (phase 14) Safety rails: the newest `min_backups` (at least 1) are always kept, **pinned backups are outside the policy** (neither counted towards its limits nor deleted, so pinning does not shorten the history of the rest), new policies start in dry run (audited when the would-delete set changes), at most 1000 deletions per pass, and targets whose driver does not declare `deletes` (git) are left alone rather than rewriting history. `pinned` lands with retention; Q8 adds setting it, labels and notes. |
 | 32 | (phase 15) Change summaries are computed in the orchestrator, the only place that can decrypt, by a signed internal task on its own queue (workers can publish there too) run by `events`, not inline in the job event, so a slow read never holds up event handling. It reads both backups back through the storage worker (two request/response reads; two unencrypted backups with equal hashes are unchanged without reading). Collectors advertise `volatile_lines`; the orchestrator bounds and validates them (they run on its side) and applies the device driver's patterns unless the device turned `strip_volatile` off. Binary backups are compared for equality only, backups over 16 MiB are not compared, and the first backup of a device counts every line as added. |
+| 33 | (phase 16) Config search indexes in the **orchestrator database** (PostgreSQL `pg_trgm`; an unindexed scan on SQLite), not a separate engine. Searches are substrings and regexes of literals that word-based full-text search mangles; an indexed-only field in Solr or OpenSearch still holds every term and its positions in plaintext; and one database keeps the permission check inside the query. The backend is an interface, so an external engine can be added later. |
+| 34 | (phase 16) Search is **opt-in** (`DV_CONFIG_SEARCH`) and covers only each device's **latest** backup: one `SearchDocument` per device, built by the post-store task from bytes it already decrypted, so no backup is read twice. A catch-up pass in the scheduler builds missing or stale documents, so enabling search, key rotation and driver upgrades need no manual step. |
+| 35 | (phase 16) Secret values are replaced by **keyed tokens** before indexing: drivers declare `secret_lines` (with optional encodings the orchestrator reverses, such as `cisco7`), and each value becomes an HMAC whose key is derived from the data key and never stored in the database. Queries are tokenised by the same patterns on the server, so a full line or a bare secret value (phase 17) still finds its devices, while a dump shows only which devices share a secret, which is accepted. Secret values cannot be matched by substring or regex. |
+| 36 | (phase 16) Regex search uses RE2, matched per line, so a user's pattern runs in linear time; PostgreSQL only narrows the candidates, under a statement timeout. Results are capped, and searches are audited with secrets in tokenised form. |
