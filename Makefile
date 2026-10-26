@@ -89,7 +89,7 @@ zabbix-validate: dev-image
 		echo "== Zabbix $$v ($$ZABBIX_TAG)"; \
 		$(ZABBIX_TEST) up -d --quiet-pull postgres server web stub \
 			&& $(ZABBIX_TEST) run --rm validate --version $$v \
-			|| status=1; \
+			|| { status=1; $(ZABBIX_TEST) logs --no-color --tail 60 server web; }; \
 		$(ZABBIX_TEST) down --volumes --remove-orphans --timeout 5; \
 		[ $$status -eq 0 ] || break; \
 	done; exit $$status

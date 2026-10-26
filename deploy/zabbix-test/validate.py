@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import os
+import socket
 import sys
 import time
 import urllib.error
@@ -75,8 +76,12 @@ EXPECTED_TRIGGERS = {
 }
 # Hosts whose HTTP items are meant to fail (the token is refused).
 FAILING_HOSTS = {'DeviceVault refused'}
-# Seconds one API call may take (within the web image's PHP limit, ZBX_MAXEXECUTIONTIME, 600 by default).
-API_TIMEOUT = 540
+# Seconds one API call may take (within the web image's PHP limit, ZBX_MAXEXECUTIONTIME). Linking the templates
+# in host.create builds hundreds of items, which is slow on a small CI runner.
+API_TIMEOUT = 180
+HOST_CREATE_ATTEMPTS = 3
+# The server's trapper port: it listens only once its start-up database work is done.
+ZABBIX_SERVER = os.environ.get('ZABBIX_SERVER', 'server:10051')
 
 
 class Api:
@@ -88,7 +93,6 @@ class Api:
         if self.auth and method not in ('apiinfo.version', 'user.login'):
             body['auth'] = self.auth
         request = urllib.request.Request(self.url, json.dumps(body).encode(), {'Content-Type': 'application/json-rpc'})
-        # Linking the templates in host.create builds hundreds of items; on a small CI runner that takes minutes.
         with urllib.request.urlopen(request, timeout=API_TIMEOUT) as response:
             answer = json.load(response)
         if 'error' in answer:
@@ -107,6 +111,20 @@ def connect() -> tuple[Api, str]:
         except (OSError, RuntimeError, ValueError) as exc:
             if time.monotonic() > deadline:
                 raise SystemExit(f'Zabbix API not ready: {exc}') from exc
+            time.sleep(3)
+
+
+def wait_for_server() -> None:
+    """Wait until the Zabbix server listens. Until then it may hold database locks that make API writes hang."""
+    host, _, port = ZABBIX_SERVER.rpartition(':')
+    deadline = time.monotonic() + 300
+    while True:
+        try:
+            with socket.create_connection((host, int(port)), timeout=5):
+                return
+        except OSError as exc:
+            if time.monotonic() > deadline:
+                raise SystemExit(f'Zabbix server not listening on {ZABBIX_SERVER}: {exc}') from exc
             time.sleep(3)
 
 
@@ -147,8 +165,21 @@ def create_hosts(api: Api) -> dict[str, str]:
             params['interfaces'] = [
                 {'type': 1, 'main': 1, 'useip': 1, 'ip': address, 'dns': '', 'port': '10050'}
             ]  # fmt: skip
-        ids[host] = api.call('host.create', params)['hostids'][0]
+        ids[host] = _create_host(api, params)
     return ids
+
+
+def _create_host(api: Api, params: dict) -> str:
+    """host.create, surviving a lost answer: a timed-out call may still have created the host."""
+    for attempt in range(1, HOST_CREATE_ATTEMPTS + 1):
+        try:
+            return api.call('host.create', params)['hostids'][0]
+        except TimeoutError:
+            print(f'host.create {params["host"]!r} timed out (attempt {attempt})', flush=True)
+            found = api.call('host.get', {'output': ['hostid'], 'filter': {'host': [params['host']]}})
+            if found:
+                return found[0]['hostid']
+    raise SystemExit(f'could not create host {params["host"]!r}')
 
 
 def _recorded(name: str) -> dict:
@@ -250,6 +281,7 @@ def main() -> int:
     api, server = connect()
     if not server.startswith(f'{args.version}.'):
         raise SystemExit(f'expected Zabbix {args.version}, the API is {server}')
+    wait_for_server()
     import_templates(api, args.version)
     print(f'Zabbix {server}: imported {HOST_TEMPLATE!r} and {DEVICE_TEMPLATE!r}', flush=True)
     hosts = create_hosts(api)
