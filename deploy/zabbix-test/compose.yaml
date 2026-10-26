@@ -34,6 +34,8 @@ services:
       DB_SERVER_HOST: postgres
       ZBX_SERVER_HOST: server
       PHP_TZ: UTC
+      # host.create links templates with hundreds of items; give it time on small CI runners (validate.py API_TIMEOUT).
+      ZBX_MAXEXECUTIONTIME: '600'
 
   # Recorded orchestrator and relay answers (stdlib only), at http://stub:8000.
   stub:

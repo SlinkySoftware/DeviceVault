@@ -75,6 +75,8 @@ EXPECTED_TRIGGERS = {
 }
 # Hosts whose HTTP items are meant to fail (the token is refused).
 FAILING_HOSTS = {'DeviceVault refused'}
+# Seconds one API call may take (within the web image's PHP limit, ZBX_MAXEXECUTIONTIME, 600 by default).
+API_TIMEOUT = 540
 
 
 class Api:
@@ -86,7 +88,8 @@ class Api:
         if self.auth and method not in ('apiinfo.version', 'user.login'):
             body['auth'] = self.auth
         request = urllib.request.Request(self.url, json.dumps(body).encode(), {'Content-Type': 'application/json-rpc'})
-        with urllib.request.urlopen(request, timeout=60) as response:
+        # Linking the templates in host.create builds hundreds of items; on a small CI runner that takes minutes.
+        with urllib.request.urlopen(request, timeout=API_TIMEOUT) as response:
             answer = json.load(response)
         if 'error' in answer:
             raise RuntimeError(f'{method}: {answer["error"].get("data") or answer["error"]}')
