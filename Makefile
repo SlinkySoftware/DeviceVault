@@ -88,9 +88,14 @@ zabbix-validate: dev-image
 		v=$${pair%%:*}; export ZABBIX_TAG=$${pair#*:} POSTGRES_IMAGE=$(ZABBIX_POSTGRES_IMAGE); \
 		echo "== Zabbix $$v ($$ZABBIX_TAG)"; \
 		$(ZABBIX_TEST) up -d --quiet-pull postgres server web stub \
-			&& $(ZABBIX_TEST) run --rm validate --version $$v \
+			&& $(ZABBIX_TEST) run --rm validate --version $$v --phase import \
+			&& $(ZABBIX_TEST) exec -T postgres psql -q -U zabbix -d zabbix -c 'VACUUM ANALYZE' \
+			&& $(ZABBIX_TEST) run --rm validate --version $$v --phase check \
 			|| { status=1; $(ZABBIX_TEST) logs --no-color server web postgres \
-				| grep -viE 'Invalid token|became not supported|PHP Deprecated|POST /api_jsonrpc' | tail -200; }; \
+				| grep -viE 'Invalid token|became not supported|PHP Deprecated|POST /api_jsonrpc' | tail -200; \
+				$(ZABBIX_TEST) exec -T postgres psql -U zabbix -d zabbix -c \
+					"select pid, state, now() - xact_start as open_for, left(query, 200) as query \
+					 from pg_stat_activity where datname = 'zabbix' order by xact_start"; }; \
 		$(ZABBIX_TEST) down --volumes --remove-orphans --timeout 5; \
 		[ $$status -eq 0 ] || break; \
 	done; exit $$status

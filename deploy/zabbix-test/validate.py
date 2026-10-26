@@ -279,14 +279,20 @@ def check(api: Api, hosts: dict[str, str]) -> tuple[list[str], dict]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', required=True, choices=['6.0', '7.0'])
+    # `make zabbix-validate` runs `import`, analyzes the freshly loaded database (without planner statistics a
+    # slow runner's server crawls while holding locks that host.create waits on), then runs `check`.
+    parser.add_argument('--phase', choices=['all', 'import', 'check'], default='all')
     args = parser.parse_args()
 
     api, server = connect()
     if not server.startswith(f'{args.version}.'):
         raise SystemExit(f'expected Zabbix {args.version}, the API is {server}')
     wait_for_server()
-    import_templates(api, args.version)
-    print(f'Zabbix {server}: imported {HOST_TEMPLATE!r} and {DEVICE_TEMPLATE!r}', flush=True)
+    if args.phase in ('all', 'import'):
+        import_templates(api, args.version)
+        print(f'Zabbix {server}: imported {HOST_TEMPLATE!r} and {DEVICE_TEMPLATE!r}', flush=True)
+        if args.phase == 'import':
+            return 0
     hosts = create_hosts(api)
     print(f'Created {len(hosts)} hosts; waiting for items and triggers (up to {TIMEOUT}s)', flush=True)
 
