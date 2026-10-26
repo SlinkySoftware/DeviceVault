@@ -13,6 +13,8 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:?set by make zabbix-validate}
     environment: *db
+    # Lock waits show up in the logs `make zabbix-validate` prints when it fails.
+    command: [postgres, -c, log_lock_waits=on, -c, deadlock_timeout=2s]
     tmpfs:
       - /var/lib/postgresql/data
 
@@ -25,6 +27,7 @@ services:
       # Pick up new hosts and items quickly.
       ZBX_CACHEUPDATEFREQUENCY: '10'
       ZBX_STARTHTTPPOLLERS: '5'
+      ZBX_LOGSLOWQUERIES: '2000'
 
   web:
     image: zabbix/zabbix-web-nginx-pgsql:${ZABBIX_TAG}

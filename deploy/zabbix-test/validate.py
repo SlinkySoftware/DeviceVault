@@ -172,8 +172,11 @@ def create_hosts(api: Api) -> dict[str, str]:
 def _create_host(api: Api, params: dict) -> str:
     """host.create, surviving a lost answer: a timed-out call may still have created the host."""
     for attempt in range(1, HOST_CREATE_ATTEMPTS + 1):
+        started = time.monotonic()
         try:
-            return api.call('host.create', params)['hostids'][0]
+            hostid = api.call('host.create', params)['hostids'][0]
+            print(f'host.create {params["host"]!r}: {time.monotonic() - started:.1f}s', flush=True)
+            return hostid
         except TimeoutError:
             print(f'host.create {params["host"]!r} timed out (attempt {attempt})', flush=True)
             found = api.call('host.get', {'output': ['hostid'], 'filter': {'host': [params['host']]}})
