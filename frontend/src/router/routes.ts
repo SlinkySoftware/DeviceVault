@@ -65,6 +65,9 @@ const routes: RouteRecordRaw[] = [
 
       admin('users', 'users', 'Users', () => import('@/pages/admin/UsersPage.vue')),
       admin('user-groups', 'user-groups', 'User Groups', () => import('@/pages/admin/UserGroupsPage.vue')),
+      admin('service-accounts', 'service-accounts', 'Service Accounts', () =>
+        import('@/pages/admin/ServiceAccountsPage.vue'),
+      ),
       admin('access', 'access', 'Access', () => import('@/pages/admin/AccessPage.vue')),
       admin('auth-providers', 'auth-providers', 'Auth Providers', () => import('@/pages/admin/AuthProvidersPage.vue')),
       admin('audit-log', 'audit-log', 'Audit Log', () => import('@/pages/admin/AuditLogPage.vue')),

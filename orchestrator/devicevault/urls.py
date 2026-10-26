@@ -22,7 +22,7 @@ from rest_framework import routers
 from search import api as search_api
 
 from accounts import api as accounts_api
-from accounts import oidc_views, provider_api
+from accounts import oidc_views, provider_api, token_api
 from api import views
 from audit import api as audit_api
 from backups import api as backup_api
@@ -46,6 +46,9 @@ router.register(r'credential-types', views.CredentialTypeViewSet)
 router.register(r'device-groups', views.DeviceGroupViewSet, basename='device-groups')
 router.register(r'users', accounts_api.UserViewSet, basename='users')
 router.register(r'user-groups', accounts_api.UserGroupViewSet, basename='user-groups')
+router.register(r'tokens', token_api.TokenViewSet, basename='tokens')
+router.register(r'admin/tokens', token_api.AdminTokenViewSet, basename='admin-tokens')
+router.register(r'service-accounts', token_api.ServiceAccountViewSet, basename='service-accounts')
 router.register(r'auth-providers', provider_api.AuthProviderViewSet, basename='auth-providers')
 router.register(r'auth-provider-kinds', provider_api.AuthProviderKindViewSet, basename='auth-provider-kinds')
 router.register(r'audit-logs', audit_api.AuditLogViewSet, basename='audit-logs')

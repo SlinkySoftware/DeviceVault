@@ -147,6 +147,9 @@ DEVICEVAULT_SESSION_MAX_HOURS = env_int('DV_SESSION_MAX_HOURS', 12, minimum=1)
 SESSION_COOKIE_AGE = DEVICEVAULT_SESSION_MAX_HOURS * 3600
 DEVICEVAULT_LOGIN_MAX_FAILURES = env_int('DV_LOGIN_MAX_FAILURES', 5, minimum=1)
 DEVICEVAULT_LOGIN_LOCKOUT_MIN = env_int('DV_LOGIN_LOCKOUT_MIN', 15, minimum=1)
+# API tokens (accounts.tokens): the longest expiry allowed, and requests per token ("<n>/sec|min|hour").
+DEVICEVAULT_API_TOKEN_MAX_DAYS = env_int('DV_API_TOKEN_MAX_DAYS', 365, minimum=1)
+DEVICEVAULT_API_TOKEN_RATE = env_str('DV_API_TOKEN_RATE', '600/min')
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -156,7 +159,10 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ['accounts.authentication.SessionAuthentication'],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'accounts.authentication.TokenAuthentication',
+        'accounts.authentication.SessionAuthentication',
+    ],
     # A safety net only: every view states its own permission classes (accounts.access).
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'EXCEPTION_HANDLER': 'api.exceptions.exception_handler',

@@ -20,6 +20,7 @@ from accounts.login import is_break_glass, password_sign_in
 from accounts.models import FLAGS, REQUIRES, AuthProvider, DeviceGroupGrant, UserGroup, UserGroupMembership
 from accounts.providers import KINDS, ProviderError
 from accounts.throttle import LOGIN, locked_out
+from accounts.token_api import SERVICE_ACCOUNT_ADMIN
 from audit.log import client_ip, record
 from audit.models import AuditLog
 from devices.models import DeviceGroup
@@ -142,6 +143,7 @@ class LogoutView(APIView):
     answers ``{redirect}``: the IdP's end-session URL to send the browser to."""
 
     permission_classes = [IsAuthenticated]
+    token_scopes = ()
 
     def post(self, request):
         redirect = end_session_redirect(request)
@@ -225,6 +227,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
+    token_scopes = ()
 
     def post(self, request):
         form = ChangePasswordSerializer(data=request.data, context={'request': request})
@@ -238,6 +241,11 @@ class ChangePasswordView(APIView):
 
 
 # ===== Users =====
+
+
+def _is_service(user) -> bool:
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_service_account)
 
 
 def user_snapshot(user) -> dict:
@@ -376,7 +384,12 @@ class UserViewSet(viewsets.ModelViewSet):
 
     serializer_class = UserSerializer
     permission_classes = [IsGlobalAdmin]
-    queryset = User.objects.prefetch_related('user_groups', 'external_identities__provider').order_by('username')
+    # Service accounts have their own endpoint (accounts.token_api).
+    queryset = (
+        User.objects.exclude(profile__is_service_account=True)
+        .prefetch_related('user_groups', 'external_identities__provider')
+        .order_by('username')
+    )
 
     def perform_create(self, serializer):
         user = serializer.save()
@@ -464,8 +477,13 @@ def group_snapshot(group) -> dict:
 
 
 class UserGroupSerializer(serializers.ModelSerializer):
-    members = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True, required=False)
+    """``members`` are people; service accounts join groups through their own endpoint and are only listed here."""
+
+    members = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.exclude(profile__is_service_account=True), many=True, required=False
+    )
     member_names = serializers.SerializerMethodField()
+    service_account_names = serializers.SerializerMethodField()
     grants = GrantSerializer(many=True, required=False)
     provider_name = serializers.CharField(source='provider.name', read_only=True, default=None)
 
@@ -482,6 +500,7 @@ class UserGroupSerializer(serializers.ModelSerializer):
             'external_id',
             'members',
             'member_names',
+            'service_account_names',
             'grants',
             'created_at',
             'updated_at',
@@ -489,7 +508,15 @@ class UserGroupSerializer(serializers.ModelSerializer):
         read_only_fields = ['is_builtin', 'source', 'external_id', 'created_at', 'updated_at']
 
     def get_member_names(self, obj) -> list[str]:
-        return sorted(user.username for user in obj.members.all())
+        return sorted(user.username for user in obj.members.all() if not _is_service(user))
+
+    def get_service_account_names(self, obj) -> list[str]:
+        return sorted(user.username for user in obj.members.all() if _is_service(user))
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['members'] = [user.pk for user in instance.members.all() if not _is_service(user)]
+        return data
 
     def validate_grants(self, value):
         groups = [row['device_group'].pk for row in value]
@@ -503,6 +530,12 @@ class UserGroupSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'is_global_admin': 'The Administrators group is always global.'})
         if group is not None and group.source == UserGroup.EXTERNAL and 'members' in attrs:
             raise serializers.ValidationError({'members': 'External groups are filled by their identity provider.'})
+        if (
+            group is not None
+            and attrs.get('is_global_admin')
+            and group.members.filter(profile__is_service_account=True).exists()
+        ):
+            raise serializers.ValidationError({'is_global_admin': SERVICE_ACCOUNT_ADMIN})
         return attrs
 
     def create(self, validated_data):
@@ -525,7 +558,8 @@ class UserGroupSerializer(serializers.ModelSerializer):
 
     def _set_members(self, group, users) -> None:
         wanted = {user.pk for user in users}
-        group.memberships.filter(source=UserGroupMembership.MANUAL).exclude(user_id__in=wanted).delete()
+        manual = group.memberships.filter(source=UserGroupMembership.MANUAL)
+        manual.exclude(user__profile__is_service_account=True).exclude(user_id__in=wanted).delete()
         have = set(group.memberships.values_list('user_id', flat=True))
         UserGroupMembership.objects.bulk_create(
             UserGroupMembership(user_id=user_id, group=group) for user_id in wanted - have
@@ -541,7 +575,7 @@ class UserGroupViewSet(viewsets.ModelViewSet):
 
     serializer_class = UserGroupSerializer
     permission_classes = [IsGlobalAdmin]
-    queryset = UserGroup.objects.select_related('provider').prefetch_related('members', 'grants__device_group')
+    queryset = UserGroup.objects.select_related('provider').prefetch_related('members__profile', 'grants__device_group')
 
     def perform_create(self, serializer):
         group = serializer.save()

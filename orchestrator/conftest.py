@@ -161,3 +161,40 @@ def client_for(db):
 def admin_client(make_user, client_for):
     """An API client signed in as a global administrator."""
     return client_for(make_user('admin', global_admin=True))
+
+
+@pytest.fixture(autouse=True)
+def token_redis(monkeypatch):
+    """The Redis that API token rate limits and refusal audits use."""
+    import fakeredis
+
+    server = fakeredis.FakeRedis()
+    monkeypatch.setattr('accounts.tokens._redis', lambda: server)
+    return server
+
+
+@pytest.fixture
+def make_token(db):
+    """Issue an API token for ``user``: returns (row, token string)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from accounts import tokens
+
+    def make(user, scopes=('api',), *, days=30, name='test', **fields):
+        return tokens.issue(user, name=name, scopes=scopes, expires_at=timezone.now() + timedelta(days=days), **fields)
+
+    return make
+
+
+@pytest.fixture
+def token_client(db):
+    """An API client sending ``Authorization: Bearer <token>`` and no session."""
+
+    def make(raw, address='192.0.2.10'):
+        client = APIClient(REMOTE_ADDR=address)
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {raw}')
+        return client
+
+    return make

@@ -44,10 +44,19 @@ def is_break_glass(user) -> bool:
     return UserProfile.objects.filter(user=user, break_glass=True).exists()
 
 
+def is_service_account(user) -> bool:
+    from core.models import UserProfile
+
+    return UserProfile.objects.filter(user=user, is_service_account=True).exists()
+
+
 def password_sign_in(request, username: str, password: str) -> SignIn:
     """Local accounts first, then each enabled password provider in ``order``."""
     result = SignIn()
     local = authenticate(request, username=username, password=password)
+    if local is not None and is_service_account(local):
+        # Service accounts have no usable password, so this guards against one being set by hand.
+        return SignIn(reason='service_account')
     if local is not None:
         if settings.DEVICEVAULT_LOCAL_AUTH_ENABLED or is_break_glass(local):
             return SignIn(user=local, details={'provider': 'local'})

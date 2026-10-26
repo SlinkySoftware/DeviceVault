@@ -88,6 +88,22 @@ use and `DV_SESSION_MAX_HOURS` after sign-in. Repeated failed sign-ins lock out 
 username or client address for `DV_LOGIN_LOCKOUT_MIN`; the client address is the
 last `X-Forwarded-For` hop, which the `web` service adds.
 
+**API tokens** let scripts and monitoring call the API without a session: send
+`Authorization: Bearer dvt_...`. A token acts as its owner and never beyond their
+grants, narrowed by its scopes: `api` (the whole API, except managing tokens,
+signing in and out, and changing passwords), `monitoring` (only the read-only
+`/api/monitoring/` endpoints) and `monitoring_platform` (with platform health,
+granted by a global administrator to a service account's token only). Tokens
+expire (90 days by default, `DV_API_TOKEN_MAX_DAYS` at most), can be limited to
+source networks, are rate-limited per token (`DV_API_TOKEN_RATE`), and are shown
+once when created; only a SHA-256 of the secret is stored. Users manage their own on
+their Profile page. **Service accounts** (Admin Settings > Service Accounts) are
+accounts that never sign in and exist to own tokens, so a monitoring system's token
+does not stop working when a person leaves; their access comes from user groups,
+which may not be global-administrator groups. Creating and revoking tokens is
+audited, as is a token's first use from each address and every refused token
+(at most once a minute per address).
+
 **Identity providers** are configured in the UI (Admin Settings > Auth Providers),
 not the environment. An LDAP / Active Directory provider uses the login form: local
 accounts are tried first, then each enabled provider in order, by searching for
@@ -510,6 +526,8 @@ secrets). The file takes precedence.
 | `DV_SESSION_IDLE_MIN` | `60` | A session unused this long ends |
 | `DV_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in, used or not |
 | `DV_LOGIN_MAX_FAILURES` / `DV_LOGIN_LOCKOUT_MIN` | `5` / `15` | Failed sign-ins (per username, and per client address) within the window that lock it out for the window |
+| `DV_API_TOKEN_MAX_DAYS` | `365` | The longest expiry an API token may have; new tokens default to 90 days |
+| `DV_API_TOKEN_RATE` | `600/min` | Requests per API token (`<n>/sec`, `/min` or `/hour`), counted in Redis across every node; over it a token gets 429 |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
 | `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_keys`) |
 | `DV_DATA_KEYS` | required | AES-256 key ring for secrets at rest (`generate_keys`) |

@@ -69,6 +69,10 @@ class UserProfile(models.Model):
     break_glass = models.BooleanField(
         default=False, help_text='A local user who may sign in even when local authentication is disabled'
     )
+    is_service_account = models.BooleanField(
+        default=False, help_text='A machine account: never signs in, exists only to own API tokens'
+    )
+    description = models.CharField(max_length=200, blank=True, help_text='What a service account is for')
     created_at = models.DateTimeField(auto_now_add=True, help_text='Profile creation timestamp')
     updated_at = models.DateTimeField(auto_now=True, help_text='Last modification timestamp')
 
