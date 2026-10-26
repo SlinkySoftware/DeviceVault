@@ -95,6 +95,7 @@ const routes: RouteRecordRaw[] = [
       ),
       admin('workers', 'workers', 'Workers', () => import('@/pages/admin/WorkersPage.vue')),
       admin('flower', 'flower', 'Flower', () => import('@/pages/admin/FlowerPage.vue')),
+      admin('monitoring', 'monitoring', 'Monitoring', () => import('@/pages/admin/MonitoringPage.vue')),
     ],
   },
   { path: '/:catchAll(.*)*', redirect: { name: 'dashboard' } },

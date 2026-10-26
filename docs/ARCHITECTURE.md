@@ -534,32 +534,35 @@ Nothing is outbound from DeviceVault to Zabbix, and nothing Zabbix-specific runs
 - `verification`: reserved for ROADMAP Q12.
 - `storage`: the storage worker failed.
 - `integrity`: hash mismatch.
-- `push`: a pushed file could not be ingested.
+- `push`: reserved. A pushed file that cannot be ingested is refused (a `PushRejection`), not a failed job, so nothing sets it today.
 - `orphaned`: the orchestrator's timeout fired.
 - `unknown`.
 
-How each side fills it in:
-- **Workers.** `DriverError` (and so `TransientError` and `PermanentError`) gains a `reason` argument. `NetmikoDriver` maps Netmiko's authentication, timeout and connection exceptions. Unclassified exceptions report `unknown`. The reason travels in the signed `failed` job event (`protocol.jobs`).
+The names are shared through `devicevault_protocol.jobs` (`FAILURE_*`, `failure_reason()`). How each side fills it in:
+- **Workers.** `DriverError` (and so `TransientError` and `PermanentError`) gains a `reason` argument. `NetmikoDriver` maps Netmiko's authentication exceptions (and a refused enable or missing credential) to `auth`, network and SSH errors before the session is up to `connection` and after it to `timeout`, and output matching its `rejected_output` patterns (checked in the first lines of each command's output) to `command`. Unclassified exceptions report `unknown`. The reason travels in the signed `failed` job event (`protocol.jobs`).
 - **Orchestrator.** It sets `integrity`, `orphaned` and `storage` itself, and maps any value it doesn't recognise to `unknown`.
 - **Old jobs** keep null, which the metrics count as `unknown`.
 
 `error` stays as it is. Monitoring never exposes the error text, only the reason.
 
 **Expected interval.** `backups/freshness.py` gives each device:
-- `expected_interval`: the gap between its schedule's next two runs (`Schedule.next_run_after`), or null for a device with no enabled schedule (push-only or manual).
-- `next_due_at`: the next run plus the interval × `DV_STALE_FACTOR` (1.5 by default).
-- `overdue`: an active, enabled device with an interval whose latest **successful** backup (newest `stored` job, as the dashboard's freshness card uses) is older than the interval × the factor. A device never backed up counts as overdue once it is older than the interval × the factor.
+- `expected_interval`: the longest gap between its schedule's next eight runs (`Schedule.next_run_after`), so an uneven schedule (weekdays only) is judged by its longest wait, or null for a device with no enabled schedule (push-only or manual).
+- `next_due_at`: the deadline for a successful backup: the latest success (or, never backed up, the device's new `created_at`) plus the interval × `DV_STALE_FACTOR` (1.5 by default).
+- `overdue`: an active, enabled device with an interval that is past `next_due_at`. "Latest successful" is the newest `stored` job, as the dashboard's freshness card uses.
 
 Disabled and inactive devices are never overdue. Push-only devices get no interval here. ROADMAP Q5 adds a per-device expected push interval, the UI and notifications on top of this module, and the dashboard's fixed 24 h and 7 d freshness thresholds switch to it then.
 
 #### Metric catalogue and snapshot (phase 22)
 
 **Catalogue.** `monitoring/catalogue.py` declares every metric once:
-- its key (`backups.success_ratio.24h`) and name;
+- its key, a flat field of one section entry (`success_ratio_24h`, read in Zabbix as `$.success_ratio_24h`), and name;
 - its kind (`gauge`, or `counter` for monotonic values);
-- its unit (`s`, `B`, `%`, `unixtime`, or none);
-- its scope (`estate`, `group`, `device`, `worker`, `target`, `receiver`);
-- an optional value map and a description.
+- its unit (`s`, `B`, `%`, `unixtime`, or none) and Zabbix value type (`float`, `int`, `text`);
+- its scope (`estate`, `platform`, `group`, `device`, `worker`, `target`, `receiver`);
+- an optional value map and a description;
+- its Prometheus series name and labels, or none to leave it out of Prometheus (text fields, per-device figures).
+
+Value-mapped states travel as numbers (`status_code`, `failure_reason_code`, `lifecycle_code`; booleans as 0 and 1), because Zabbix value maps map numbers; the catalogue's `VALUE_MAPS` give the codes, which are only ever appended to. Counts are never null; ratios and durations with nothing to measure are.
 
 The JSON endpoints, the Prometheus renderer and the Zabbix template generator all read it. A test fails if an endpoint returns a key the catalogue lacks, or the reverse.
 
@@ -612,13 +615,13 @@ The class joins the permission-class test. Reads are not audited (token use is, 
 |---|---|
 | `summary/` | Estate outcomes, timing, freshness, change, volume, push and self, as one object |
 | `device-groups/` | `{"data": [{"id", "name", ...metrics}]}`, one entry per visible device group (devices without a group form an `"ungrouped"` entry): the shape Zabbix low-level discovery reads, and the per-group items in the same response |
-| `device/?ip=<addr>&id=<id>` | One device, from the caller's published snapshot (service accounts only; 404 for other callers, who have none). `id` wins when non-empty, otherwise the active device with that `ip_address` (unique among active devices, decision 42). An unknown address and a device the owner can't see both return 200 `{"found": false, "published_at": ...}`, so the response says nothing about devices outside the owner's grants. With no current snapshot it answers 503 `{"error": "stale"}`. The receiver relay serves the same contract |
+| `device/?ip=<addr>&id=<id>` | One device, from the caller's published snapshot (service accounts only; 404 for other callers, who have none). `id` wins when non-empty, otherwise the active device with that `ip_address` (unique among active devices, decision 42). An unknown address and a device the owner can't see both return 200 `{"found": 0, "published_at": ..., "published_age": ...}`, so the response says nothing about devices outside the owner's grants. With no current snapshot it answers 503 `{"error": "stale"}`. The receiver relay serves the same contract |
 | `workers/`, `storage-targets/`, `receivers/` | Platform lists for discovery (empty without the platform scope) |
 | `zabbix/template/?version=6.0\|7.0` | The generated Zabbix template (phase 24) |
 | `metrics` | Prometheus text exposition (below) |
 
-**Prometheus.** `metrics` renders the estate, group, worker, target and receiver metrics from the same snapshot, using `prometheus_client` with a registry built per request (not the process-global one):
-- Names are `devicevault_*`, with `device_group`, `collection_group`, `storage_target`, `worker`, `receiver`, `state` and `reason` labels.
+**Prometheus.** `metrics` renders the estate, group, worker, target and receiver metrics from the same cached sections, in text exposition format 0.0.4 written by `monitoring/prometheus.py` (a few lines; no `prometheus_client` dependency and no process-global registry):
+- Names are `devicevault_*`, with `storage_target`, `worker`, `receiver`, `state`, `reason`, `window` and `stage`/`quantile` labels. Device-group series are separate families, `devicevault_group_*` labelled `device_group`, so summing them never double-counts the estate series.
 - **No per-device series**: cardinality must stay bounded, and per-device status belongs to the Zabbix device template.
 - Outcome counters are true counters.
 - Timing is exported as gauges per window and quantile (`devicevault_backup_duration_seconds{stage, window, quantile}`), not histograms. Histograms need cumulative buckets, which means a rollup this design deliberately avoids (decision 37).

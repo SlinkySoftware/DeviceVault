@@ -1,0 +1,111 @@
+# Prometheus alert rules for DeviceVault (/api/monitoring/metrics), the counterparts of
+# the Zabbix template's triggers. Load with `rule_files: [devicevault-rules.yml]` and
+# scrape DeviceVault with a monitoring token:
+#
+#   scrape_configs:
+#     - job_name: devicevault
+#       metrics_path: /api/monitoring/metrics
+#       scheme: https
+#       authorization: {type: Bearer, credentials_file: /etc/prometheus/devicevault.token}
+#       static_configs: [{targets: ['devicevault.example.com']}]
+#
+# Thresholds are plain numbers here; adjust them to your estate.
+groups:
+  - name: devicevault
+    rules:
+      - alert: DeviceVaultDown
+        expr: up{job="devicevault"} == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: DeviceVault monitoring endpoint unreachable
+      - alert: DeviceVaultFiguresStale
+        expr: devicevault_metrics_age_seconds > 300
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: DeviceVault figures are {{ $value }}s old
+      - alert: DeviceVaultSuccessRatioLow
+        expr: devicevault_backup_success_ratio{window="24h"} < 95
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: Backup success ratio over 24h is {{ $value }}%
+      - alert: DeviceVaultGroupSuccessRatioLow
+        expr: devicevault_group_backup_success_ratio{window="24h"} < 95
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: Backup success ratio of {{ $labels.device_group }} over 24h is {{ $value }}%
+      - alert: DeviceVaultDevicesOverdue
+        expr: devicevault_group_devices{state="overdue"} > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $value }} devices in {{ $labels.device_group }} are overdue for a backup'
+      - alert: DeviceVaultDevicesFailing
+        expr: devicevault_group_devices_failing{consecutive="3"} > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $value }} devices in {{ $labels.device_group }} failed 3 or more times in a row'
+      - alert: DeviceVaultDevicesNeverBackedUp
+        expr: devicevault_devices{state="never"} > 0
+        for: 1d
+        labels: {severity: info}
+        annotations:
+          summary: '{{ $value }} enabled devices have never been backed up'
+      - alert: DeviceVaultStaleGroup
+        expr: devicevault_group_oldest_success_age_seconds > 2 * 86400
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: A device in {{ $labels.device_group }} has not backed up for {{ $value | humanizeDuration }}
+      - alert: DeviceVaultSlowBackups
+        expr: devicevault_backup_duration_seconds{stage="total",quantile="0.95"} > 600
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: 95th percentile backup duration is {{ $value | humanizeDuration }}
+      # Platform health: needs a token with the platform scope.
+      - alert: DeviceVaultNoSchedulerLeader
+        expr: devicevault_scheduler_leader == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: No DeviceVault scheduler holds the lease; nothing is being scheduled
+      - alert: DeviceVaultSchedulerStalled
+        expr: devicevault_scheduler_tick_age_seconds > 120
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: The DeviceVault scheduler last ran {{ $value | humanizeDuration }} ago
+      - alert: DeviceVaultWorkerOffline
+        expr: devicevault_worker_online == 0 and devicevault_worker_status == 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Worker {{ $labels.worker }} is offline
+      - alert: DeviceVaultWorkerPending
+        expr: devicevault_worker_pending_seconds > 3600
+        labels: {severity: info}
+        annotations:
+          summary: Worker {{ $labels.worker }} has waited over an hour for approval
+      - alert: DeviceVaultAssignmentBehind
+        expr: devicevault_worker_assignment_behind == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Worker {{ $labels.worker }} has not applied its current assignment
+      - alert: DeviceVaultStorageTargetUnserved
+        expr: devicevault_storage_target_workers_online == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: No online storage worker serves {{ $labels.storage_target }}
+      - alert: DeviceVaultPushRefusals
+        expr: devicevault_pushes_refused{reason="any"} > 50
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: '{{ $value }} pushes were refused in the last 24h'

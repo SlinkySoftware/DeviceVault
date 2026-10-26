@@ -521,6 +521,9 @@ export interface ServiceAccount {
 
 export type ServiceAccountWrite = Pick<ServiceAccount, 'username' | 'description' | 'is_active' | 'groups'>
 
+/** A monitoring section (`/api/monitoring/summary/`): flat fields, named and described in the orchestrator's catalogue. */
+export type MonitoringFigures = Record<string, number | string | null>
+
 export type AuditOutcome = 'success' | 'failure' | 'denied'
 
 export interface AuditEntry {

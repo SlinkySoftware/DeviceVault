@@ -229,3 +229,18 @@ def test_prometheus_exposition(job, admin_client):
     assert 'devicevault_backup_failures{reason="auth",window="24h"} 1' in body
     assert 'devicevault_worker_online{worker="collector-1"}' in body
     assert 'Edge 01' not in body  # no per-device series
+
+
+def test_the_shipped_alert_rules_use_real_series():
+    import re
+    from pathlib import Path
+
+    from monitoring.prometheus import _family
+
+    rules = Path(__file__).resolve().parents[3] / 'deploy' / 'prometheus' / 'devicevault-rules.yml'
+    used = set(re.findall(r'\b(devicevault_[a-z_]+)\b', rules.read_text()))
+    known = {
+        _family(metric.prometheus, metric.scope) for metric in catalogue.CATALOGUE if metric.prometheus is not None
+    }
+
+    assert used - known == set()
