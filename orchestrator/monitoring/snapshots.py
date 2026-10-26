@@ -31,6 +31,7 @@ logger = logging.getLogger('devicevault.monitoring')
 
 LOCK_SECONDS = 30
 WAIT_SECONDS = 5
+PUBLISH_NOW_KEY = 'dv:monitoring:publish-now'
 _last_publish: datetime | None = None
 
 
@@ -78,15 +79,24 @@ def _fresh(raw: bytes, lifetime: int) -> bool:
 # --- relay snapshots -----------------------------------------------------------------------
 
 
+def relay_tokens(now: datetime | None = None) -> list[ApiToken]:
+    """Live tokens with the monitoring scope of active service accounts: the tokens relays accept."""
+    tokens = (
+        ApiToken.objects.filter(
+            revoked_at__isnull=True,
+            expires_at__gt=now or timezone.now(),
+            user__is_active=True,
+            user__profile__is_service_account=True,
+        )
+        .select_related('user')
+        .order_by('prefix')
+    )
+    return [token for token in tokens if ApiToken.MONITORING in token.scopes]
+
+
 def relay_owners() -> list[User]:
     """Service accounts holding a live token with the monitoring scope."""
-    tokens = ApiToken.objects.filter(
-        revoked_at__isnull=True,
-        expires_at__gt=timezone.now(),
-        user__is_active=True,
-        user__profile__is_service_account=True,
-    ).select_related('user')
-    owners = {token.user.pk: token.user for token in tokens if ApiToken.MONITORING in token.scopes}
+    owners = {token.user.pk: token.user for token in relay_tokens()}
     return [owners[pk] for pk in sorted(owners)]
 
 
@@ -110,15 +120,24 @@ def publish_relays(now: datetime | None = None) -> int:
     return published
 
 
+def request_publish() -> None:
+    """Have the scheduler leader publish at its next tick (relay owners or their grants changed)."""
+    try:
+        _redis().set(PUBLISH_NOW_KEY, 1, ex=settings.DEVICEVAULT_MONITORING_PUBLISH_SECONDS)
+    except RedisError as exc:  # the next interval publishes anyway
+        logger.warning('monitoring_publish_request_failed', extra={'error': str(exc)})
+
+
 def publish_if_due(now: datetime | None = None) -> int | None:
-    """The scheduler leader's hook: publish when the interval has passed (and at start-up)."""
+    """The scheduler leader's hook: publish when the interval has passed, at start-up, and when asked."""
     global _last_publish
     now = now or timezone.now()
     interval = timedelta(seconds=settings.DEVICEVAULT_MONITORING_PUBLISH_SECONDS)
-    if _last_publish is not None and now - _last_publish < interval:
-        return None
-    _last_publish = now
     try:
+        redis = _redis()
+        if _last_publish is not None and now - _last_publish < interval and not redis.delete(PUBLISH_NOW_KEY):
+            return None
+        _last_publish = now
         return publish_relays(now)
     except RedisError as exc:
         logger.warning('monitoring_publish_failed', extra={'error': str(exc)})

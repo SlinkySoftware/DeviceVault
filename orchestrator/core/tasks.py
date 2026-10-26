@@ -4,6 +4,7 @@ import logging
 
 from devicevault.celery import app
 from devicevault_protocol.jobs import JOB_EVENT_TASK
+from devicevault_protocol.monitoring import MONITORING_EVENT_TASK
 from devicevault_protocol.push import PUSH_EVENT_TASK
 from devicevault_protocol.registration import WORKER_EVENT_TASK
 
@@ -40,6 +41,17 @@ def push_event(envelope: dict) -> None:
     try:
         handle_push_event(envelope)
     except PushEventRejected:
+        pass
+
+
+@app.task(name=MONITORING_EVENT_TASK, ignore_result=True)
+def monitoring_event(envelope: dict) -> None:
+    from monitoring.relay import EventRejected as MonitoringEventRejected
+    from monitoring.relay import handle_monitoring_event
+
+    try:
+        handle_monitoring_event(envelope)
+    except MonitoringEventRejected:
         pass
 
 

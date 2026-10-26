@@ -395,6 +395,56 @@ or lower the host's unprivileged port start
 redirect needs no conntrack helper: replies come from the receiver's own ports, which
 host networking leaves untranslated.
 
+### Monitoring relay
+
+Zabbix polls each device's backup status (`/api/monitoring/device/?ip=...`) from the
+server or proxy that monitors the device. Proxies in device zones usually cannot reach
+the orchestrator, so a receiver in the same zone can answer for it: its **monitoring
+relay** is an HTTPS listener serving the device snapshots the orchestrator publishes to
+Redis (signed, every `DV_MONITORING_PUBLISH_SECONDS`). The relay never touches the
+database, and answers exactly as the orchestrator's own endpoint does.
+
+1. Create a service account (Admin Settings > Service accounts), give its group `view`
+   on the device groups Zabbix should see, and create a token with the `monitoring`
+   scope. Limit the token's networks to the Zabbix proxies' addresses. Every receiver
+   with the relay enabled accepts every such token.
+2. On a receiver in each proxy zone (one that is already there for pushes, or a new one
+   used only as a relay: SCP/SFTP and TFTP may stay off), open **Receiver settings**,
+   enable **Monitoring endpoint** and keep or change the port (TCP 8443). It listens on
+   the receiver's listen address. The port opens only while the relay is enabled.
+3. Allow **Zabbix proxy -> receiver, TCP 8443** (or your port) through the zone's
+   firewall, and nothing else to that port. Nothing flows from DeviceVault to Zabbix.
+4. Point Zabbix at `https://<receiver>:8443` (the Workers page shows the URL; `/device/`
+   and `/api/monitoring/device/` both work), with `Authorization: Bearer <token>`.
+
+**Certificate.** The relay generates a self-signed TLS certificate on first start and
+keeps it in the `state` volume beside its identity and SSH host key. Zabbix HTTP agent
+items can verify a certificate against a CA but cannot pin one, so turn **Verify peer**
+off. The certificate's SHA-256 fingerprint is shown on the Workers page and logged at
+start (`receiver_relay_certificate`), to compare by hand, e.g.
+`openssl s_client -connect <receiver>:8443 </dev/null | openssl x509 -noout -fingerprint -sha256`.
+Traffic is encrypted, but the relay is not authenticated to the proxy; what crosses is a
+token limited to the `monitoring` scope and the proxies' networks, and read-only status.
+
+**Behaviour.**
+- A token that is malformed, unknown, revoked, expired, of an inactive account or used
+  from outside its networks gets the same 401. Refusals are audited as `token.refused`
+  naming the receiver (at most once a minute per address), and a token's first use from
+  each address as `token.use`.
+- Each token is rate-limited by each relay on its own (`DV_API_TOKEN_RATE`), answering 429.
+- With no snapshot younger than three publish intervals the relay answers
+  503 `{"error": "stale"}`, so a stopped publisher shows in Zabbix rather than ageing
+  quietly. Data can be one publish interval plus one poll interval old.
+- Receivers check each snapshot against the orchestrator key they pinned and its hash;
+  one that fails is ignored (the previous is kept) and audited as
+  `monitoring.snapshot_rejected`.
+- Creating or revoking a monitoring token, or changing or deleting a service account,
+  re-sends receivers their token list at once and publishes the snapshots at the next
+  scheduler tick. A token that expires is refused by the relay on its own; the scheduler
+  leader re-sends the list too.
+- The Workers page shows, per relay, its URL, certificate fingerprint, the age of the
+  snapshots it holds, and its request, refusal and throttled counts since it started.
+
 ## 5. Flower
 
 Flower shows live workers, queues and tasks. Register each Flower under
@@ -566,7 +616,7 @@ secrets). The file takes precedence.
 | `DV_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in, used or not |
 | `DV_LOGIN_MAX_FAILURES` / `DV_LOGIN_LOCKOUT_MIN` | `5` / `15` | Failed sign-ins (per username, and per client address) within the window that lock it out for the window |
 | `DV_API_TOKEN_MAX_DAYS` | `365` | The longest expiry an API token may have; new tokens default to 90 days |
-| `DV_API_TOKEN_RATE` | `600/min` | Requests per API token (`<n>/sec`, `/min` or `/hour`), counted in Redis across every node; over it a token gets 429 |
+| `DV_API_TOKEN_RATE` | `600/min` | Requests per API token (`<n>/sec`, `/min` or `/hour`), counted in Redis across every node; over it a token gets 429. Receiver monitoring relays get it in their assignment and count it each on their own |
 | `DV_API_WORKERS` / `DV_API_TIMEOUT` | `3` / `90` | gunicorn workers and request timeout (seconds) |
 | `DV_SIGNING_KEY` | required | Ed25519 key signing everything sent to workers (`generate_keys`) |
 | `DV_DATA_KEYS` | required | AES-256 key ring for secrets at rest (`generate_keys`) |
@@ -603,10 +653,11 @@ secrets). The file takes precedence.
 | `DV_REDIS_URL` | `redis://localhost:6379/0` | Redis |
 | `DV_WORKER_NAME` | `receiver` | Display name |
 | `DV_LOG_LEVEL` | `INFO` | |
-| `DV_STATE_DIR` | `/var/lib/devicevault` | Identity, SSH host key and uploads in progress |
+| `DV_STATE_DIR` | `/var/lib/devicevault` | Identity, SSH host key, relay TLS certificate and uploads in progress |
 | `DV_WORKER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat interval |
 
-Everything else (protocols, ports, login, size limit) is set per receiver in the UI.
+Everything else (protocols, ports, login, size limit, the monitoring relay) is set per
+receiver in the UI; the relay's rate limit is the orchestrator's `DV_API_TOKEN_RATE`.
 
 ## Known limitations
 

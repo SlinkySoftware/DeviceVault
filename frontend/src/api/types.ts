@@ -713,6 +713,28 @@ export interface ReceiverRuntime {
   /** Push-enabled devices it accepts. */
   devices: number
   listeners: { ssh?: ListenerStatus; tftp?: ListenerStatus }
+  /** The monitoring relay (absent from receivers older than it). */
+  monitoring?: RelayStatus
+}
+
+/** A device snapshot a receiver's relay has loaded, per owner (service account id). */
+export interface RelaySnapshot {
+  generation: string
+  published_at: IsoDateTime
+  devices: number
+  stale: boolean
+}
+
+/** What a receiver's monitoring relay reports; counts are since the receiver started. */
+export interface RelayStatus extends ListenerStatus {
+  /** SHA-256 of its self-signed TLS certificate, colon-separated hex. */
+  certificate_fingerprint: string
+  /** Relay tokens it accepts. */
+  tokens: number
+  snapshots: Record<string, RelaySnapshot>
+  requests: number
+  refused: number
+  throttled: number
 }
 
 /** One receiver's settings; the password is write-only. */
@@ -727,6 +749,9 @@ export interface ReceiverSettings {
   ssh_authorized_keys: string
   tftp_enabled: boolean
   tftp_port: number
+  /** Answer Zabbix proxies' device requests over HTTPS on the listen address. */
+  monitoring_enabled: boolean
+  monitoring_port: number
   updated_at: IsoDateTime
 }
 
@@ -741,6 +766,8 @@ export interface ReceiverSettingsWrite {
   ssh_authorized_keys: string
   tftp_enabled: boolean
   tftp_port: number
+  monitoring_enabled: boolean
+  monitoring_port: number
 }
 
 export type PushRejectionReason =

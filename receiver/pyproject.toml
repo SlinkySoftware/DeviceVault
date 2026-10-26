@@ -5,6 +5,7 @@ description = "DeviceVault push receiver: accepts backups devices upload over SC
 requires-python = ">=3.14,<3.15"
 license = "GPL-3.0-or-later"
 dependencies = [
+    "aiohttp>=3.12,<4",
     "asyncssh>=2.21,<3",
     "celery>=5.6.3,<5.7",
     "devicevault-protocol",

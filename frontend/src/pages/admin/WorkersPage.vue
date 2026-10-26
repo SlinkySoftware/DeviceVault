@@ -65,11 +65,22 @@
                 <q-badge :color="listener.color" :outline="!listener.listening" :label="listener.label" />
                 <q-tooltip v-if="listener.error">{{ listener.error }}</q-tooltip>
               </template>
-              <span v-if="listeners(props.row).length === 0" class="text-grey">Listening for nothing</span>
+              <template v-if="enabledRelay(props.row)">
+                <q-badge
+                  :color="enabledRelay(props.row)!.error ? 'negative' : 'positive'"
+                  :outline="!enabledRelay(props.row)!.listening"
+                  :label="`Monitoring :${enabledRelay(props.row)!.port}${enabledRelay(props.row)!.error ? ' failed' : ''}`"
+                />
+                <q-tooltip v-if="enabledRelay(props.row)!.error">{{ enabledRelay(props.row)!.error }}</q-tooltip>
+              </template>
+              <span v-if="listeners(props.row).length === 0 && !enabledRelay(props.row)" class="text-grey">
+                Listening for nothing
+              </span>
             </div>
             <div v-if="props.row.runtime.receiver" class="text-caption text-grey q-mt-xs">
               accepts {{ props.row.runtime.receiver.devices }} device{{ props.row.runtime.receiver.devices === 1 ? '' : 's' }}
             </div>
+            <RelayStatusCell v-if="enabledRelay(props.row)" :relay="enabledRelay(props.row)!" :host="props.row.hostname" />
           </div>
           <div v-else-if="props.row.status === 'approved'">
             <div class="text-weight-medium">{{ roleLabel(props.row.role) }}</div>
@@ -149,12 +160,14 @@ import type { OrchestratorIdentity, Worker, WorkerStatus } from '@/api/types'
 import PageCard from '@/components/PageCard.vue'
 import PushRejectionsDialog from '@/components/PushRejectionsDialog.vue'
 import ReceiverSettingsDialog from '@/components/ReceiverSettingsDialog.vue'
+import RelayStatusCell from '@/components/RelayStatusCell.vue'
 import TimeCell from '@/components/TimeCell.vue'
 import WorkerAssignmentDialog from '@/components/WorkerAssignmentDialog.vue'
 import { useNotify } from '@/composables/useNotify'
 import { usePolling } from '@/composables/usePolling'
 import { useSettingsStore } from '@/stores/settings'
 import { pushProtocolLabel } from '@/utils/format'
+import { enabledRelay } from '@/utils/relay'
 
 const STATUS_COLORS: Record<WorkerStatus, string> = { pending: 'warning', approved: 'positive', revoked: 'grey' }
 const ROLE_LABELS: Record<string, string> = { collector: 'Collector', storage: 'Storage', receiver: 'Push receiver' }

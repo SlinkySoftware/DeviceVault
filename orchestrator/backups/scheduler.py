@@ -123,6 +123,7 @@ def apply_retention(now: datetime, leading: Callable[[], bool] | None = None) ->
 def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> None:
     # Imported here: the monitoring figures read the scheduler's lease key.
     from monitoring.metrics import note_tick
+    from monitoring.relay import expire_relay_tokens
     from monitoring.snapshots import publish_if_due
 
     now = now or timezone.now()
@@ -131,6 +132,7 @@ def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None)
     prune_sessions(now)
     deletions = apply_retention(now, leading)
     indexing = catch_up(now)
+    expire_relay_tokens(now)
     publish_if_due(now)
     note_tick(now)
     if created or expired or deletions or indexing:

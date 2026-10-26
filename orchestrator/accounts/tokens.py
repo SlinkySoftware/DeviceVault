@@ -42,7 +42,6 @@ REFUSAL_AUDIT_SECONDS = 60
 DEFAULT_VIEW_SCOPES = (ApiToken.API,)
 
 _PREFIX_ALPHABET = string.ascii_lowercase + string.digits
-_PERIODS = {'sec': 1, 'min': 60, 'hour': 3600}
 
 
 def _redis() -> Redis:
@@ -54,9 +53,8 @@ def rate() -> tuple[int, int]:
     """``DV_API_TOKEN_RATE`` as (requests, seconds)."""
     value = settings.DEVICEVAULT_API_TOKEN_RATE
     try:
-        count, period = value.split('/')
-        return int(count), _PERIODS[period]
-    except ValueError, KeyError:
+        return monitoring.parse_rate(value)
+    except ValueError:
         raise ImproperlyConfigured(f'DV_API_TOKEN_RATE must look like 600/min, not {value!r}') from None
 
 
@@ -167,20 +165,22 @@ def over_rate(token: ApiToken) -> bool:
     return count > limit
 
 
-def touch(request, token: ApiToken, address: str | None) -> None:
-    """Note a use: last used (at most once a minute), and audit the first use from a new address."""
-    now = timezone.now()
+def touch(request, token: ApiToken, address: str | None, *, receiver: str = '', at=None) -> None:
+    """Note a use: last used (at most once a minute), and audit the first use from a new address.
+
+    ``request`` is None for uses a receiver's relay reports (``receiver`` names it, ``at`` is when).
+    """
+    now = at or timezone.now()
+    if token.last_used_at is not None and now < token.last_used_at:
+        now = token.last_used_at  # a late report never moves last use backwards
     changes = {}
     if address and address not in token.addresses:
         token.addresses = [*token.addresses, address][-MAX_ADDRESSES:]
         changes['addresses'] = token.addresses
-        record(
-            _plain(request),
-            'token.use',
-            resource=token.prefix,
-            actor=token.user,
-            details={'token': token.prefix, 'name': token.name, 'address': address},
-        )
+        details = {'token': token.prefix, 'name': token.name, 'address': address}
+        if receiver:
+            details['receiver'] = receiver
+        record(_plain(request), 'token.use', resource=token.prefix, actor=token.user, details=details)
     stale = token.last_used_at is None or now - token.last_used_at > timedelta(seconds=TOUCH_SECONDS)
     if changes or stale or token.last_used_address != address:
         token.last_used_at, token.last_used_address = now, address
@@ -227,6 +227,22 @@ def revoke(request, token: ApiToken) -> None:
     token.revoked_by = request.user if request.user.is_authenticated else None
     token.save(update_fields=['revoked_at', 'revoked_by'])
     record(request, 'token.revoke', resource=token.prefix, details=snapshot(token))
+    if is_relay_token(token):
+        relays_changed()
+
+
+def is_relay_token(token: ApiToken) -> bool:
+    """A ``monitoring`` token of a service account: receiver relays accept it (``monitoring.relay``)."""
+    from accounts.login import is_service_account
+
+    return ApiToken.MONITORING in token.scopes and is_service_account(token.user)
+
+
+def relays_changed() -> None:
+    """The relay tokens or their owners changed: tell receivers, and publish the snapshots soon."""
+    from monitoring.relay import relay_tokens_changed
+
+    relay_tokens_changed()
 
 
 def live_tokens(user):

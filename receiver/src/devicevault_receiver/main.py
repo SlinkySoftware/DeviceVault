@@ -13,6 +13,7 @@ from devicevault_protocol.env import env_str
 from devicevault_protocol.identity import state_dir
 from devicevault_protocol.logs import get_logger
 
+from . import certificate as tls
 from . import hostkey
 from .agent import ReceiverAgent
 from .app import app, bus, identity, redis_client
@@ -34,6 +35,7 @@ def main() -> None:
         events=events,
         host_key=hostkey.load_or_create(),
         spool_dir=spool_dir,
+        certificate=tls.load_or_create(),
     )
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -48,6 +50,7 @@ def main() -> None:
     )
     agent.log_identity()
     logger.warning('receiver_host_key', extra={'fingerprint': hostkey.fingerprint(receiver.host_key)})
+    logger.warning('receiver_relay_certificate', extra={'fingerprint': receiver.load_certificate().fingerprint})
 
     stopping = asyncio.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):

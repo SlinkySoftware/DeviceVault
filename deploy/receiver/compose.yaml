@@ -1,4 +1,5 @@
-# DeviceVault push receiver: devices upload their backups to it (SCP/SFTP, TFTP).
+# DeviceVault push receiver: devices upload their backups to it (SCP/SFTP, TFTP),
+# and Zabbix proxies in its zone can poll its monitoring relay (HTTPS).
 #
 #   cp receiver.env.example receiver.env   # then edit
 #   docker compose -p dv-receiver up -d
@@ -6,12 +7,13 @@
 # Like a worker it connects out to RabbitMQ and Redis only, registers with the
 # orchestrator and waits for an administrator to approve it as a receiver
 # (Admin Settings > Workers). It listens on nothing until its settings there
-# enable a protocol.
+# enable a protocol or the monitoring relay (TCP 8443 by default).
 #
 # Host networking is required, not a convenience: devices are matched by
 # their source address, which Docker's port publishing can replace, and a
 # listener's port is opened only while its assignment enables it. Firewall
-# the host so only device networks reach the listening ports.
+# the host so only device networks reach the push ports, and only the zone's
+# Zabbix proxies reach the relay port.
 
 name: devicevault-receiver
 
@@ -22,8 +24,9 @@ services:
     network_mode: host
     env_file: [receiver.env]
     volumes:
-      # Identity, SSH host key, and uploads in progress. Keep it: a new host key
-      # makes devices that pinned the old one refuse to connect.
+      # Identity, SSH host key, the relay's TLS certificate, and uploads in
+      # progress. Keep it: a new host key makes devices that pinned the old one
+      # refuse to connect.
       - state:/var/lib/devicevault
     stop_grace_period: 60s
 

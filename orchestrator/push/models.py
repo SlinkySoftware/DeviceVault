@@ -6,6 +6,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from core.fields import EncryptedJSONField
+from devicevault_protocol.monitoring import DEFAULT_RELAY_PORT
 from devicevault_protocol.push import DEFAULT_MAX_FILE_SIZE, DEFAULT_SSH_PORT, DEFAULT_TFTP_PORT, PROTOCOLS, REASONS
 
 PORT_VALIDATORS = [MinValueValidator(1), MaxValueValidator(65535)]
@@ -32,6 +33,10 @@ class ReceiverSettings(models.Model):
         default=False, help_text='Accept TFTP uploads (unauthenticated) from devices set to push over TFTP'
     )
     tftp_port = models.PositiveIntegerField(default=DEFAULT_TFTP_PORT, validators=PORT_VALIDATORS)
+    monitoring_enabled = models.BooleanField(
+        default=False, help_text='Answer monitoring requests (HTTPS) from the published device snapshots'
+    )
+    monitoring_port = models.PositiveIntegerField(default=DEFAULT_RELAY_PORT, validators=PORT_VALIDATORS)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -2,11 +2,13 @@
 
 Every receiver accepts every push-enabled device, so its assignment lists them
 all; any change to that list, or to a receiver's settings, sends receivers a
-new assignment version.
+new assignment version. The same goes for the tokens their monitoring relays
+accept (``monitoring.relay``).
 """
 
 from typing import Any
 
+from django.conf import settings as django_settings
 from django.db import transaction
 
 from core import keys
@@ -36,6 +38,22 @@ def push_devices() -> list[dict[str, Any]]:
     ]
 
 
+def relay_tokens() -> list[dict[str, Any]]:
+    """The tokens receiver relays accept: digests only, never a secret."""
+    from monitoring.snapshots import relay_tokens as live_relay_tokens
+
+    return [
+        {
+            'prefix': token.prefix,
+            'digest': token.digest,
+            'owner': token.user_id,
+            'expires_at': token.expires_at.isoformat(),
+            'allowed_networks': list(token.allowed_networks or []),
+        }
+        for token in live_relay_tokens()
+    ]
+
+
 def receiver_assignment(worker: Worker) -> dict[str, Any]:
     """The ``receiver`` section of an approved receiver's assignment."""
     settings = settings_for(worker)
@@ -51,6 +69,12 @@ def receiver_assignment(worker: Worker) -> dict[str, Any]:
         'max_file_size': settings.max_file_size,
         'ssh': ssh,
         'tftp': {'enabled': settings.tftp_enabled, 'port': settings.tftp_port},
+        'monitoring': {
+            'enabled': settings.monitoring_enabled,
+            'port': settings.monitoring_port,
+            'rate': django_settings.DEVICEVAULT_API_TOKEN_RATE,
+            'tokens': relay_tokens() if settings.monitoring_enabled else [],
+        },
         'devices': push_devices(),
         'encryption': keys.vault_public(),
     }
@@ -65,8 +89,11 @@ def needs_update(worker: Worker) -> bool:
     return reported.get('vault_kid') != (vault['kid'] if vault else None)
 
 
-def bump_receivers() -> None:
-    """Send every receiver a new assignment once the current transaction commits."""
+def receiver_inputs_changed() -> None:
+    """Something every receiver's assignment holds changed: push-enabled devices, or relay tokens and owners.
+
+    Sends every receiver a new assignment once the current transaction commits.
+    """
     from core.workers import update_assignment
 
     def bump():

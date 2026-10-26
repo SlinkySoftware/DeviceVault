@@ -125,6 +125,8 @@ def _create_token(request, owner) -> response.Response:
     with transaction.atomic():
         token = form.save()
         record(request, 'token.create', resource=token.prefix, details=tokens.snapshot(token))
+        if tokens.is_relay_token(token):
+            tokens.relays_changed()
     return response.Response({**TokenSerializer(token).data, 'token': token.raw}, status=status.HTTP_201_CREATED)
 
 
@@ -281,11 +283,14 @@ class ServiceAccountViewSet(SessionOnly, viewsets.ModelViewSet):
             resource=user.username,
             details={'before': before, 'after': account_snapshot(user)},
         )
+        # Its active flag decides whether relays accept its tokens, its groups what its snapshot holds.
+        tokens.relays_changed()
 
     def perform_destroy(self, instance):
         before = account_snapshot(instance)
         instance.delete()
         record(self.request, 'service_account.delete', resource=before['username'], details=before)
+        tokens.relays_changed()
 
     @decorators.action(detail=True, methods=['get', 'post'])
     def tokens(self, request, pk=None):
