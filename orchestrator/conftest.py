@@ -165,11 +165,13 @@ def admin_client(make_user, client_for):
 
 @pytest.fixture(autouse=True)
 def token_redis(monkeypatch):
-    """The Redis that API token rate limits and refusal audits use."""
+    """The Redis that API token rate limits, refusal audits and the monitoring figures and snapshots use."""
     import fakeredis
 
     server = fakeredis.FakeRedis()
-    monkeypatch.setattr('accounts.tokens._redis', lambda: server)
+    for module in ('accounts.tokens', 'monitoring.metrics', 'monitoring.snapshots'):
+        monkeypatch.setattr(f'{module}._redis', lambda: server)
+    monkeypatch.setattr('monitoring.snapshots._last_publish', None)
     return server
 
 

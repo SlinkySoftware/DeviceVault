@@ -1,7 +1,7 @@
 """How fresh each device's backups are, judged by its own schedule.
 
-A scheduled device has an expected interval: the gap between its schedule's
-next two runs. It is overdue once its latest successful backup (the newest
+A scheduled device has an expected interval: the longest gap between its
+schedule's next few runs. It is overdue once its latest successful backup (the newest
 ``stored`` job) is older than that interval times ``DV_STALE_FACTOR``; a device
 never backed up is overdue once it is itself that old. Disabled and inactive
 devices are never overdue. Devices with no enabled schedule (push-only or
@@ -18,12 +18,15 @@ from django.utils import timezone
 from backups.models import BackupJob
 from policies.models import BackupSchedule
 
+# Gaps looked at to find a schedule's interval: enough to span a week of daily runs.
+INTERVAL_RUNS = 8
+
 
 @dataclass(frozen=True)
 class Freshness:
     """One device's freshness at a moment."""
 
-    # Gap between the schedule's next two runs; None without an enabled schedule.
+    # Longest gap between the schedule's next runs; None without an enabled schedule.
     expected_interval: timedelta | None
     # When the newest stored backup finished; None if never backed up.
     last_success: datetime | None
@@ -41,11 +44,17 @@ def stale_factor() -> float:
 
 
 def expected_interval(schedule: BackupSchedule | None, now: datetime | None = None) -> timedelta | None:
-    """The gap between ``schedule``'s next two runs after ``now``; None for no schedule or a disabled one."""
+    """The longest gap between ``schedule``'s next few runs after ``now``; None for no schedule or a disabled one.
+
+    The longest rather than the next gap, so an uneven schedule (weekdays only) is
+    not judged by its shortest wait: Friday's backup is still fresh on Sunday.
+    """
     if schedule is None or not schedule.enabled:
         return None
-    first = schedule.next_run_after(now or timezone.now())
-    return schedule.next_run_after(first) - first
+    runs = [schedule.next_run_after(now or timezone.now())]
+    for _ in range(INTERVAL_RUNS):
+        runs.append(schedule.next_run_after(runs[-1]))
+    return max(later - earlier for earlier, later in zip(runs, runs[1:], strict=False))
 
 
 def device_freshness(devices: QuerySet, now: datetime | None = None) -> dict[int, Freshness]:

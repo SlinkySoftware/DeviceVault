@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from backups.freshness import device_freshness, expected_interval, stale_factor
+from backups.freshness import INTERVAL_RUNS, device_freshness, expected_interval, stale_factor
 from backups.models import BackupJob
 from devices.models import Device
 from policies.models import BackupSchedule
@@ -52,8 +52,15 @@ def job(dev, state, finished_at):
         ({'schedule_type': 'custom_cron', 'cron_expression': '*/15 * * * *'}, timedelta(minutes=15)),
     ],
 )
-def test_expected_interval_is_the_gap_between_the_next_two_runs(db, fields, interval):
+def test_expected_interval_is_the_gap_between_runs(db, fields, interval):
     assert expected_interval(schedule(**fields), NOW) == interval
+
+
+def test_an_uneven_schedule_uses_its_longest_gap(db):
+    # Weekdays only: Friday to Monday is the longest wait, whatever day it is now.
+    weekdays = schedule(schedule_type='custom_cron', cron_expression='0 2 * * 1-5')
+
+    assert expected_interval(weekdays, NOW) == timedelta(days=3)
 
 
 def test_no_or_a_disabled_schedule_has_no_interval(db):
@@ -187,4 +194,4 @@ def test_many_devices_take_two_queries_and_one_interval_per_schedule(setup, djan
         result = device_freshness(Device.objects.all(), NOW)
 
     assert len(result) == Device.objects.count()
-    assert sorted(calls) == sorted([s.pk for s in schedules] * 2)
+    assert sorted(calls) == sorted([s.pk for s in schedules] * (INTERVAL_RUNS + 1))

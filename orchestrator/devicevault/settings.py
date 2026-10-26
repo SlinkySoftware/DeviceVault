@@ -185,6 +185,10 @@ DEVICEVAULT_RETENTION_INTERVAL_MIN = env_int('DV_RETENTION_INTERVAL_MIN', 60, mi
 # A scheduled device is overdue once its latest successful backup is older than its schedule's
 # interval times this (backups.freshness).
 DEVICEVAULT_STALE_FACTOR = env_float('DV_STALE_FACTOR', 1.5, minimum=1.0)
+# Monitoring (monitoring app): how long computed figures are cached, and how often the scheduler
+# leader publishes the device snapshots receiver relays serve.
+DEVICEVAULT_MONITORING_CACHE_SECONDS = env_int('DV_MONITORING_CACHE_SECONDS', 60, minimum=5)
+DEVICEVAULT_MONITORING_PUBLISH_SECONDS = env_int('DV_MONITORING_PUBLISH_SECONDS', 900, minimum=60)
 # Config search (search app): indexes decrypted configuration in the database, so it is opt-in.
 DEVICEVAULT_CONFIG_SEARCH = env_bool('DV_CONFIG_SEARCH', False)
 # Ed25519 key that signs everything sent to workers; see core.signing.

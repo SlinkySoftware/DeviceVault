@@ -8,7 +8,6 @@ and refusals at most once a minute per address, so polling does not flood the
 audit log.
 """
 
-import hashlib
 import ipaddress
 import logging
 import secrets
@@ -27,11 +26,12 @@ from redis.exceptions import RedisError
 from accounts.models import ApiToken
 from audit.log import record
 from audit.models import AuditLog
+from devicevault_protocol import monitoring
 
 logger = logging.getLogger('devicevault.tokens')
 
-PREFIX = 'dvt'
-PREFIX_LENGTH = 8
+PREFIX = monitoring.TOKEN_PREFIX
+PREFIX_LENGTH = monitoring.TOKEN_PREFIX_LENGTH
 DEFAULT_DAYS = 90
 MAX_LIVE_PER_USER = 20
 MAX_NETWORKS = 20
@@ -60,8 +60,8 @@ def rate() -> tuple[int, int]:
         raise ImproperlyConfigured(f'DV_API_TOKEN_RATE must look like 600/min, not {value!r}') from None
 
 
-def digest(secret: str) -> str:
-    return hashlib.sha256(secret.encode()).hexdigest()
+digest = monitoring.token_digest
+parse = monitoring.parse_token
 
 
 def issue(user, *, name: str, scopes, expires_at, allowed_networks=(), created_by=None) -> tuple[ApiToken, str]:
@@ -90,14 +90,6 @@ def normalise_scopes(scopes) -> list[str]:
     if ApiToken.MONITORING_PLATFORM in wanted:
         wanted.add(ApiToken.MONITORING)
     return [scope for scope in ApiToken.SCOPES if scope in wanted]
-
-
-def parse(raw: str) -> tuple[str, str] | None:
-    """(prefix, secret) of a well-formed token string, else None."""
-    parts = raw.split('_', 2)
-    if len(parts) != 3 or parts[0] != PREFIX or len(parts[1]) != PREFIX_LENGTH or not parts[2]:
-        return None
-    return parts[1], parts[2]
 
 
 def is_live(token: ApiToken, now=None) -> bool:
