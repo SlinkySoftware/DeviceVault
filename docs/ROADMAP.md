@@ -34,6 +34,9 @@ Each item has an **Impact** (what it buys an enterprise) and an **Effort** estim
 | **M** | One to two weeks. A new model and API surface, a driver, or a worker task. |
 | **L** | A full phase (several weeks). New component, new data pipeline or a cross-cutting design. |
 
+Each quick win also has a **Status**: blank for an idea, `In progress: phase N` while it is being built, and
+`Complete: PR #N (merge commit)` once merged. Keep it current (see section 7).
+
 Quick wins are ordered by **value ÷ effort**, best first, so reading from the top and stopping is a
 sensible strategy. Detailed changes are grouped by theme and ordered by strategic value.
 
@@ -47,22 +50,22 @@ only.
 
 Small, self-contained, and each one removes a reason for an evaluator to say "not yet".
 
-| # | Item | Effort | Impact |
-|---|---|---|---|
-| Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | **Scheduled: phase 14.** Storage stops growing without bound. |
-| Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M | Failures and changes reach people instead of waiting to be noticed. |
-| Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | **Scheduled: phase 15.** "What changed?" answered at a glance, with added/removed line counts. |
-| Q4 | [Zabbix and Prometheus monitoring](#monitoring-integration-zabbix-and-prometheus) | S-M | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
-| Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S | The classic silent failure: a device that stopped backing up weeks ago. |
-| Q6 | [Config search](#q6-config-search) | S-M | "Which devices still have SNMP community `public`?" in seconds. |
-| Q7 | [Bulk device import and export](#q7-bulk-device-import-and-export) | S | Onboarding hundreds of devices from a CSV instead of a form. |
-| Q8 | [Pin, label and annotate backups](#q8-pin-label-and-annotate-backups) | S | Mark known-good versions, exempt them from retention, record why. |
-| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S | Automation and scripting without borrowing a browser session. |
-| Q10 | [Audit log export and syslog forwarding](#q10-audit-log-export-and-syslog-forwarding) | S | Satisfies "send it to the SIEM" without a project. |
-| Q11 | [Add more built-in vendor drivers](#q11-more-built-in-vendor-drivers) | S each | Each Netmiko-based driver is a few dozen lines; covers a new customer base. |
-| Q12 | [Backup verification probes](#q12-backup-verification-probes) | S | Reject empty, truncated or error-page "backups" before they replace a good one. |
-| Q13 | [Dashboard upgrades](#q13-dashboard-upgrades) | S | Success-rate trend, oldest backup per group, top failing devices. |
-| Q14 | [Scheduled digest report](#q14-scheduled-digest-report) | S | A weekly "state of the estate" email for managers. |
+| # | Item | Effort | Status | Impact |
+|---|---|---|---|---|
+| Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | Complete: PR #58 (`5502de9`), phase 14 | Storage stops growing without bound. |
+| Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M |  | Failures and changes reach people instead of waiting to be noticed. |
+| Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | Complete: PR #59 (`0930972`), phase 15 | "What changed?" answered at a glance, with added/removed line counts. |
+| Q4 | [Zabbix and Prometheus monitoring](#monitoring-integration-zabbix-and-prometheus) | S-M |  | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
+| Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S |  | The classic silent failure: a device that stopped backing up weeks ago. |
+| Q6 | [Config search](#q6-config-search) | S-M | Complete: PRs #61, #62 (`2b4435c`, `d6b4250`), phases 16-17 | "Which devices still have SNMP community `public`?" in seconds. |
+| Q7 | [Bulk device import and export](#q7-bulk-device-import-and-export) | S |  | Onboarding hundreds of devices from a CSV instead of a form. |
+| Q8 | [Pin, label and annotate backups](#q8-pin-label-and-annotate-backups) | S | Complete: PR #65 (`159e163`), phase 19 | Mark known-good versions, exempt them from retention, record why. |
+| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S |  | Automation and scripting without borrowing a browser session. |
+| Q10 | [Audit log export and syslog forwarding](#q10-audit-log-export-and-syslog-forwarding) | S |  | Satisfies "send it to the SIEM" without a project. |
+| Q11 | [Add more built-in vendor drivers](#q11-more-built-in-vendor-drivers) | S each |  | Each Netmiko-based driver is a few dozen lines; covers a new customer base. |
+| Q12 | [Backup verification probes](#q12-backup-verification-probes) | S |  | Reject empty, truncated or error-page "backups" before they replace a good one. |
+| Q13 | [Dashboard upgrades](#q13-dashboard-upgrades) | S | Complete: PR #64 (`63298de`), phase 18 | Success-rate trend, oldest backup per group, top failing devices. |
+| Q14 | [Scheduled digest report](#q14-scheduled-digest-report) | S |  | A weekly "state of the estate" email for managers. |
 
 ### Q1. Retention enforcement
 Scheduled as phase 14 (`feat/retention`); see ARCHITECTURE.md section 10 and decisions 30-31.
@@ -268,6 +271,41 @@ against expected interval once Q5 does, and failure reasons from verification pr
 
 Larger pieces of work, in rough strategic order within each theme. Several unlock others, so the final
 section proposes a sequence.
+
+Status works as in the quick wins table above.
+
+| # | Item | Status | Impact |
+|---|---|---|---|
+| D1 | [Semantic, structured diff and change timeline](#d1-semantic-structured-diff-and-change-timeline) |  | Turns a wall of text into answers: "an ACL was edited on interface Gi0/1", not "line 412 changed". |
+| D2 | [Compliance and policy checking](#d2-compliance-and-policy-checking) |  | The feature that moves DeviceVault from "backup tool" to "compliance evidence source". |
+| D3 | [Golden config and drift detection](#d3-golden-config-and-drift-detection) |  | "Is this device what we intended?" |
+| D4 | [Unauthorized-change detection with change-ticket correlation](#d4-unauthorized-change-detection-with-change-ticket-correlation) |  | Answers "who changed it and was it approved?", the question every post-incident review asks. |
+| D5 | [Event-driven backups](#d5-event-driven-backups) |  | Backups at the moment of change instead of at 02:00; far smaller recovery-point gaps. |
+| D6 | [Restore and push-back](#d6-restore-and-push-back) |  | Backup without restore is half a product. This is the most-requested feature in this category. |
+| D7 | [Disaster-recovery bundles and device replacement](#d7-disaster-recovery-bundles-and-device-replacement) |  | "A switch died at 2 a.m. and the replacement is in the box." |
+| D8 | [Integrations: CMDB, ticketing, source of truth and chat](#d8-integrations-cmdb-ticketing-source-of-truth-and-chat) |  | Enterprises will not maintain a second inventory. |
+| D9 | [Approval workflow (four-eyes)](#d9-approval-workflow-four-eyes) |  | Required by many regulated environments for sensitive actions. |
+| D10 | [Beyond configuration: firmware, licences, inventory, state](#d10-beyond-configuration-firmware-licences-inventory-state) |  | Network teams back up more than `running-config`. |
+| D11 | [Non-CLI collection methods](#d11-non-cli-collection-methods) |  | Many platforms (controllers, firewalls, SD-WAN, cloud) have no usable SSH CLI. |
+| D12 | [Jump hosts, bastions and network segments](#d12-jump-hosts-bastions-and-network-segments) |  | Real networks are segmented. Most customers will not open a flat route from one collector. |
+| D13 | [Discovery and onboarding](#d13-discovery-and-onboarding) |  | The inventory is wrong on day one. Discovery fixes it. |
+| D14 | [Secrets management integration](#d14-secrets-management-integration) |  | Many security teams forbid long-lived device passwords in an application database. |
+| D15 | [Tamper-evident audit and backup integrity](#d15-tamper-evident-audit-and-backup-integrity) |  | Auditors ask "how do I know this log or this backup was not altered?" |
+| D16 | [Key management and rotation tooling](#d16-key-management-and-rotation-tooling) |  | The key ring exists; operating it should not need a shell. |
+| D17 | [Authentication hardening](#d17-authentication-hardening) |  | Closes common security-questionnaire gaps. |
+| D18 | [Worker and receiver security tightening](#d18-worker-and-receiver-security-tightening) |  | Reduces blast radius, answers "what if a collector is compromised". |
+| D19 | [Multi-tenancy and delegated administration](#d19-multi-tenancy-and-delegated-administration) |  | MSPs, large holdings and carriers need strict separation; internal customers want self-service. |
+| D20 | [Scale-out scheduling and large estates](#d20-scale-out-scheduling-and-large-estates) |  | 10,000+ devices need predictable behaviour. |
+| D21 | [Backup storage efficiency](#d21-backup-storage-efficiency) |  | Most configs are 99.9% identical to yesterday's. |
+| D22 | [Multi-target replication and storage health](#d22-multi-target-replication-and-storage-health) |  | One copy is no copy. |
+| D23 | [Disaster recovery of DeviceVault itself](#d23-disaster-recovery-of-devicevault-itself) |  | The backup system must itself be recoverable. |
+| D24 | [Upgrades, versioning and fleet management of workers](#d24-upgrades-versioning-and-fleet-management-of-workers) |  | 20 collectors across 12 sites cannot be updated by hand. |
+| D25 | [Topology, relationships and impact](#d25-topology-relationships-and-impact) |  | Turns an inventory into a map. |
+| D26 | [Reports and evidence packs](#d26-reports-and-evidence-packs) |  | Audit season becomes a button. |
+| D27 | [Tags, custom fields and smart groups](#d27-tags-custom-fields-and-smart-groups) |  | Real inventories have dimensions beyond "device group": site, owner, criticality, lifecycle, PCI scope. |
+| D28 | [AI-assisted analysis (optional, off by default)](#d28-ai-assisted-analysis-optional-off-by-default) |  | Reduces the time between "something changed" and "I understand it". |
+| D29 | [Accessibility, localisation and theming](#d29-accessibility-localisation-and-theming) |  | Procurement checklists ask (WCAG 2.1 AA, languages, dark mode, corporate branding). |
+| D30 | [Monitoring suite: push transport, tracing and more platforms](#d30-monitoring-suite-push-transport-tracing-and-more-platforms) |  | Fits DeviceVault into whichever operations stack a customer runs, including restricted networks. |
 
 ### Theme A — Understanding changes
 
@@ -584,6 +622,7 @@ The order below keeps each step useful on its own and puts the foundations other
 ## 7. Keeping this document honest
 
 When an item is scheduled, give it a phase in ARCHITECTURE.md section 10 and a decision-log entry for any
-design choice, then change its entry here to a one-line pointer. When an item is rejected, move it to
+design choice, then change its entry here to a one-line pointer and set its Status to `In progress: phase N`; when the phase
+merges, set it to `Complete: PR #N (merge commit)`. When an item is rejected, move it to
 section 6 with the reason. Review the ranking whenever a real customer conversation changes the picture:
 the value estimates above are informed guesses, not measurements.
