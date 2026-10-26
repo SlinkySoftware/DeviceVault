@@ -36,7 +36,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   asyncio loop (`main`) running the listeners (`ssh`: asyncssh SCP/SFTP; `tftp`: write requests; both
   upload-only), `agent`
   (applies the assignment's `receiver` section, `config`), `ingest` (spool, encrypt, stage, report)
-  and `events` (signed `push.*` events, rate-limited refusals). Must not import Django.
+  and `events` (signed `push.*` and `monitoring.*` events, rate-limited refusals); `monitoring` the opt-in
+  HTTPS relay answering Zabbix proxies from the published device snapshots, with a self-signed certificate
+  (`certificate`) kept in the state volume. Must not import Django.
 - `orchestrator/`: Django project (`devicevault/` settings, urls, `celery.py` for
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
@@ -49,7 +51,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   `snapshots.py` their cache and the relay snapshots; `metrics_api.py` `/api/monitoring/`; `prometheus.py`),
   `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
   `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and
-  re-sends them when push-enabled devices change, `events.py` turns pushed files into jobs), `storage`
+  re-sends them when push-enabled devices or relay tokens change (`receiver_inputs_changed`), `events.py` turns
+  pushed files into jobs; `monitoring/relay.py` handles relays' events), `storage`
   (storage targets; `storage/service.py` sends their tasks). Settings
   are env-only; tests use `devicevault.test_settings`. `core/workers.py` is the worker
   registry (events, approval, assignments, collector and storage driver catalogues);
