@@ -229,6 +229,8 @@ class Device(models.Model):
         null=True, blank=True, help_text='When a global administrator purged its backups'
     )
     purge_requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    # A device never backed up is overdue once it is older than its expected interval (backups.freshness).
+    created_at = models.DateTimeField(auto_now_add=True, help_text='When the device was added')
 
     class Meta:
         constraints = [

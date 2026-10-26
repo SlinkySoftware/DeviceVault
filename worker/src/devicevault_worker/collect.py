@@ -12,6 +12,8 @@ from devicevault_protocol.jobs import (
     EVENT_FAILED,
     EVENT_RETRYING,
     EVENT_STARTED,
+    FAILURE_TIMEOUT,
+    FAILURE_UNKNOWN,
     STAGE_COLLECT,
     blob_key,
 )
@@ -20,7 +22,7 @@ from devicevault_protocol.trust import SignatureError, verified_payload
 from devicevault_worker import events
 from devicevault_worker.app import app, get_logger, redis_client
 from devicevault_worker.drivers import get_driver
-from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
+from devicevault_worker.drivers.base import CollectionLog, DriverError, PermanentError, Target, TransientError
 from devicevault_worker.payload import prepare, secret
 
 logger = get_logger('devicevault.worker.collect')
@@ -126,13 +128,14 @@ def collect(self, envelope: dict) -> None:
             log.warning(f'attempt {attempt} failed, retrying in {countdown}s: {exc}')
             events.send(job_id, EVENT_RETRYING, attempt=attempt, stage=STAGE_COLLECT, error=str(exc), log=log.entries)
             raise self.retry(exc=exc, countdown=countdown) from exc
-        _fail(job_id, attempt, f'{exc} (gave up after {attempt} attempts)', log)
+        _fail(job_id, attempt, f'{exc} (gave up after {attempt} attempts)', log, exc.reason)
     except SoftTimeLimitExceeded:
-        _fail(job_id, attempt, f'collection exceeded {SOFT_TIME_LIMIT}s', log)
+        _fail(job_id, attempt, f'collection exceeded {SOFT_TIME_LIMIT}s', log, FAILURE_TIMEOUT)
     except Exception as exc:  # PermanentError and anything unexpected
         if not isinstance(exc, PermanentError):
             logger.exception('collect_failed', extra={'job_id': job_id})
-        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log)
+        reason = exc.reason if isinstance(exc, DriverError) else FAILURE_UNKNOWN
+        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log, reason)
     finally:
         lock.release()
 
@@ -154,6 +157,6 @@ def _collect(job: dict[str, Any], log: CollectionLog) -> tuple[bytes, bool]:
     return content, driver_cls.is_binary
 
 
-def _fail(job_id: str, attempt: int, error: str, log: CollectionLog) -> None:
+def _fail(job_id: str, attempt: int, error: str, log: CollectionLog, reason: str) -> None:
     log.error(error)
-    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_COLLECT, error=error, log=log.entries)
+    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_COLLECT, error=error, reason=reason, log=log.entries)

@@ -27,7 +27,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   task and queue names, the job protocol (`jobs`), the Celery app factory, presence constants, `crypto`,
   and the runtime workers and receivers share: `identity` (persistent worker id and keys), `agent`
   (registration and assignments; subclasses `apply` them), `trust` (task signature checks), `blobs`
-  (chunked, streamed Redis staging) and `logs`. Shared by all sides; must not import Django.
+  (chunked, streamed Redis staging), `logs`, and `monitoring` (API token strings, the signed device snapshots
+  the orchestrator publishes for receiver relays, and the `device/` answer). Shared by all sides; must not import Django.
 - `worker/` (`devicevault_worker`): Celery app (`devicevault_worker.app`), collect and
   storage tasks, `drivers/` (collector drivers), `storage/` (storage drivers and tasks), `agent`
   (applies assignments as Celery queue consumers). Must not import Django (a test enforces it).
@@ -42,8 +43,10 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
   `api.py` sign-in, users and user groups; `provider_api.py` auth providers; `tokens.py` API tokens (bearer
   authentication, scopes: each view's `token_scopes`, default `('api',)`, `()` for session-only views; rate limits,
-  use and refusal audit); `token_api.py` token and service-account endpoints), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices` (`lifecycle.py` marks devices inactive, purges and deletes them),
-  `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
+  use and refusal audit); `token_api.py` token and service-account endpoints), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards, `freshness.py` expected intervals and overdue), `core`, `credentials`, `devices` (`lifecycle.py` marks devices inactive, purges and deletes them),
+  `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them; `catalogue.py`
+  every monitoring metric, read by the endpoints, Prometheus and the Zabbix generator; `metrics.py` the figures;
+  `snapshots.py` their cache and the relay snapshots; `metrics_api.py` `/api/monitoring/`; `prometheus.py`),
   `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
   `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and
   re-sends them when push-enabled devices change, `events.py` turns pushed files into jobs), `storage`

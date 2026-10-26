@@ -20,7 +20,7 @@
 from pathlib import Path
 
 from devicevault_protocol.bus import BusSettings
-from devicevault_protocol.env import ConfigError, env_bool, env_int, env_list, env_str
+from devicevault_protocol.env import ConfigError, env_bool, env_float, env_int, env_list, env_str
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(env_str('DV_DATA_DIR', str(BASE_DIR / 'var')))
@@ -182,6 +182,13 @@ DEVICEVAULT_COLLECT_TIMEOUT_SEC = env_int('DV_COLLECT_TIMEOUT_SEC', 120, minimum
 DEVICEVAULT_JOB_TIMEOUT_MIN = env_int('DV_JOB_TIMEOUT_MIN', 120, minimum=1)
 DEVICEVAULT_SCHEDULER_INTERVAL_SEC = env_int('DV_SCHEDULER_INTERVAL_SEC', 30, minimum=5)
 DEVICEVAULT_RETENTION_INTERVAL_MIN = env_int('DV_RETENTION_INTERVAL_MIN', 60, minimum=1)
+# A scheduled device is overdue once its latest successful backup is older than its schedule's
+# interval times this (backups.freshness).
+DEVICEVAULT_STALE_FACTOR = env_float('DV_STALE_FACTOR', 1.5, minimum=1.0)
+# Monitoring (monitoring app): how long computed figures are cached, and how often the scheduler
+# leader publishes the device snapshots receiver relays serve.
+DEVICEVAULT_MONITORING_CACHE_SECONDS = env_int('DV_MONITORING_CACHE_SECONDS', 60, minimum=5)
+DEVICEVAULT_MONITORING_PUBLISH_SECONDS = env_int('DV_MONITORING_PUBLISH_SECONDS', 900, minimum=60)
 # Config search (search app): indexes decrypted configuration in the database, so it is opt-in.
 DEVICEVAULT_CONFIG_SEARCH = env_bool('DV_CONFIG_SEARCH', False)
 # Ed25519 key that signs everything sent to workers; see core.signing.

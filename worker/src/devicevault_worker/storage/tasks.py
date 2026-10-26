@@ -25,6 +25,8 @@ from devicevault_protocol.jobs import (
     EVENT_RETRYING,
     EVENT_STARTED,
     EVENT_STORED,
+    FAILURE_INTEGRITY,
+    FAILURE_STORAGE,
     READ_BLOB_TTL_SECONDS,
     STAGE_STORE,
     read_blob_key,
@@ -104,7 +106,7 @@ def store(self, envelope: dict, blob: dict) -> None:
             if staged is None:
                 raise StorageError('the collected backup expired before it could be stored')
             if staged['sha256'] != blob['sha256']:
-                raise StorageError('the staged backup does not match the collected hash')
+                raise StagedMismatch('the staged backup does not match the collected hash')
             data.seek(0)
 
             started = time.monotonic()
@@ -136,12 +138,17 @@ def store(self, envelope: dict, blob: dict) -> None:
     except Exception as exc:
         if not isinstance(exc, StorageError | PermanentError):
             logger.exception('store_failed', extra={'job_id': job_id})
-        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log)
+        reason = FAILURE_INTEGRITY if isinstance(exc, StagedMismatch) else FAILURE_STORAGE
+        _fail(job_id, attempt, str(exc) or exc.__class__.__name__, log, reason)
 
 
-def _fail(job_id: str, attempt: int, error: str, log: CollectionLog) -> None:
+class StagedMismatch(StorageError):
+    """The staged backup's hash is not the one the collector reported."""
+
+
+def _fail(job_id: str, attempt: int, error: str, log: CollectionLog, reason: str = FAILURE_STORAGE) -> None:
     log.error(error)
-    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_STORE, error=error, log=log.entries)
+    events.send(job_id, EVENT_FAILED, attempt=attempt, stage=STAGE_STORE, error=error, reason=reason, log=log.entries)
 
 
 def _answer(task: str, envelope: dict, work) -> dict:

@@ -149,4 +149,85 @@ def test_stale_jobs_time_out(setup, broker, settings):
 
     job.refresh_from_db()
     assert job.state == BackupJob.TIMED_OUT
+    assert job.failure_reason == BackupJob.REASON_ORPHANED
     assert expire_stale_jobs() == 0
+
+
+# --- failure reasons -----------------------------------------------------------------
+
+
+def test_a_stored_job_has_no_failure_reason(setup, broker):
+    job, _ = create_job(setup['device'])
+    collected(setup, job)
+
+    job = stored(setup, job)
+
+    assert job.state == BackupJob.STORED and job.failure_reason is None
+
+
+@pytest.mark.parametrize(
+    ('reported', 'expected'),
+    [
+        ('connection', 'connection'),
+        ('auth', 'auth'),
+        ('timeout', 'timeout'),
+        ('command', 'command'),
+        ('disk on fire', 'unknown'),
+        (None, 'unknown'),
+        (7, 'unknown'),
+    ],
+)
+def test_the_collectors_failure_reason_is_recorded(setup, broker, reported, expected):
+    job, _ = create_job(setup['device'])
+    details = {'error': 'it broke', 'stage': 'collect'}
+    if reported is not None:
+        details['reason'] = reported
+
+    job = handle_job_event(job_event(setup['collector'], job, EVENT_FAILED, **details))
+
+    assert job.state == BackupJob.FAILED
+    assert (job.failure_reason, job.error) == (expected, 'it broke')
+    assert BackupJob.objects.get(pk=job.pk).failure_reason == expected
+
+
+@pytest.mark.parametrize(
+    ('reported', 'expected'),
+    [('storage', 'storage'), ('integrity', 'integrity'), ('auth', 'storage'), (None, 'storage')],
+)
+def test_storage_step_failures_are_storage_unless_the_hash_differed(setup, broker, reported, expected):
+    job, _ = create_job(setup['device'])
+    collected(setup, job)
+    details = {'error': 'disk full', 'stage': STAGE_STORE}
+    if reported is not None:
+        details['reason'] = reported
+
+    job = handle_job_event(job_event(setup['storage'], job, EVENT_FAILED, **details))
+
+    assert job.failure_reason == expected
+
+
+def test_a_hash_mismatch_is_an_integrity_failure(setup, broker):
+    job, _ = create_job(setup['device'])
+    collected(setup, job)
+
+    job = stored(setup, job, sha='b' * 64)
+
+    assert job.failure_reason == BackupJob.REASON_INTEGRITY
+
+
+def test_a_timed_out_job_that_completes_after_all_loses_its_reason(setup, broker):
+    job, _ = create_job(setup['device'])
+    BackupJob.objects.filter(pk=job.pk).update(created_at=timezone.now() - timedelta(minutes=121))
+    expire_stale_jobs()
+
+    collected(setup, job)
+    job = stored(setup, job)
+
+    assert job.state == BackupJob.STORED and job.failure_reason is None
+
+
+def test_failure_reason_is_read_only_in_the_api():
+    from backups.api import BackupJobSerializer
+
+    assert 'failure_reason' in BackupJobSerializer.Meta.fields
+    assert 'failure_reason' in BackupJobSerializer.Meta.read_only_fields

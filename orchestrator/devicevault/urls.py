@@ -28,6 +28,7 @@ from audit import api as audit_api
 from backups import api as backup_api
 from backups import dashboard
 from monitoring import api as monitoring_api
+from monitoring import metrics_api
 from storage import api as storage_api
 
 router = routers.DefaultRouter()
@@ -61,6 +62,13 @@ urlpatterns = [
     path('api/health/', views.health),
     path('api/version/', views.version_info),
     path('api/flower-auth/', monitoring_api.flower_auth),
+    path('api/monitoring/summary/', metrics_api.summary),
+    path('api/monitoring/device-groups/', metrics_api.device_groups),
+    path('api/monitoring/device/', metrics_api.device),
+    path('api/monitoring/workers/', metrics_api.workers),
+    path('api/monitoring/storage-targets/', metrics_api.storage_targets),
+    path('api/monitoring/receivers/', metrics_api.receivers),
+    path('api/monitoring/metrics', metrics_api.prometheus_metrics),
     path('api/onboarding/', views.onboarding),
     path('api/dashboard/summary/', dashboard.summary),
     path('api/dashboard/activity/', dashboard.activity),

@@ -6,6 +6,8 @@ import uuid
 from django.contrib.auth.models import User
 from django.db import models
 
+from devicevault_protocol import jobs
+
 LABEL_MAX = 64
 NOTE_MAX = 2000
 
@@ -36,6 +38,32 @@ class BackupJob(models.Model):
     ]
     ACTIVE_STATES = (QUEUED, COLLECTING, COLLECTED, STORING)
     TERMINAL_STATES = (STORED, FAILED, TIMED_OUT)
+
+    # Why a failed or timed-out job failed (devicevault_protocol.jobs.FAILURE_REASONS). Workers
+    # report the collection side; the orchestrator sets integrity, storage and orphaned itself.
+    # Null for jobs that did not fail.
+    REASON_CONNECTION = jobs.FAILURE_CONNECTION
+    REASON_AUTH = jobs.FAILURE_AUTH
+    REASON_TIMEOUT = jobs.FAILURE_TIMEOUT
+    REASON_COMMAND = jobs.FAILURE_COMMAND
+    REASON_VERIFICATION = jobs.FAILURE_VERIFICATION
+    REASON_STORAGE = jobs.FAILURE_STORAGE
+    REASON_INTEGRITY = jobs.FAILURE_INTEGRITY
+    REASON_PUSH = jobs.FAILURE_PUSH
+    REASON_ORPHANED = jobs.FAILURE_ORPHANED
+    REASON_UNKNOWN = jobs.FAILURE_UNKNOWN
+    REASON_CHOICES = [
+        (REASON_CONNECTION, 'Connection failed'),
+        (REASON_AUTH, 'Authentication refused'),
+        (REASON_TIMEOUT, 'Device stopped responding'),
+        (REASON_COMMAND, 'Command rejected'),
+        (REASON_VERIFICATION, 'Verification failed'),
+        (REASON_STORAGE, 'Storage failed'),
+        (REASON_INTEGRITY, 'Hash mismatch'),
+        (REASON_PUSH, 'Pushed file not ingested'),
+        (REASON_ORPHANED, 'No result in time'),
+        (REASON_UNKNOWN, 'Unknown'),
+    ]
 
     TRIGGER_MANUAL = 'manual'
     TRIGGER_SCHEDULE = 'schedule'
@@ -100,6 +128,7 @@ class BackupJob(models.Model):
 
     attempts = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
+    failure_reason = models.CharField(max_length=16, choices=REASON_CHOICES, null=True, blank=True)
     log = models.JSONField(default=list, blank=True, help_text='Structured log entries from every stage')
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -112,7 +141,12 @@ class BackupJob(models.Model):
     class Meta:
         ordering = ['-created_at']
         # (state, finished_at): the dashboard's daily trend, failing devices and storage figures.
-        indexes = [models.Index(fields=['device', '-created_at']), models.Index(fields=['state', 'finished_at'])]
+        # (state, failure_reason): failures counted by reason (monitoring).
+        indexes = [
+            models.Index(fields=['device', '-created_at']),
+            models.Index(fields=['state', 'finished_at']),
+            models.Index(fields=['state', 'failure_reason']),
+        ]
 
     def __str__(self):
         return f'{self.device} {self.created_at:%Y-%m-%d %H:%M} [{self.state}]'

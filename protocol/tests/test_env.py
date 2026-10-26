@@ -1,6 +1,6 @@
 import pytest
 
-from devicevault_protocol.env import ConfigError, env_bool, env_int, env_list, env_map, env_str
+from devicevault_protocol.env import ConfigError, env_bool, env_float, env_int, env_list, env_map, env_str
 
 
 def test_env_str_prefers_file_over_value(monkeypatch, tmp_path):
@@ -45,6 +45,31 @@ def test_env_int_minimum(monkeypatch):
 
     with pytest.raises(ConfigError, match='>= 1'):
         env_int('DV_TEST', 5, minimum=1)
+
+
+def test_env_float_parses_and_defaults(monkeypatch):
+    assert env_float('DV_TEST', 1.5) == 1.5
+    monkeypatch.setenv('DV_TEST', ' ')
+    assert env_float('DV_TEST', 1.5) == 1.5
+    monkeypatch.setenv('DV_TEST', '2.25')
+    assert env_float('DV_TEST', 1.5) == 2.25
+    monkeypatch.setenv('DV_TEST', '3')
+    assert env_float('DV_TEST', 1.5) == 3.0
+
+
+@pytest.mark.parametrize(('value', 'message'), [('fast', 'must be a number'), ('nan', 'finite'), ('inf', 'finite')])
+def test_env_float_rejects_non_numbers(monkeypatch, value, message):
+    monkeypatch.setenv('DV_TEST', value)
+
+    with pytest.raises(ConfigError, match=message):
+        env_float('DV_TEST', 1.5)
+
+
+def test_env_float_minimum(monkeypatch):
+    monkeypatch.setenv('DV_TEST', '0.5')
+
+    with pytest.raises(ConfigError, match='>= 1.0'):
+        env_float('DV_TEST', 1.5, minimum=1.0)
 
 
 def test_env_list_strips_blanks(monkeypatch):

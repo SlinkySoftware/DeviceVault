@@ -144,7 +144,7 @@ matrix, and Admin Settings > Audit Log records sign-ins, access changes, backup
 content views, diffs and downloads, and refused requests.
 
 With `DV_DB_ENGINE=sqlite` the database lives in the stack's `data` volume, which
-limits you to a single orchestrator node (see [High availability](#6-high-availability)).
+limits you to a single orchestrator node (see [High availability](#7-high-availability)).
 
 Every orchestrator node needs the same three keys:
 
@@ -428,7 +428,46 @@ A proxied Flower is served from the UI's origin, so treat it as trusted code and
 proxy only Flower instances you run. The development stack has no nginx, so its
 Flower is a direct endpoint, `http://localhost:5555`; `make dev-seed` adds it.
 
-## 6. High availability
+## 6. Monitoring
+
+DeviceVault reports backup health to the monitoring you already run. Everything is
+read-only under `/api/monitoring/`, pulled with an API token (DeviceVault opens no
+connection to your monitoring); **Admin Settings > Monitoring** lists the URLs and
+shows the current figures.
+
+1. Create a **service account** (Admin Settings > Service Accounts), for example
+   `zabbix`, in a user group with `view` on the device groups it should report on.
+   It sees exactly those devices, as a person in that group would.
+2. Give it a token with the **Monitoring** scope. Add **Platform health** for worker,
+   scheduler, storage target and receiver figures; without it those sections are
+   simply empty. Limit the token to your monitoring servers' networks.
+3. Point your monitoring at the endpoints with `Authorization: Bearer <token>`.
+
+| Endpoint | Returns |
+|---|---|
+| `summary/` | Estate figures in one flat object: finished, stored, failed and timed-out jobs per window (1h, 24h, 7d) and all time, success and failure ratios, failures by reason, queued and running jobs, collection, storage, queue-wait and total durations (average, median, p95, maximum over 24h), device counts (enabled, disabled, inactive, never backed up, overdue, failing 1/3/5+ times in a row), the oldest last success, changes, bytes stored and held, push figures, version and server time; platform health with that scope |
+| `device-groups/` | `{"data": [...]}`, the same figures per visible device group (Zabbix low-level discovery) |
+| `device/?ip=<address>` (or `&id=<id>`) | One device: status, last success and its age, failure reason, failures in a row, schedule interval, next due and overdue, the last backup's duration, size and changes, backups held. Answered from the service account's published snapshot; `found` is 0 for an unknown device or one the account cannot see; 503 `stale` when no current snapshot exists |
+| `workers/`, `storage-targets/`, `receivers/` | `{"data": [...]}` platform lists (empty without the platform scope) |
+| `metrics` | Prometheus text format: the estate, group, worker, target and receiver figures (no per-device series) |
+
+Figures are computed from job rows and cached for `DV_MONITORING_CACHE_SECONDS`.
+Per-device answers come from snapshots the scheduler leader publishes every
+`DV_MONITORING_PUBLISH_SECONDS` (15 minutes), one per service account with a
+monitoring token, signed so a receiver relay can verify them. A device is
+**overdue** once its latest successful backup is older than its schedule's longest
+gap between runs times `DV_STALE_FACTOR`; devices without a schedule (push-only or
+manual) are never overdue. Failures carry a **reason**: `connection`, `auth`,
+`timeout`, `command`, `storage`, `integrity`, `orphaned` (the orchestrator's job
+timeout) or `unknown`; only the reason is exported, never the error text.
+
+**Prometheus**: scrape `/api/monitoring/metrics` with the token
+(`authorization: {type: Bearer, credentials_file: ...}`); example alert rules are in
+`deploy/prometheus/devicevault-rules.yml`. Device-group series are separate families
+(`devicevault_group_*`, labelled `device_group`), so sums never double-count the
+estate.
+
+## 7. High availability
 
 Run two orchestrator nodes behind a load balancer or a virtual IP.
 
@@ -539,6 +578,9 @@ secrets). The file takes precedence.
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
 | `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules (and renews its lease) |
 | `DV_RETENTION_INTERVAL_MIN` | `60` | How often the scheduler's leader applies retention policies |
+| `DV_STALE_FACTOR` | `1.5` | A scheduled device is overdue once its latest successful backup is older than its schedule's interval (the longest gap between its runs) times this (at least `1.0`) |
+| `DV_MONITORING_CACHE_SECONDS` | `60` | How long the monitoring figures (`/api/monitoring/`) are cached in Redis per caller before they are computed again |
+| `DV_MONITORING_PUBLISH_SECONDS` | `900` | How often the scheduler leader publishes the per-device snapshots that `device/` and receiver relays serve (at least 60) |
 | `DV_CONFIG_SEARCH` | `false` | Config search: keeps the latest backup of each device, secrets hashed, in the database (see *Config search*) |
 
 ### Worker

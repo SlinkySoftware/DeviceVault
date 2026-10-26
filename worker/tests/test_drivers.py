@@ -1,7 +1,10 @@
 import re
+import socket
 
 import pytest
 from netmiko import NetmikoAuthenticationException, NetmikoTimeoutException
+from netmiko.exceptions import ReadTimeout
+from paramiko.ssh_exception import SSHException
 
 from devicevault_worker.drivers import get_driver
 from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
@@ -28,6 +31,8 @@ set name=edge-01
 
 
 class FakeConnection:
+    enable_error = None
+
     def __init__(self, outputs, error=None, **kwargs):
         self.kwargs = kwargs
         self.outputs = outputs
@@ -44,11 +49,16 @@ class FakeConnection:
         return False
 
     def enable(self):
+        if self.enable_error:
+            raise self.enable_error
         self.enabled = True
 
     def send_command(self, command, read_timeout):
         self.commands.append(command)
-        return self.outputs[command]
+        output = self.outputs[command]
+        if isinstance(output, BaseException):
+            raise output
+        return output
 
 
 @pytest.fixture
@@ -117,25 +127,87 @@ def test_mikrotik_export(netmiko):
 
 
 @pytest.mark.parametrize(
-    ('error', 'expected'),
+    ('error', 'expected', 'reason'),
     [
-        (NetmikoAuthenticationException('bad password'), PermanentError),
-        (NetmikoTimeoutException('timed out'), TransientError),
-        (ConnectionRefusedError('refused'), TransientError),
+        (NetmikoAuthenticationException('bad password'), PermanentError, 'auth'),
+        (NetmikoTimeoutException('TCP connection to device failed'), TransientError, 'connection'),
+        (ConnectionRefusedError('refused'), TransientError, 'connection'),
+        (socket.gaierror('Name or service not known'), TransientError, 'connection'),
+        (SSHException('Error reading SSH protocol banner'), TransientError, 'connection'),
     ],
 )
-def test_connection_errors_are_classified(netmiko, error, expected):
+def test_connection_errors_are_classified(netmiko, error, expected, reason):
     netmiko({}, error=error)
 
-    with pytest.raises(expected):
+    with pytest.raises(expected) as raised:
         run('cisco_ios', CREDS)
+
+    assert raised.value.reason == reason
+
+
+@pytest.mark.parametrize('error', [ReadTimeout('pattern not detected'), EOFError(), OSError('socket closed')])
+def test_a_device_that_stops_answering_mid_session_times_out(netmiko, error):
+    netmiko({'show running-config': error})
+
+    with pytest.raises(TransientError, match='stopped responding') as raised:
+        run('cisco_ios', CREDS)
+
+    assert raised.value.reason == 'timeout'
+
+
+def test_a_refused_enable_is_an_auth_failure(netmiko):
+    made = netmiko({'show running-config': CISCO_OUTPUT})
+    FakeConnection.enable_error = ValueError('Failed to enter enable mode.')
+    try:
+        with pytest.raises(PermanentError, match='enable mode refused') as raised:
+            run('cisco_ios', {**CREDS, 'enable_secret': 'wrong'})
+    finally:
+        FakeConnection.enable_error = None
+
+    assert raised.value.reason == 'auth' and made[0].commands == []
+
+
+@pytest.mark.parametrize(
+    ('key', 'command', 'output'),
+    [
+        (
+            'cisco_ios',
+            'show running-config',
+            "show running-config\n          ^\n% Invalid input detected at '^' marker.\n",
+        ),
+        ('cisco_ios', 'show running-config', '% Authorization failed.\n'),
+        ('mikrotik_ssh_export', '/export show-sensitive', 'bad command name show-sensitive (line 1 column 9)\n'),
+    ],
+)
+def test_rejected_commands_are_command_failures(netmiko, key, command, output):
+    netmiko({command: output})
+
+    with pytest.raises(PermanentError, match='rejected') as raised:
+        run(key, CREDS)
+
+    assert raised.value.reason == 'command'
+
+
+def test_rejection_text_inside_the_configuration_is_not_a_rejection(netmiko):
+    banner = CISCO_OUTPUT.replace('version 17.9\n', 'version 17.9\nbanner motd ^\n% Invalid input detected\n^\n')
+    netmiko({'show running-config': banner})
+
+    assert '% Invalid input detected' in run('cisco_ios', CREDS).decode()
 
 
 def test_missing_credentials_are_permanent(netmiko):
     netmiko({})
 
-    with pytest.raises(PermanentError, match='password'):
+    with pytest.raises(PermanentError, match='password') as raised:
         run('cisco_ios', {'username': 'admin'})
+
+    assert raised.value.reason == 'auth'
+
+
+def test_driver_errors_default_to_unknown_and_reject_unknown_reasons():
+    assert TransientError('x').reason == 'unknown'
+    assert PermanentError('x', reason='nonsense').reason == 'unknown'
+    assert PermanentError('x', reason='storage').reason == 'storage'
 
 
 def test_drivers_advertise_their_volatile_lines():

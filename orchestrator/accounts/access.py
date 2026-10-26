@@ -168,6 +168,30 @@ class IsGlobalAdminOrReadOnly(BasePermission):
         return is_global_admin(request.user)
 
 
+class CanReadMonitoring(BasePermission):
+    """The read-only monitoring endpoints: any signed-in user or token (``monitoring`` or ``api`` scope).
+
+    The figures are filtered to the caller's ``view`` grants; platform sections
+    are left out unless ``sees_platform``.
+    """
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.method in SAFE_METHODS)
+
+
+def sees_platform(request) -> bool:
+    """Platform health (workers, scheduler, storage targets, receivers): admin-only facts elsewhere in the API.
+
+    A token needs the ``monitoring_platform`` scope; a session needs a global administrator.
+    """
+    from accounts.models import ApiToken
+
+    token = getattr(request, 'auth', None)
+    if isinstance(token, ApiToken):
+        return ApiToken.MONITORING_PLATFORM in token.scopes
+    return is_global_admin(request.user)
+
+
 class HasDeviceGroupPermission(BasePermission):
     """Signed-in users, holding ``flag`` on the device group of the object acted on.
 

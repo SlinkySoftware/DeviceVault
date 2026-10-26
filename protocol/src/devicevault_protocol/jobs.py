@@ -24,7 +24,10 @@ payload is::
 ``collected`` adds ``sha256``, ``size``, ``is_binary``, ``encrypted``,
 ``duration_ms``; ``stored`` adds ``sha256``, ``size``, ``storage_ref``,
 ``duration_ms``; ``retrying`` and ``failed`` add ``error`` and ``stage``
-("collect" or "store").
+("collect" or "store"); ``failed`` also adds ``reason``, one of
+``FAILURE_REASONS``. The orchestrator stores it as ``BackupJob.failure_reason``
+(mapping anything it does not recognise to ``unknown``) and sets
+``integrity``, ``storage`` and ``orphaned`` itself.
 The orchestrator only accepts a ``stored`` event whose hash matches the one
 the collector reported.
 
@@ -59,6 +62,36 @@ EVENTS = (
 
 STAGE_COLLECT = 'collect'
 STAGE_STORE = 'store'
+
+# Why a job failed (``BackupJob.failure_reason``). Monitoring exposes these, never the error text.
+FAILURE_CONNECTION = 'connection'  # unreachable, refused, or DNS
+FAILURE_AUTH = 'auth'  # login or enable refused
+FAILURE_TIMEOUT = 'timeout'  # the device stopped answering mid-session
+FAILURE_COMMAND = 'command'  # the device rejected a command
+FAILURE_VERIFICATION = 'verification'  # reserved (ROADMAP Q12)
+FAILURE_STORAGE = 'storage'  # the storage worker failed
+FAILURE_INTEGRITY = 'integrity'  # hash mismatch
+FAILURE_PUSH = 'push'  # a pushed file could not be ingested
+FAILURE_ORPHANED = 'orphaned'  # the orchestrator's job timeout fired
+FAILURE_UNKNOWN = 'unknown'
+FAILURE_REASONS = (
+    FAILURE_CONNECTION,
+    FAILURE_AUTH,
+    FAILURE_TIMEOUT,
+    FAILURE_COMMAND,
+    FAILURE_VERIFICATION,
+    FAILURE_STORAGE,
+    FAILURE_INTEGRITY,
+    FAILURE_PUSH,
+    FAILURE_ORPHANED,
+    FAILURE_UNKNOWN,
+)
+
+
+def failure_reason(value: object) -> str:
+    """``value`` if it is a known failure reason, else ``unknown``."""
+    return value if isinstance(value, str) and value in FAILURE_REASONS else FAILURE_UNKNOWN
+
 
 # Staged backups live long enough for a storage worker outage to be fixed.
 BLOB_TTL_SECONDS = 24 * 3600

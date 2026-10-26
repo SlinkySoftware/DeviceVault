@@ -17,6 +17,13 @@ class CiscoIosDriver(NetmikoDriver):
         r'! No configuration change since last restart',
         r'ntp clock-period',
     )
+    rejected_output = (
+        r'% ?Invalid input detected',
+        r'% ?Incomplete command',
+        r'% ?Ambiguous command',
+        r'% ?Unknown command',
+        r'% ?Authorization failed',
+    )
     # Type 7 is reversible, so its values are decoded before hashing; types 5, 8 and 9
     # are salted hashes and are tokenised as written. A type digit before the value is
     # skipped; a bare number after ``key`` is a key id, not a secret.

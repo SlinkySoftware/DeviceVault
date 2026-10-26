@@ -7,7 +7,9 @@ expires first (``LEASE_SECONDS``). The leader also re-checks the lease before
 each due schedule, so a leader that stalled past its lease stops scheduling.
 The leader also prunes expired sign-in sessions, hourly, and applies retention
 policies every ``DV_RETENTION_INTERVAL_MIN`` (backups.retention), and runs the
-config search catch-up pass every few minutes (search.indexing).
+config search catch-up pass every few minutes (search.indexing). It publishes the
+monitoring relays' device snapshots every ``DV_MONITORING_PUBLISH_SECONDS``
+(monitoring.snapshots) and records each tick for the platform figures.
 """
 
 import logging
@@ -119,12 +121,18 @@ def apply_retention(now: datetime, leading: Callable[[], bool] | None = None) ->
 
 
 def tick(now: datetime | None = None, leading: Callable[[], bool] | None = None) -> None:
+    # Imported here: the monitoring figures read the scheduler's lease key.
+    from monitoring.metrics import note_tick
+    from monitoring.snapshots import publish_if_due
+
     now = now or timezone.now()
     created = run_due_schedules(now, leading)
     expired = expire_stale_jobs(now)
     prune_sessions(now)
     deletions = apply_retention(now, leading)
     indexing = catch_up(now)
+    publish_if_due(now)
+    note_tick(now)
     if created or expired or deletions or indexing:
         logger.info(
             'scheduler_tick',

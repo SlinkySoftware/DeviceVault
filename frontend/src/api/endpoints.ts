@@ -40,6 +40,7 @@ import type {
   LogEntry,
   LoginResponse,
   Manufacturer,
+  MonitoringFigures,
   RetentionPolicy,
   RetentionPolicyWrite,
   RetentionPreview,
@@ -260,6 +261,10 @@ export const serviceAccountsApi = {
     create: async (body) => (await http.post<ApiTokenCreated>(`/service-accounts/${id}/tokens/`, body)).data,
     revoke: adminTokensApi.revoke,
   }),
+}
+
+export const monitoringApi = {
+  summary: async () => (await http.get<MonitoringFigures>('/monitoring/summary/')).data,
 }
 
 const authProviders = resource<AuthProvider, AuthProviderWrite>('/auth-providers/')

@@ -8,7 +8,9 @@ packages expose a ``devicevault.collectors`` entry point.
 
 Drivers raise ``TransientError`` for problems worth retrying (timeouts,
 unreachable device) and ``PermanentError`` for ones that are not (bad
-credentials, unsupported device); anything else counts as permanent.
+credentials, unsupported device); anything else counts as permanent. Both take
+a ``reason`` (``devicevault_protocol.jobs.FAILURE_*``); unclassified failures
+report ``unknown``.
 """
 
 from abc import ABC, abstractmethod
@@ -18,9 +20,20 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
+from devicevault_protocol.jobs import FAILURE_AUTH, FAILURE_UNKNOWN, failure_reason
+
 
 class DriverError(Exception):
-    """A collection failed."""
+    """A collection failed.
+
+    ``reason`` says why, as one of ``devicevault_protocol.jobs.FAILURE_REASONS``
+    (``connection``, ``auth``, ``timeout``, ``command``...); it travels in the
+    signed ``failed`` job event, and anything unrecognised becomes ``unknown``.
+    """
+
+    def __init__(self, *args: object, reason: str = FAILURE_UNKNOWN):
+        super().__init__(*args)
+        self.reason = failure_reason(reason)
 
 
 class TransientError(DriverError):
@@ -126,5 +139,5 @@ class CollectorDriver(ABC):
         """Values of the named credential fields, or PermanentError if any is missing."""
         missing = [name for name in names if not credentials.get(name)]
         if missing:
-            raise PermanentError(f'credential is missing {", ".join(missing)}')
+            raise PermanentError(f'credential is missing {", ".join(missing)}', reason=FAILURE_AUTH)
         return [str(credentials[name]) for name in names]

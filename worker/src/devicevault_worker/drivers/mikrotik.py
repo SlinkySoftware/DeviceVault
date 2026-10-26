@@ -18,6 +18,7 @@ class MikrotikExportDriver(NetmikoDriver):
     Params = MikrotikExportParams
     # The export starts with "# <date> <time> by RouterOS <version>".
     volatile_lines = (r'# .* by RouterOS ',)
+    rejected_output = (r'bad command name', r'expected end of command', r'syntax error', r'not enough permissions')
     # With show-sensitive the export holds secrets as properties (quoted or not), such as
     # password, auth-password, secret, ipsec-secret, wpa2-pre-shared-key and private-key.
     secret_lines = (

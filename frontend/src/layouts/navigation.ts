@@ -62,6 +62,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { label: 'Collection Groups', icon: 'hub', to: '/vaultadmin/collection-groups' },
       { label: 'Workers', icon: 'memory', to: '/vaultadmin/workers' },
       { label: 'Flower', icon: 'local_florist', to: '/vaultadmin/flower' },
+      { label: 'Monitoring', icon: 'monitor_heart', to: '/vaultadmin/monitoring' },
     ],
   },
 ]
