@@ -480,6 +480,245 @@ Retention never deletes the device itself. When the last deletion is confirmed, 
 
 **Out of scope.** Deleting devices automatically when they become deletable. The device row and its job history are the last record of the device, so a person decides when they go.
 
+### 7.6 API tokens and service accounts (phase 21)
+
+Scripts, CI and monitoring systems need to call the API without a browser session (ROADMAP Q9). Monitoring (section 7.7) is the first consumer, so this phase comes first. A token never carries more than its user's rights, and a **scope** narrows it further.
+
+**Model.** `accounts.ApiToken`:
+- `user`, `name` (unique per user), `scopes` (a list, below), `expires_at`, `allowed_networks` (a list of CIDRs, empty for any address).
+- `prefix` (8 characters, shown in lists and audit entries) and `digest` (SHA-256 of the secret). The secret is 32 random bytes, so a fast hash is enough. It is never stored and is shown once, at creation.
+- `created_at`, `created_by`, `last_used_at`, `last_used_address`, `revoked_at`, `revoked_by`.
+
+The token is `dvt_<prefix>_<secret>` (URL-safe base64). The fixed `dvt_` prefix lets secret scanners (GitHub, gitleaks) recognise a leaked one.
+
+**Scopes.**
+- `api`: the whole API as the user, except token and service-account management, sign-in, sign-out and password changes. A token can never mint or revoke tokens.
+- `monitoring`: only the read-only `/api/monitoring/` endpoints (section 7.7), filtered by the user's `view` grants.
+- `monitoring_platform`: adds the platform-health sections (workers, scheduler, storage targets, receivers) to `monitoring`. These are admin-only facts elsewhere in the API, so only a global administrator can grant this scope, and only on a service account's token.
+
+**Service accounts.** A user with `is_service_account` (a new `accounts.UserProfile` field) cannot sign in by any provider or password, has no session, and exists only to own tokens. Only global administrators create, edit and delete service accounts and their tokens. A service account joins user groups like any user, so its device-group grants come from the same matrix (decision 14). A service account cannot be a member of a global-administrator group: a leaked automation token must not be an administrator. A person's own tokens stop working when the person is deactivated. A service account's tokens don't, which is the reason service accounts exist.
+
+**Authentication.** `accounts.authentication.TokenAuthentication` reads `Authorization: Bearer dvt_...`, runs before session authentication, and needs no CSRF token, because the browser does not send it on its own. A request is refused (401, with the same body for every cause) when the token is unknown, revoked or expired, its user is inactive, or the source address is outside `allowed_networks`. The source address is the one the audit log already uses (nginx's `X-Real-IP`). `last_used_at` and `last_used_address` are written at most once a minute, so polling does not mean a database write per request.
+
+**Scope enforcement.** Each view declares `token_scopes` (default `('api',)`; the monitoring views declare `('monitoring', 'api')`). A token request to a view whose `token_scopes` doesn't overlap the token's scopes gets 403. The existing test that every view states its `permission_classes` also checks that every view resolves `token_scopes`.
+
+**Limits.** Expiry is required: the default is 90 days, the longest is `DV_API_TOKEN_MAX_DAYS` (365). Service-account tokens may go up to the same limit. Each token is rate-limited (`DV_API_TOKEN_RATE`, 600/min by default, counted in Redis so every node shares the count) and answers 429 over it. At most 20 live tokens per user.
+
+**Audit.** `token.create` and `token.revoke` record the token's prefix, scopes, networks and expiry. `token.use` is recorded the first time a token is used from an address it has not used before, not on every request (a Zabbix poll would flood the log). Refused token requests are recorded as `token.refused` (prefix if one parsed, cause, address), rate-limited per address as push refusals are. Every other audited action done through a token records the token's prefix next to the user.
+
+**API.** `/api/tokens/` (`IsAuthenticated`, session only): the user's own tokens. List, create (returns the secret once) and revoke. `/api/service-accounts/` and `/api/service-accounts/{id}/tokens/` (`IsGlobalAdmin`): service accounts, their group memberships, and their tokens. `/api/admin/tokens/` (`IsGlobalAdmin`): every live token, revocable.
+
+**Frontend.** An "API tokens" tab on the user's profile page: list, a create `FormDialog` (name, scopes, expiry, networks) and a show-once dialog with a copy button. An admin "Service accounts" page: accounts, their groups, and their tokens. Service accounts are hidden from the Users page and shown with a badge in group membership lists.
+
+### 7.7 Monitoring: Zabbix and Prometheus (phases 22-24)
+
+Backup health belongs in the monitoring system an estate already runs (ROADMAP Q4). DeviceVault serves read-only JSON that Zabbix polls with **HTTP agent** items, plus a Prometheus exposition of the same numbers, and ships Zabbix templates for both uses:
+- **The DeviceVault host.** One Zabbix host represents DeviceVault: estate and per-group backup outcomes, freshness and platform health. It polls the orchestrator's web endpoints.
+- **Existing device hosts.** A template linked to the hosts Zabbix already has (Router_X) adds that device's backup status, matched on its address. It polls a **receiver in the device's own zone** (the monitoring relay, below), not the orchestrator.
+
+An HTTP agent item runs on whichever Zabbix server or proxy monitors its host. The proxies that monitor routers and switches sit in the device zones, and usually cannot reach the zone where the orchestrator lives. That is the same reason collectors exist. So per-device data is relayed:
+1. The orchestrator publishes a signed snapshot to Redis every 15 minutes.
+2. Receivers, which are already deployed in device zones and built to accept inbound connections (decision 23), load it and answer the proxies' requests.
+
+Data can be up to one publish interval plus one poll interval old (about 30 minutes at the defaults). That is acceptable when backups run daily. The DeviceVault host itself is assigned to the server or a proxy that can reach the web tier.
+
+Nothing is outbound from DeviceVault to Zabbix, and nothing Zabbix-specific runs in collectors. No Zabbix agent is needed for any of this. An agent on the orchestrator machines remains useful for operating-system metrics through Zabbix's stock Linux template, which is outside this design.
+
+#### Failure reasons and freshness (phase 22, prerequisites)
+
+**Failure reason.** `BackupJob.failure_reason`, nullable and indexed with `state`, takes one of:
+- `connection`: unreachable, refused, or DNS.
+- `auth`: login or enable refused.
+- `timeout`: the device stopped answering mid-session.
+- `command`: the device rejected a command.
+- `verification`: reserved for ROADMAP Q12.
+- `storage`: the storage worker failed.
+- `integrity`: hash mismatch.
+- `push`: a pushed file could not be ingested.
+- `orphaned`: the orchestrator's timeout fired.
+- `unknown`.
+
+How each side fills it in:
+- **Workers.** `DriverError` (and so `TransientError` and `PermanentError`) gains a `reason` argument. `NetmikoDriver` maps Netmiko's authentication, timeout and connection exceptions. Unclassified exceptions report `unknown`. The reason travels in the signed `failed` job event (`protocol.jobs`).
+- **Orchestrator.** It sets `integrity`, `orphaned` and `storage` itself, and maps any value it doesn't recognise to `unknown`.
+- **Old jobs** keep null, which the metrics count as `unknown`.
+
+`error` stays as it is. Monitoring never exposes the error text, only the reason.
+
+**Expected interval.** `backups/freshness.py` gives each device:
+- `expected_interval`: the gap between its schedule's next two runs (`Schedule.next_run_after`), or null for a device with no enabled schedule (push-only or manual).
+- `next_due_at`: the next run plus the interval × `DV_STALE_FACTOR` (1.5 by default).
+- `overdue`: an active, enabled device with an interval whose latest **successful** backup (newest `stored` job, as the dashboard's freshness card uses) is older than the interval × the factor. A device never backed up counts as overdue once it is older than the interval × the factor.
+
+Disabled and inactive devices are never overdue. Push-only devices get no interval here. ROADMAP Q5 adds a per-device expected push interval, the UI and notifications on top of this module, and the dashboard's fixed 24 h and 7 d freshness thresholds switch to it then.
+
+#### Metric catalogue and snapshot (phase 22)
+
+**Catalogue.** `monitoring/catalogue.py` declares every metric once:
+- its key (`backups.success_ratio.24h`) and name;
+- its kind (`gauge`, or `counter` for monotonic values);
+- its unit (`s`, `B`, `%`, `unixtime`, or none);
+- its scope (`estate`, `group`, `device`, `worker`, `target`, `receiver`);
+- an optional value map and a description.
+
+The JSON endpoints, the Prometheus renderer and the Zabbix template generator all read it. A test fails if an endpoint returns a key the catalogue lacks, or the reverse.
+
+**Metrics.** Windows are 1 h, 24 h and 7 d. Lifetime counters count every job row that still exists (rows survive pruning, decision 30; deleting a device removes its rows, which a counter reset absorbs).
+- **Outcomes** (estate and group): finished jobs by state (`stored`, `failed`, `timed_out`) per window and lifetime, success and failure ratio per window (null with no finished jobs), failures per reason per window, jobs queued and running now, and attempts beyond the first (retries) per window.
+- **Timing** (estate and group, 24 h): average, median, 95th percentile and maximum of collect time, store time, queue wait (`started_at - created_at`) and end-to-end time (`finished_at - created_at`). Percentiles are computed in Python over the window's values, which stays bounded at a few thousand jobs a day.
+- **Freshness** (estate and group): devices total, enabled, disabled and inactive. Never backed up, overdue, and in consecutive failure at 1+, 3+ and 5+. The age of the oldest latest-successful backup, the single most useful alert.
+- **Change** (estate and group, per window): stored backups that changed, and lines added, removed and modified.
+- **Volume** (estate, group, target): bytes stored per window, stored and unpruned backups held, and their total `size_bytes`.
+- **Push** (estate and receiver, 24 h): files accepted, refusals by reason, and the time of the last push. Push-enabled devices with no push in 7 d (estate only, until Q5 gives each one its own interval).
+- **Platform** (`monitoring_platform` scope only):
+  - Workers by role and status, each with heartbeat age, version, and applied versus desired assignment version.
+  - The scheduler: whether a leader holds the lease, the lease's remaining TTL, and the age of the last tick. The leader records a `dv:scheduler:last_tick` key in Redis each tick, a small addition.
+  - Per storage target: online workers serving it, the last stored job, and `storage` failures in 24 h. Target checks run on demand (decision 11) and are not stored, so their result is not a metric, and free space is not known.
+- **Self**: DeviceVault version, `payload_encryption`, server time (so Zabbix can alarm on clock skew), the time the snapshot was computed, and its age.
+- **Device** (per device, `device/` only):
+  - Identity: `found`, id, name, group, address, `enabled`, `lifecycle`.
+  - Latest outcome: the latest job's state, or `never` or `running`; last attempt and last success time; seconds since the last success; last failure time and `failure_reason`; consecutive failures.
+  - Freshness: expected interval, next due, overdue.
+  - Latest successful backup: collect, store and total time, size, changed, and lines added, removed and modified.
+  - History: backups held, pinned backups, push mode and last push, and the 7 d success ratio.
+
+**Estate, group and platform sections.** These are computed by queries over job rows, as the dashboard's are (decision 37): one grouped query per section, run when asked. Each result is cached in Redis so polling stays cheap:
+- **Key.** `dv:monitoring:<user>:<scopes>:<section>`.
+- **Lifetime.** `DV_MONITORING_CACHE_SECONDS` (60 by default).
+- **Stampede guard.** A `SET NX` lock makes one node compute while the others serve the previous value, or wait up to 5 s when there is none.
+
+**Device snapshot.** Per-device data is published rather than computed on request.
+- **When.** The scheduler leader publishes every `DV_MONITORING_PUBLISH_SECONDS` (900 by default), plus once at start-up.
+- **Who for.** One snapshot is published per **relay owner**: each service account that holds a live `monitoring` token. Usually that is one account (`zabbix`). A second Zabbix instance, or a team that should see only its groups, gets its own account and so its own snapshot.
+- **Contents.** The device metrics of every device the owner can view, keyed by id, with an index from active address to id. It also carries `published_at`, the publish interval and the owner's id.
+- **Storage.** It is staged as a blob (`protocol.blobs`, chunked as backups are, roughly 600 bytes a device). A pointer key `dv:monitoring:relay:<owner>` records the blob, its SHA-256, `published_at` and a signature over all three, made with the orchestrator signing key (`core.signing`) that receivers already pin. A collector can write to Redis, but cannot forge a snapshot that silences every alert.
+- **Lifetime.** Blobs and pointers expire after 3 × the interval, so a stopped publisher shows up as stale rather than as old data that looks fresh.
+- **Swaps.** A new generation is staged before its pointer is swapped, so a reader never sees half a snapshot.
+- **Not encrypted.** Device names, addresses and backup status are metadata that receivers already hold in part for push, and it contains no configuration, credentials or error text.
+
+The orchestrator's own `device/` endpoint reads the same published snapshot, so the direct path and the relay path always give the same answer. A site whose proxies *can* reach the web tier may skip the relay.
+
+Every query is filtered with `access.devices_for(owner, 'view')`, so a token sees exactly what its owner would see in the UI and nothing else.
+
+#### Endpoints (phase 22)
+
+Under `/api/monitoring/`, `GET` only, JSON (except `metrics`). Each view states `permission_classes = [CanReadMonitoring]`, a new class in `accounts/access.py`:
+- Any authenticated user, through a session or a token with the `monitoring` or `api` scope.
+- Platform sections need a global administrator's session or the `monitoring_platform` scope. Otherwise they are left out of the response, not refused, so one token works for both templates.
+
+The class joins the permission-class test. Reads are not audited (token use is, section 7.6).
+
+| Endpoint | Returns |
+|---|---|
+| `summary/` | Estate outcomes, timing, freshness, change, volume, push and self, as one object |
+| `device-groups/` | `{"data": [{"id", "name", ...metrics}]}`, one entry per visible device group (devices without a group form an `"ungrouped"` entry): the shape Zabbix low-level discovery reads, and the per-group items in the same response |
+| `device/?ip=<addr>&id=<id>` | One device, from the caller's published snapshot (service accounts only; 404 for other callers, who have none). `id` wins when non-empty, otherwise the active device with that `ip_address` (unique among active devices, decision 42). An unknown address and a device the owner can't see both return 200 `{"found": false, "published_at": ...}`, so the response says nothing about devices outside the owner's grants. With no current snapshot it answers 503 `{"error": "stale"}`. The receiver relay serves the same contract |
+| `workers/`, `storage-targets/`, `receivers/` | Platform lists for discovery (empty without the platform scope) |
+| `zabbix/template/?version=6.0\|7.0` | The generated Zabbix template (phase 24) |
+| `metrics` | Prometheus text exposition (below) |
+
+**Prometheus.** `metrics` renders the estate, group, worker, target and receiver metrics from the same snapshot, using `prometheus_client` with a registry built per request (not the process-global one):
+- Names are `devicevault_*`, with `device_group`, `collection_group`, `storage_target`, `worker`, `receiver`, `state` and `reason` labels.
+- **No per-device series**: cardinality must stay bounded, and per-device status belongs to the Zabbix device template.
+- Outcome counters are true counters.
+- Timing is exported as gauges per window and quantile (`devicevault_backup_duration_seconds{stage, window, quantile}`), not histograms. Histograms need cumulative buckets, which means a rollup this design deliberately avoids (decision 37).
+- Bearer tokens work with Prometheus's `authorization` scrape setting.
+
+`deploy/prometheus/devicevault-rules.yml` ships alert rules equivalent to the Zabbix triggers. A Grafana dashboard is left to ROADMAP D30.
+
+**Frontend.** An admin "Monitoring" page beside Flower:
+- the endpoint URLs for this installation;
+- template downloads for Zabbix 6.0 and 7.0;
+- a three-step setup (create a service account, give its group `view`, create a `monitoring` token);
+- a preview of `summary/` as the signed-in global administrator sees it.
+
+#### Monitoring relay on receivers (phase 23)
+
+A receiver gains a third listener next to SSH and TFTP: a small HTTPS server (`devicevault_receiver.monitoring`, aiohttp) that answers `GET /device/?ip=&id=` from the published snapshot. It never touches the database, as receivers never do.
+
+**Settings.** Receiver settings gain a `monitoring` section, travelling in the assignment like the rest (decision 26): enabled (off by default), bind address and port (8443). Unlike SSH and TFTP, the port is opened only once the section is enabled. A receiver may run with only this listener enabled, as a pure relay in a zone with no pushing devices. Every enabled receiver serves every device in the snapshots it holds, just as every receiver accepts every push-enabled device (decision 25). So any receiver a proxy can reach will do.
+
+**TLS.** The receiver generates a self-signed certificate on first start and keeps it in its state volume beside its identity keys. Its SHA-256 fingerprint is reported in the receiver's signed status and shown on the Workers page. Zabbix HTTP agent items can verify a certificate against a CA but cannot pin a fingerprint, so the template turns *verify peer* off. Traffic is encrypted, but the relay is not authenticated to the proxy. That is accepted because what crosses is a token limited to the `monitoring` scope and to the proxies' networks, and read-only metadata. Certificates issued by your own CA are a follow-up (ROADMAP D30).
+
+**Tokens.** The assignment carries, for every live `monitoring` token of a relay owner:
+- the token's prefix and digest (never the secret);
+- its expiry and `allowed_networks`;
+- its owner's snapshot id.
+
+The orchestrator re-sends receiver assignments when a relay token is created, revoked or reaches its expiry, or when its owner is deleted (`push.service.bump_receivers`, generalised to "receiver inputs changed"). The receiver checks the bearer token against that list in constant time and enforces the network list. It rate-limits per token locally (`DV_API_TOKEN_RATE` travels in the assignment, not as a receiver setting).
+
+**Reporting.** Usage is reported back in a signed `monitoring.used` event every minute: per token, the request count and the source addresses seen. From these the orchestrator updates `last_used_at` and records first use from a new address (section 7.6). Refusals are signed `monitoring.refused` events, rate-limited like `push.rejected`, and audited as `token.refused` with the receiver named.
+
+**Snapshot loading.**
+- **Watching.** Every 30 seconds the receiver reads each owner's pointer key, with no blob fetch when the generation hasn't changed.
+- **Loading.** On a new generation it fetches the blob and checks its SHA-256 and the signature against its pinned orchestrator key. Only then does it swap the in-memory index.
+- **Bad snapshots.** One that fails verification is ignored, the previous one is kept, and a `monitoring.snapshot_rejected` event is raised.
+- **Stale snapshots.** A snapshot older than 3 × its interval, or none at all, makes the receiver answer 503 `stale`, so the problem shows in Zabbix rather than data quietly ageing.
+- **Cost.** Lookups are dictionary reads. 10,000 devices polled every 15 minutes is about 11 requests a second, spread over the zone's receivers.
+
+**Frontend.** The receiver settings form gains the Monitoring endpoint section. The Workers page shows, for each receiver with it enabled: its URL, its certificate fingerprint, the age of the snapshots it has loaded, and its request and refusal counts.
+
+#### Zabbix templates (phase 24)
+
+**Generator.** `monitoring/zabbix.py` builds the templates from the catalogue. `manage.py zabbix_template --version 6.0|7.0` writes one file, and `make zabbix-template` regenerates both into `deploy/zabbix/devicevault_zabbix_6.0.yaml` and `devicevault_zabbix_7.0.yaml`. Both are committed, so changes show in review, and a test fails when either is out of step with the generator. The export format differs between the LTS versions (UUIDs, dashboard widget fields, some preprocessing names), so the generator has one small emitter per version over shared content. Template UUIDs are derived from stable keys (uuid5), so regenerating changes nothing that did not change. Templates do not depend on the installation (drivers and groups are discovered), so the endpoint serves the same output.
+
+**`DeviceVault by HTTP`** is linked to one host that stands for DeviceVault.
+- **Macros:** `{$DV.URL}`, `{$DV.TOKEN}` (secret text), `{$DV.INTERVAL}` (1m), `{$DV.SUCCESS.MIN}` (95), `{$DV.STALE.MAX}` (2d), `{$DV.FAIL.CONSEC}` (3), `{$DV.DURATION.MAX}` (10m), `{$DV.WORKER.HEARTBEAT.MAX}` (3m), `{$DV.PENDING.MAX}` (1h), `{$DV.SKEW.MAX}` (60).
+- **Master items:** one HTTP agent item each for `summary/`, `device-groups/`, `workers/`, `storage-targets/` and `receivers/`, sending `Authorization: Bearer {$DV.TOKEN}`. Every value is a dependent item with JSONPath, and those that rarely change use *Discard unchanged with heartbeat*.
+- **Discovery:** dependent LLD rules (supported since Zabbix 4.2) for device groups, workers, storage targets and receivers. Each has item and trigger prototypes and a *Keep lost resources* period of 7 days.
+- **Triggers:**
+  - Endpoint unreachable, or answering 401/403/5xx.
+  - Snapshot older than 3 × `{$DV.INTERVAL}`.
+  - Success ratio below `{$DV.SUCCESS.MIN}` over 24 h, per estate and per group.
+  - Oldest latest-success age above `{$DV.STALE.MAX}`, per group.
+  - Overdue devices > 0, and devices in `{$DV.FAIL.CONSEC}`+ consecutive failures > 0, per group.
+  - Never-backed-up devices > 0.
+  - p95 end-to-end duration above `{$DV.DURATION.MAX}`.
+  - Platform: the scheduler has no leader, or its last tick is over 2 minutes old; a worker's heartbeat is older than `{$DV.WORKER.HEARTBEAT.MAX}`; a worker has been pending approval longer than `{$DV.PENDING.MAX}`; an assignment version is behind for 10 minutes; a storage target has no online worker; push refusals spike.
+  - Clock skew above `{$DV.SKEW.MAX}` seconds.
+  - Every trigger has a recovery expression and tags (`component`, `scope`, `group`). All depend on the endpoint trigger, so a DeviceVault outage raises one problem, not hundreds.
+- **Also included:** value maps (job states, failure reasons, worker status, lifecycle) and a template dashboard (success ratio, duration percentiles, failures by reason, freshness per group, platform health).
+
+**`DeviceVault Device by HTTP`** is linked to the device hosts Zabbix already has, so network teams see backup status on the host they already watch.
+- **Match:** the master item calls `{$DV.RELAY.URL}/device/?ip={HOST.IP}&id={$DV.DEVICE.ID}`. `{HOST.IP}` is the host's default interface address, so linking the template is usually the whole setup. `{$DV.DEVICE.ID}` (empty by default) is set on a host whose interface address isn't the one DeviceVault backs up. Zabbix user macros cannot contain built-in macros, so the two are separate parameters rather than one macro with a default.
+- **Relay:** `{$DV.RELAY.URL}` is a receiver in the zone of the proxy that monitors the host (`https://receiver-site-a:8443`). It is set once per zone on a small site template that links this one, or on the hosts themselves, since Zabbix has neither host-group nor proxy macros. Pointing it at `{$DV.URL}/api/monitoring` uses the orchestrator directly where the proxies can reach it. *Verify peer* is off (the relay's certificate is self-signed).
+- **Credentials:** `{$DV.TOKEN}` is meant to be a global macro (or set on the site template). It may be the same `monitoring` token the DeviceVault host uses.
+- **Polling:** `{$DV.DEVICE.INTERVAL}` (15m, matching the publish interval; polling faster gains nothing).
+- **Items:** dependent items for every device metric. Last success and last attempt are `unixtime`. Durations are `s` and size is `B`. Status, reason and lifecycle use value maps.
+- **Triggers:**
+  - *Not backed up by DeviceVault*: `found=0 and {$DV.NOTFOUND.ALERT}=1`, severity Information. Zabbix trigger severity can't come from a macro, so a macro switches the trigger off instead. Linked across a whole host group, this shows which monitored devices nothing backs up.
+  - *Backup overdue*: `overdue=1`.
+  - *Backup failing*: consecutive failures >= `{$DV.DEVICE.FAIL.CONSEC}` (2).
+  - *Authentication failing*: the latest reason is `auth`, severity Average, because credentials do not fix themselves.
+  - *No successful backup for `{$DV.DEVICE.STALE.MAX}`*: 0 by default, which switches it off. This is for estates that prefer a flat threshold to the schedule-based `overdue`.
+  - *No data from DeviceVault*: `nodata` on the master item for 3 intervals, or the relay answering 503 `stale`. The other device triggers depend on it.
+  - *DeviceVault data is old*: `published_at` older than `{$DV.DEVICE.DATA.MAX}` (45m), which catches a publisher that has stopped while a relay still serves.
+  - Device triggers include `enabled=1 and lifecycle=active`, so a paused or retired device stays quiet. Zabbix cannot make a template trigger depend on a trigger of another host (the DeviceVault host), hence the per-host *No data* trigger.
+
+**Validation.** `make zabbix-validate` starts Zabbix 6.0 and then 7.0 (server, web and PostgreSQL containers from `deploy/zabbix-test/`), and imports both templates through the Zabbix API (`configuration.import`). Then it creates one host per template, pointing the DeviceVault host at a stub server that serves recorded orchestrator responses, and the device host at a real receiver relay loaded with a recorded, signed snapshot. It checks that every item becomes supported and that the expected triggers fire. It is Docker only, like everything else. It is not part of `make check` (two Zabbix servers make CI slow). A separate `zabbix.yml` workflow runs it on pull requests that touch `monitoring/` or `deploy/zabbix/`, and it is not required to merge.
+
+**Documentation.** A "Monitoring" section in `DEPLOYMENT.md` covers:
+- creating the service account and token;
+- importing the templates and setting the global macros;
+- enabling the monitoring relay on a receiver in each proxy zone, the firewall flow (proxy to receiver on 8443), and the per-zone site template;
+- linking the device template to an existing host group;
+- tuning the thresholds;
+- the Prometheus scrape configuration;
+- the request rate the device template generates, and how stale its data can be (one publish plus one poll interval).
+
+#### Out of scope
+
+These stay in ROADMAP D30:
+- pushing values out with `zabbix_sender` (trapper items) for Zabbix servers that cannot reach DeviceVault;
+- RabbitMQ queue depth (it needs the management API and its credentials);
+- Redis and broker reachability, and key and certificate expiry;
+- the `events` backlog;
+- creating Zabbix hosts from DeviceVault's inventory;
+- relay certificates issued by your own CA (the relay's certificate is self-signed in phase 23);
+- a Grafana dashboard.
+
+A bulk per-device endpoint is also left out: the device template's per-host poll replaces it, and per-device Prometheus series are refused by design.
+
 ## 8. HA
 
 - Two orchestrator nodes. `web`/`api`/`events` are active/active. `scheduler` runs on both but only the Redis-lease leader acts. The standby takes over at its next tick when the leader stops cleanly (the lease is released), or once the lease expires (60 s by default) when it dies. The leader re-checks the lease before each due schedule, so one that stalled past its lease stops scheduling.
@@ -517,6 +756,10 @@ Rewritten with TypeScript, `<script setup>`, Pinia, a typed API client, and Vite
 | 18 | `feat/dashboard` | Dashboard upgrades (ROADMAP Q13, section 7.3): per-card `/api/dashboard/` endpoints (summary, activity, trend, freshness, failing, storage, push refusals for global admins); one grouped query per trend; `(state, finished_at)` index; push refusals kept by age; in-house SVG chart components replacing the canvas chart; page-wide period in the URL; dead `DashboardLayout` removed | yes |
 | 19 | `feat/backup-pins` | Pin, label and annotate backups (ROADMAP Q8, section 7.4): `pin/` (group `admin`, locked against retention) and `annotate/` (`view_contents`) actions, who and when, `?pinned=`/`?labelled=` filters, audit, UI on the backups, compare and search pages | yes |
 | 20 | `feat/device-decommission` | Decommissioning devices (section 7.5): Mark inactive (who, when, reason), a hold set by the new `RetentionPolicy.inactive_keep_days` (90 days by default), retention lifting the `min_backups` floor once the hold ends, Delete only when nothing deletable remains (409 otherwise), global-admin purge (unpins, deletes at once, audited), the IP address unique among active devices only, inactive devices left out of scheduling, push, search and the dashboard device counts, audit with a snapshot on delete, lifecycle filter and actions in the UI | yes |
+| 21 | `feat/api-tokens` | API tokens and service accounts (ROADMAP Q9, section 7.6): `ApiToken` (hashed, shown once, expiring, network allow-list), `api`/`monitoring`/`monitoring_platform` scopes and per-view `token_scopes`, bearer authentication without CSRF, per-token rate limit, service accounts (no sign-in, never global administrators), audit of create, revoke, first use per address and refusals, profile tokens tab and Service accounts page | yes |
+| 22 | `feat/monitoring-api` | Monitoring endpoints (ROADMAP Q4, section 7.7): `BackupJob.failure_reason` set by workers and the orchestrator, `backups/freshness.py` (expected interval, overdue), metric catalogue, cached estate, group and platform sections, the signed per-relay-owner device snapshot published by the scheduler leader every 15 minutes, `summary/`, `device-groups/`, `device/`, platform lists, `CanReadMonitoring`, Prometheus `metrics` and alert rules, scheduler last-tick key, Monitoring admin page | yes |
+| 23 | `feat/monitoring-relay` | Monitoring relay on receivers (section 7.7): opt-in HTTPS listener with a self-signed certificate and reported fingerprint, relay tokens (digests) in the receiver assignment and re-sent on token changes, snapshot loading with signature and hash checks, 503 when stale, `monitoring.used`/`refused`/`snapshot_rejected` events, receiver settings and Workers page UI | yes |
+| 24 | `feat/zabbix-templates` | Zabbix templates (section 7.7): catalogue-driven generator for 6.0 and 7.0, `DeviceVault by HTTP` and `DeviceVault Device by HTTP` (polling the zone's relay) committed under `deploy/zabbix/` with a drift test, `zabbix/template/` endpoint, `make zabbix-validate` against Zabbix 6.0 and 7.0 containers and its workflow, DEPLOYMENT.md monitoring guide | yes |
 | later | — | New vendor drivers, Redis Sentinel | — |
 
 Candidate work beyond these (notifications, change summaries, compliance checking, restore, integrations and more, ranked as quick wins and larger changes) is collected in [ROADMAP.md](ROADMAP.md); an item gets a phase here once it is scheduled.
@@ -569,3 +812,12 @@ Each backend phase ships its own UI changes, so master never has a broken fronte
 | 40 | (phase 20) Devices are removed in two steps. **Mark inactive** stops collection and starts a hold. **Delete** removes the device and its job rows, and is allowed only once retention has removed every backup it may remove (or the device never stored one). Only a person deletes a device; retention never does. A global administrator can **purge** an inactive device to end its hold early: it unpins and deletes every backup at once, needs the device name typed, and is audited with the pins it removed. A group `admin` cannot, since a purge overrides the group's policy and pins. Backups on targets that keep everything (git) do not block deletion and stay in their history. |
 | 41 | (phase 20) The hold is a retention policy setting, `inactive_keep_days` (90 days by default), counted from when the device was marked inactive. During the hold the policy applies as usual, `min_backups` included. Afterwards the floor is lifted and every unpinned backup expires. With no value, or no policy, backups are kept until someone acts (reactivates, sets a policy, or purges). Pinned backups keep a device inactive until they are unpinned. |
 | 42 | (phase 20) `Device.ip_address` is unique among **active** devices only, so a replacement can take over its predecessor's address during the hold. Inactive devices are never matched to pushes, so decision 25 still holds. Reactivating a device whose address is taken fails. |
+| 43 | (phase 21) API tokens are built before monitoring and serve both: one token system, with **scopes** (`api`, `monitoring`, `monitoring_platform`) narrowing what a token reaches, never widening its user's grants. Secrets are 32 random bytes stored as SHA-256 (a slow hash adds nothing at that entropy), prefixed `dvt_` for secret scanners, expiring (365 days at most) and optionally limited to source networks. |
+| 44 | (phase 21) Machine access uses **service accounts**: users that cannot sign in, managed by global administrators, granted through user groups like anyone else, and never members of a global-administrator group. Token use is audited on first use from each address and on refusal, not per request, so polling does not flood the log. |
+| 45 | (phase 22) Monitoring is **pull only**: Zabbix HTTP agent items and a Prometheus scrape read `/api/monitoring/`, and DeviceVault opens no outbound connection. Zabbix trapper push is a later transport over the same catalogue (ROADMAP D30). |
+| 46 | (phases 22-23) Per-device status reaches **existing Zabbix hosts** through a template linked to them, polling `device/` once per host and matched on `{HOST.IP}` (overridable by `{$DV.DEVICE.ID}`), not through host prototypes that would duplicate the inventory. The proxies that monitor devices usually cannot reach the orchestrator's zone, so they poll a **receiver relay** in their own zone. The scheduler leader publishes a **signed** device snapshot to Redis every 15 minutes, one per relay owner (each service account with a `monitoring` token), and receivers verify it against the pinned orchestrator key and answer from memory. Up to about 30 minutes of staleness is accepted, since backups run daily. Estate, group and platform metrics still come from the orchestrator directly. An unmatched or invisible device answers `found: false`, and the template turns that into a coverage alarm. |
+| 47 | (phase 22) Failures carry a structured **`failure_reason`** set by workers (`DriverError(reason=...)`, in the signed event) and the orchestrator. Monitoring exposes the reason only, never the error text, which can hold device output. |
+| 48 | (phase 22) "Overdue" is computed by DeviceVault from each device's schedule (`backups/freshness.py`, the base Q5 builds on), and raw ages are exported too, so the templates alarm on the schedule-aware flag and a flat threshold remains available. Push-only devices have no expected interval until Q5. |
+| 49 | (phase 22) One **metric catalogue** feeds the JSON endpoints, Prometheus and the Zabbix generator. Prometheus gets no per-device series, and durations are window quantile gauges rather than histograms, since histograms need the rollups decision 37 avoids. |
+| 50 | (phase 23) The relay is a receiver listener, not a new component: receivers are the part already built and deployed to accept inbound connections in device zones. It is opt-in per receiver, serves every device in the snapshots it holds, and uses a **self-signed certificate** (Zabbix cannot pin one, so *verify peer* is off). That is accepted because only a `monitoring`-scoped, network-limited token and read-only metadata cross it. Receivers learn relay tokens as digests in their assignment and report use and refusals as signed events. |
+| 51 | (phase 24) Zabbix templates are **generated and committed** for 6.0 and 7.0 LTS, with a drift test, and validated by importing them into real Zabbix containers (`make zabbix-validate`, its own workflow, not part of `make check`). |

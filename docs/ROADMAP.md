@@ -55,12 +55,12 @@ Small, self-contained, and each one removes a reason for an evaluator to say "no
 | Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | Complete: PR #58 (`5502de9`), phase 14 | Storage stops growing without bound. |
 | Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M |  | Failures and changes reach people instead of waiting to be noticed. |
 | Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | Complete: PR #59 (`0930972`), phase 15 | "What changed?" answered at a glance, with added/removed line counts. |
-| Q4 | [Zabbix and Prometheus monitoring](#monitoring-integration-zabbix-and-prometheus) | S-M |  | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
+| Q4 | [Zabbix and Prometheus monitoring](#q4-monitoring-endpoints-zabbix-first-prometheus-alongside) | S-M | Scheduled: phases 22-24 (after Q9) | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
 | Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S |  | The classic silent failure: a device that stopped backing up weeks ago. |
 | Q6 | [Config search](#q6-config-search) | S-M | Complete: PRs #61, #62 (`2b4435c`, `d6b4250`), phases 16-17 | "Which devices still have SNMP community `public`?" in seconds. |
 | Q7 | [Bulk device import and export](#q7-bulk-device-import-and-export) | S |  | Onboarding hundreds of devices from a CSV instead of a form. |
 | Q8 | [Pin, label and annotate backups](#q8-pin-label-and-annotate-backups) | S | Complete: PR #65 (`159e163`), phase 19 | Mark known-good versions, exempt them from retention, record why. |
-| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S |  | Automation and scripting without borrowing a browser session. |
+| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S | Scheduled: phase 21 | Automation and scripting without borrowing a browser session. |
 | Q10 | [Audit log export and syslog forwarding](#q10-audit-log-export-and-syslog-forwarding) | S |  | Satisfies "send it to the SIEM" without a project. |
 | Q11 | [Add more built-in vendor drivers](#q11-more-built-in-vendor-drivers) | S each |  | Each Netmiko-based driver is a few dozen lines; covers a new customer base. |
 | Q12 | [Backup verification probes](#q12-backup-verification-probes) | S |  | Reject empty, truncated or error-page "backups" before they replace a good one. |
@@ -81,16 +81,19 @@ dead site does not send 400 emails.
 Scheduled as phase 15 (`feat/change-summary`); see ARCHITECTURE.md section 10 and decision 32. Notifications on
 changes (Q2) and change counts in monitoring (Q4) can use `BackupJob.changed`, `lines_added`, `lines_removed` and `lines_modified`.
 
-### Q4. Monitoring endpoints: Zabbix first, Prometheus second
+### Q4. Monitoring endpoints: Zabbix first, Prometheus alongside
 Enterprises already have a monitoring stack, and meeting them there is worth more than building charts.
-Zabbix is the first target; Prometheus comes almost free from the same data. The full design, metric
-list and generated templates are in [Monitoring integration](#monitoring-integration-zabbix-and-prometheus)
-below, and the larger follow-ups are D30.
+One Zabbix host polls DeviceVault for estate, group and platform health, and a second template linked to the
+device hosts Zabbix already has (matched on their address) shows each device's backup status on it, polled through a receiver relay in the device's zone. Prometheus
+reads the same catalogue. Designed in [ARCHITECTURE.md section 7.7](ARCHITECTURE.md#77-monitoring-zabbix-and-prometheus-phases-22-24)
+(phases 22-24, after Q9 in phase 21). The larger follow-ups are D30.
 
 ### Q5. Stale and missing backup detection
 Compute "last successful backup" per device and flag devices that are overdue relative to their schedule
 (or, for push devices, the expected push interval). Surface on the dashboard and feed Q2. For push mode
-this is the only way to notice a device that quietly stopped sending.
+this is the only way to notice a device that quietly stopped sending. Phase 22 builds the core
+(`backups/freshness.py`: expected interval from the schedule, `overdue`) for monitoring; Q5 adds the per-device
+push interval, the UI and notifications.
 
 ### Q6. Config search
 Full-text search over the latest backup of each device, with secret values indexed only as keyed tokens so a
@@ -112,8 +115,9 @@ labels and notes `view_contents`. Designed in [ARCHITECTURE.md section 7.4](ARCH
 
 ### Q9. Personal API tokens
 Scoped, expiring, revocable tokens for scripts and CI, hashed at rest, shown once, audited on use, and
-subject to exactly the same grants as the owning user (no privilege escalation). Needed for anything in
-the integrations theme (D8).
+subject to exactly the same grants as the owning user (no privilege escalation), plus service accounts for
+machine access. Needed for monitoring (Q4) and anything in the integrations theme (D8). Designed in
+[ARCHITECTURE.md section 7.6](ARCHITECTURE.md#76-api-tokens-and-service-accounts-phase-21) (phase 21).
 
 ### Q10. Audit log export and syslog forwarding
 CSV/JSON export with filters, and an optional forwarder to syslog (RFC 5424, TLS) or a webhook, configured as
@@ -143,127 +147,6 @@ exercise in the existing dashboard page. Designed in [ARCHITECTURE.md section 7.
 ### Q14. Scheduled digest report
 A weekly/daily summary (success rate, failures, devices with no backup, changes, storage growth) rendered
 to email or a PDF, per device group and for the whole estate. Built on Q2 delivery and Q13 queries.
-
-### Monitoring integration: Zabbix and Prometheus
-
-This is the design behind Q4. The goal is that a Zabbix administrator can import one template, set two
-macros (URL and token) and immediately see backup times, success and failure counts and ratios, stale
-devices, and the health of the platform itself, with sensible triggers already attached.
-
-**Approach: a read-only HTTP JSON API plus generated templates.** Zabbix's *HTTP agent* items poll a
-URL on an interval and *dependent items* then extract values from that one response with JSONPath, so a
-single request per interval feeds dozens of items. This needs no agent on the orchestrator, no
-Zabbix-specific code in workers, and nothing outbound from DeviceVault. It lives in the existing
-`monitoring` app (which already owns the Flower endpoints), and every number is computed in the
-orchestrator from tables it already has (`BackupJob`, workers, push refusals, schedules).
-
-**Endpoints** (under `/api/monitoring/`, JSON, `GET` only):
-
-| Endpoint | Returns | Used by |
-|---|---|---|
-| `summary/` | Estate-wide metrics (list below) in one object | Master item, dependent items |
-| `device-groups/` | One entry per device group with the same job metrics | Low-level discovery (LLD) and per-group items |
-| `devices/?group=<id>` | Per-device last-backup facts, paged and filterable | Optional device-level LLD (see scale note) |
-| `collectors/`, `storage-targets/`, `receivers/` | Liveness, last seen, queue depth, last write or push, refusals | LLD for platform components |
-| `zabbix/template/` | The Zabbix template, generated from the live driver and metric catalogue | Import in Zabbix |
-| `metrics` (Q4b) | The same data in Prometheus text format | Prometheus scrape |
-
-**Authentication and permissions.** A dedicated, read-only **monitoring token** (hashed at rest, shown once,
-revocable, optional source-address allow-list, every use rate-limited and the creation and revocation
-audited). It is a bearer token (`Authorization: Bearer ...`), which Zabbix HTTP agent items support through
-the `{$DV.TOKEN}` macro, so no session or CSRF handling is needed. It grants only these endpoints and never any
-backup content, credentials or settings. It builds on Q9's token machinery but is its own scope, so a
-monitoring system never holds a user's rights. Following the repository rule, each view states its
-`permission_classes` (a new `IsMonitoringToken` alongside `IsGlobalAdmin`, added to the test that enforces
-the rule), and a global administrator can also call them from the UI session for debugging.
-
-**Metrics.** Anything an operator might graph or alert on, in two flavours: *window gauges* (easy to alert on)
-and *monotonic counters* (Zabbix derives rates with a "change per second" preprocessing step and survives
-polling gaps).
-
-- **Backup outcomes** (per estate and per device group): jobs started, succeeded, failed, retried, timed
-  out, currently running and queued, in the last 1 h, 24 h and 7 d, plus lifetime counters. **Success ratio
-  and failure ratio** for each window, and a **failure count by reason** (connection, authentication,
-  timeout, verification probe (Q12), storage, hash mismatch).
-- **Timing**: backup duration average, median, 95th percentile and maximum per window, split into
-  collect time and store time (the pipeline already has separate collected and stored events), queue wait
-  before a job starts, and the end-to-end age of the **newest** and **oldest** successful backup.
-- **Freshness**: devices whose last success is older than their expected interval (Q5), devices **never**
-  backed up, devices **disabled**, devices in **consecutive failure** (1, 3, 5+), and the age in seconds of
-  the oldest successful backup per group, which is the single most useful alert in practice.
-- **Change** (needs Q3): backups with changes in the window, total lines added and removed, and devices that
-  changed more than N times (a flapping config is a signal).
-- **Volume**: bytes stored per window and in total, per storage target, backups held, and growth rate,
-  so capacity alerts appear before a disk fills.
-- **Push** (receivers): files accepted, refused (by reason), bytes received, last push per receiver, and
-  devices push-enabled but silent.
-- **Platform health**: workers by state (approved and online, offline, pending approval, revoked), heartbeat
-  age per worker, applied versus current assignment version (a stuck assignment), queue depth per collection
-  group and storage target, whether the **scheduler has a leader** and its lease age, last successful
-  scheduler tick, `events` backlog, storage target check result and free space, Redis and RabbitMQ
-  reachability from the orchestrator, and key and certificate expiry where known.
-- **Self-description**: DeviceVault version, orchestrator count, `payload_encryption` on or off, and the
-  server time (so Zabbix can alarm on clock skew between the two).
-
-**Generated templates.** `zabbix/template/` (and a `make` target / `manage.py` command that writes the file
-for offline use) emits a Zabbix template in the YAML export format, one file per supported Zabbix LTS (the
-format is versioned, so emit the oldest supported and test on the newest). Generating, rather than
-hand-writing, keeps the template exactly in step with the metric catalogue and with the drivers a given
-installation actually has. Contents:
-
-- **`DeviceVault by HTTP`** — the main template, applied to one Zabbix host that represents the orchestrator
-  (no agent needed). Macros: `{$DV.URL}`, `{$DV.TOKEN}` (secret macro), `{$DV.INTERVAL}`, and the thresholds
-  below. One master HTTP agent item polls `summary/`; all estate metrics are dependent items with JSONPath and
-  `Discard unchanged with heartbeat` where it helps. Value maps for worker and job states, units
-  (`s`, `B`, `%`) set correctly, a **dashboard** (success ratio, duration percentiles, failures by reason,
-  freshness, platform health) and a graph prototype set are included.
-- **LLD rules** for device groups, collection groups, storage targets, workers and receivers, with item
-  and trigger prototypes for each, so new groups and workers appear in Zabbix on their own and removed ones
-  age out (*Keep lost resources period*).
-- **Triggers with sane defaults**, all threshold-macro driven and with `Recovery` expressions, tags
-  (`component`, `group`, `scope`) and dependencies so a down orchestrator does not raise 200 child alerts:
-  - *Success ratio below `{$DV.SUCCESS.MIN}` (default 95 %) over 24 h*, per estate and per group.
-  - *No successful backup for `{$DV.STALE.MAX}`* (default 2 × the longest schedule) per group.
-  - *Devices never backed up > 0*, *consecutive failures >= `{$DV.FAIL.CONSEC}`*.
-  - *Backup duration p95 above `{$DV.DURATION.MAX}`* or a 3× jump against the previous week
-    (`trendavg`).
-  - *Scheduler has no leader for > 2 min*, *worker heartbeat older than 3 intervals*, *worker pending approval
-    for > 1 h*, *assignment version behind*, *storage target check failing*, *storage free space low*,
-    *push refusals spiking*, *monitoring endpoint unreachable or returning 401/5xx*, *clock skew > 60 s*.
-- **`DeviceVault Device by HTTP`** (optional, see scale note): a host-prototype style template that creates
-  one Zabbix host per device (or per tag/smart group (D27)) so network teams can see "last backup" on the
-  device they already monitor. Because they often have a Zabbix host per device already, the same
-  per-device LLD can instead be provided as a **template linked to the existing host**, matched by a
-  `{$DV.DEVICE}` macro (the device name or IP in DeviceVault), which avoids duplicating inventory.
-
-**Scale note.** A 10,000-device estate must not become 10,000 requests a minute. Two controls: estate and
-per-group metrics are aggregated server-side in one query each (an indexed query over a bounded recent window,
-cached for the polling interval, with no per-request heavy work), and the per-device endpoint is paged,
-filterable by group and tag, and meant to be polled slowly (for example every 15 minutes), with a single bulk response feeding
-dependent items. Discovery should default to **groups, not devices**; per-device discovery is opt-in.
-
-**Push alternative.** For firewalled Zabbix proxies or air-gapped networks, the same metric catalogue can be
-sent out through `zabbix_sender`-style **trapper** items by the leader scheduler on a timer (`DV_ZABBIX_*`
-variables, secret from a file), instead of being polled. It is a thin second transport over the same
-metric computation, so it is a follow-up (D30), not part of the first cut.
-
-**Prometheus (Q4b).** The same catalogue rendered in Prometheus text format at `/api/monitoring/metrics`
-(counters for outcomes, histograms for durations, gauges for freshness and health, with `device_group`,
-`collection_group` and `reason` labels and **no per-device labels by default** to keep cardinality bounded), plus
-shipped example alert rules and a Grafana dashboard in `deploy/`. This is mostly formatting work once the
-metrics exist.
-
-**Delivery in slices** (each useful on its own):
-1. Metric computation module and the `summary/` and `device-groups/` endpoints with the monitoring token, plus tests, including the
-   authorization test.
-2. Template generator and the `DeviceVault by HTTP` template with the estate, group and platform-health items and
-   triggers, validated by importing it into a Zabbix container in the dev stack (a `make` target; Docker only, like
-   everything else).
-3. Per-device endpoint and optional template; `metrics` for Prometheus; docs in `DEPLOYMENT.md` and an
-   `OPERATIONS.md` page on thresholds and tuning.
-
-Metrics that depend on other roadmap items degrade gracefully: change counts appear once Q3 exists, freshness
-against expected interval once Q5 does, and failure reasons from verification probes once Q12 does.
 
 ---
 
@@ -556,8 +439,8 @@ logo/colour (D19), keyboard-first navigation for the diff and search views.
 
 ### Theme G — Monitoring and observability
 
-The first slice is Q4 ([Monitoring integration](#monitoring-integration-zabbix-and-prometheus)). These are the
-larger follow-ups.
+The first slice is Q4 ([ARCHITECTURE.md section 7.7](ARCHITECTURE.md#77-monitoring-zabbix-and-prometheus-phases-22-24)).
+These are the larger follow-ups.
 
 #### D30. Monitoring suite: push transport, tracing and more platforms
 **Impact**: Fits DeviceVault into whichever operations stack a customer runs, including restricted networks.
@@ -566,7 +449,11 @@ larger follow-ups.
   for sites where Zabbix cannot reach the orchestrator, and an optional **Zabbix agent 2 plugin or
   `UserParameter` pack** for the worker and receiver hosts (disk, state volume, process, listener ports), shipped as
   a second template.
-- **Per-device status in Zabbix** at scale: host-prototype automation driven by inventory sync (D8), with the
+- **Deeper platform metrics** left out of Q4: RabbitMQ queue depth per collection group and storage target
+  (needs the management API and its credentials), the `events` backlog, Redis and broker reachability, stored
+  storage-target check results and free space, and key and certificate expiry.
+- **Per-device status in Zabbix** at scale: Q4 links a template to the hosts Zabbix already has. This adds
+  host-prototype automation driven by inventory sync (D8) for devices Zabbix doesn't know yet, with the
   device's tags (D27) mapped to Zabbix host groups and tags.
 - **Event stream**: every job and worker event also available as a webhook or syslog message (Q2, Q10), so
   Zabbix (or Splunk, Elastic, Datadog) can alarm on a single occurrence rather than a polled aggregate.
