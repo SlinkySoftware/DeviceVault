@@ -80,13 +80,17 @@ zabbix-template: dev-image
 
 # Import the committed templates into real Zabbix servers (each version in turn, deploy/zabbix-test/) and check
 # them against recorded responses. Slow, so not part of `check`; zabbix.yml runs it on monitoring changes.
+# The images each version runs, pinned: <version>:<zabbix image tag>.
+ZABBIX_IMAGES = 6.0:alpine-6.0.49 7.0:alpine-7.0.32
+ZABBIX_POSTGRES_IMAGE = postgres:16-alpine
 zabbix-validate: dev-image
-	@status=0; for v in $(ZABBIX_VERSIONS); do \
-		echo "== Zabbix $$v"; \
-		$(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env up -d --quiet-pull postgres server web stub \
-			&& $(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env run --rm validate --version $$v \
+	@status=0; for pair in $(ZABBIX_IMAGES); do \
+		v=$${pair%%:*}; export ZABBIX_TAG=$${pair#*:} POSTGRES_IMAGE=$(ZABBIX_POSTGRES_IMAGE); \
+		echo "== Zabbix $$v ($$ZABBIX_TAG)"; \
+		$(ZABBIX_TEST) up -d --quiet-pull postgres server web stub \
+			&& $(ZABBIX_TEST) run --rm validate --version $$v \
 			|| status=1; \
-		$(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env down --volumes --remove-orphans --timeout 5; \
+		$(ZABBIX_TEST) down --volumes --remove-orphans --timeout 5; \
 		[ $$status -eq 0 ] || break; \
 	done; exit $$status
 
