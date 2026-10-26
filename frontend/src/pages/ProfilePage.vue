@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <template>
   <q-page padding>
-    <q-card style="max-width: 720px">
+    <q-card style="max-width: 960px">
       <q-card-section class="row items-center">
         <q-avatar size="64px" color="primary" text-color="white" class="q-mr-md">
           {{ initials }}
@@ -38,6 +38,12 @@
           toggle-color="primary"
           @update:model-value="saveTheme"
         />
+      </q-card-section>
+
+      <q-separator />
+      <q-card-section>
+        <div class="text-subtitle1 q-mb-sm">API tokens</div>
+        <ApiTokensPanel :api="tokensApi" />
       </q-card-section>
 
       <template v-if="editable">
@@ -78,8 +84,9 @@
 import type { QForm } from 'quasar'
 import { computed, reactive, ref, watch } from 'vue'
 
-import { authApi } from '@/api/endpoints'
+import { authApi, tokensApi } from '@/api/endpoints'
 import type { ThemeMode, UserDetails } from '@/api/types'
+import ApiTokensPanel from '@/components/ApiTokensPanel.vue'
 import { useNotify } from '@/composables/useNotify'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'

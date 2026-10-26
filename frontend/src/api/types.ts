@@ -450,14 +450,61 @@ export interface UserGroup {
   /** External groups: the provider that fills them, and its name for the group. */
   provider_name: string | null
   external_id: string
+  /** People in the group; service accounts join groups from the Service Accounts page. */
   members: Id[]
   member_names: string[]
+  service_account_names: string[]
   grants: Grant[]
   created_at: IsoDateTime
   updated_at: IsoDateTime
 }
 
 export type UserGroupWrite = Pick<UserGroup, 'name' | 'description' | 'is_global_admin' | 'members' | 'grants'>
+
+/** `api`: the whole API as the user; `monitoring`: the monitoring endpoints only; `monitoring_platform`: with platform health. */
+export type TokenScope = 'api' | 'monitoring' | 'monitoring_platform'
+
+export interface ApiToken {
+  id: Id
+  name: string
+  /** Shown in lists and the audit log; the token itself is shown once, when created. */
+  prefix: string
+  username: string
+  scopes: TokenScope[]
+  allowed_networks: string[]
+  expires_at: IsoDateTime
+  created_at: IsoDateTime
+  created_by_username: string | null
+  last_used_at: IsoDateTime | null
+  last_used_address: string | null
+  revoked_at: IsoDateTime | null
+  state: 'live' | 'expired' | 'revoked'
+}
+
+export interface ApiTokenWrite {
+  name: string
+  scopes: TokenScope[]
+  allowed_networks: string[]
+  expires_in_days: number
+}
+
+export interface ApiTokenCreated extends ApiToken {
+  /** The token, returned only by the create call. */
+  token: string
+}
+
+export interface ServiceAccount {
+  id: Id
+  username: string
+  description: string
+  is_active: boolean
+  groups: Id[]
+  group_names: string[]
+  live_tokens: number
+  date_joined: IsoDateTime
+}
+
+export type ServiceAccountWrite = Pick<ServiceAccount, 'username' | 'description' | 'is_active' | 'groups'>
 
 export type AuditOutcome = 'success' | 'failure' | 'denied'
 

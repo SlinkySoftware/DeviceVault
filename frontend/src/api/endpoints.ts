@@ -3,6 +3,9 @@
 
 import { http } from './client'
 import type {
+  ApiToken,
+  ApiTokenCreated,
+  ApiTokenWrite,
   ActivityItem,
   ActivityWindow,
   AuditEntry,
@@ -44,6 +47,8 @@ import type {
   SavedSearchWrite,
   SearchQuery,
   SearchResponse,
+  ServiceAccount,
+  ServiceAccountWrite,
   StorageDriver,
   StorageTarget,
   StorageTargetWrite,
@@ -222,6 +227,40 @@ const userGroups = resource<UserGroup, UserGroupWrite>('/user-groups/')
 
 // Groups are edited with PATCH, so members and grants are replaced explicitly.
 export const userGroupsApi = { ...userGroups, update: (id: Key, body: UserGroupWrite) => userGroups.patch(id, body) }
+
+/** A token list for one owner: the signed-in user's own, or a service account's. */
+export interface TokenApi {
+  list(): Promise<ApiToken[]>
+  create(body: ApiTokenWrite): Promise<ApiTokenCreated>
+  revoke(id: Id): Promise<void>
+}
+
+export const tokensApi: TokenApi = {
+  list: async () => (await http.get<ApiToken[]>('/tokens/')).data,
+  create: async (body) => (await http.post<ApiTokenCreated>('/tokens/', body)).data,
+  revoke: async (id) => {
+    await http.post(`/tokens/${id}/revoke/`)
+  },
+}
+
+export const adminTokensApi = {
+  list: async () => (await http.get<ApiToken[]>('/admin/tokens/')).data,
+  revoke: async (id: Id) => {
+    await http.post(`/admin/tokens/${id}/revoke/`)
+  },
+}
+
+const serviceAccounts = resource<ServiceAccount, ServiceAccountWrite>('/service-accounts/')
+
+export const serviceAccountsApi = {
+  ...serviceAccounts,
+  update: (id: Key, body: ServiceAccountWrite) => serviceAccounts.patch(id, body),
+  tokens: (id: Id): TokenApi => ({
+    list: async () => (await http.get<ApiToken[]>(`/service-accounts/${id}/tokens/`)).data,
+    create: async (body) => (await http.post<ApiTokenCreated>(`/service-accounts/${id}/tokens/`, body)).data,
+    revoke: adminTokensApi.revoke,
+  }),
+}
 
 const authProviders = resource<AuthProvider, AuthProviderWrite>('/auth-providers/')
 

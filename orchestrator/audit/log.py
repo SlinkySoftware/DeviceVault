@@ -18,6 +18,14 @@ def client_ip(request) -> str | None:
         return None
 
 
+def _token_prefix(request) -> str:
+    """The prefix of the API token the request authenticated with, if any."""
+    from accounts.models import ApiToken
+
+    auth = getattr(request, '_auth', None) if request is not None else None
+    return auth.prefix if isinstance(auth, ApiToken) else ''
+
+
 def record(
     request,
     action: str,
@@ -38,6 +46,9 @@ def record(
         actor = user if user is not None and user.is_authenticated else None
     if actor_name is None:
         actor_name = actor.get_username() if actor is not None else ''
+    prefix = _token_prefix(request)
+    if prefix:
+        details = {**(details or {}), 'token': prefix}
     entry = AuditLog.objects.create(
         actor=actor,
         actor_name=actor_name[:150],

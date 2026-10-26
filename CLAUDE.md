@@ -40,7 +40,9 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   sending tasks) plus apps: `accounts` (user groups, memberships, device-group grants;
   `access.py` decides every authorization; `sessions.py` timeouts; `login.py` password sign-in,
   identity linking and group sync; `providers/` identity provider kinds (pydantic `Config`; LDAP, OIDC); `oidc_views.py` the OIDC redirects;
-  `api.py` sign-in, users and user groups; `provider_api.py` auth providers), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices` (`lifecycle.py` marks devices inactive, purges and deletes them),
+  `api.py` sign-in, users and user groups; `provider_api.py` auth providers; `tokens.py` API tokens (bearer
+  authentication, scopes: each view's `token_scopes`, default `('api',)`, `()` for session-only views; rate limits,
+  use and refusal audit); `token_api.py` token and service-account endpoints), `api`, `audit` (`log.record(...)`), `backups` (jobs, scheduler, `retention.py` the retention pass, `changes.py` change summaries, `dashboard.py` the dashboard cards), `core`, `credentials`, `devices` (`lifecycle.py` marks devices inactive, purges and deletes them),
   `monitoring` (Flower endpoints and the `/api/flower-auth/` check nginx makes before proxying them),
   `policies`, `search` (config search: `tokens.py` secret tokens, `indexing.py` documents and the catch-up pass,
   `query.py` searches), `push` (receiver settings and refusals; `service.py` builds receiver assignments and

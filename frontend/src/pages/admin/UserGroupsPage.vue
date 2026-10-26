@@ -62,7 +62,7 @@
       <q-toggle
         v-model="crud.form.value.is_global_admin"
         label="Global administrator: every permission on every device group, and application administration"
-        :disable="editing?.is_builtin"
+        :disable="editing?.is_builtin || (!crud.form.value.is_global_admin && !!editing?.service_account_names.length)"
       />
       <q-select
         v-model="crud.form.value.members"
@@ -81,6 +81,12 @@
         :hint="editing?.source === 'external' ? 'Filled by the identity provider at sign-in' : undefined"
         @filter="filterUsers"
       />
+      <div v-if="editing?.service_account_names.length" class="row items-center q-gutter-xs">
+        <span class="text-caption text-muted">Service accounts (managed on the Service Accounts page):</span>
+        <q-chip v-for="name in editing.service_account_names" :key="name" dense icon="smart_toy" color="blue-grey" text-color="white">
+          {{ name }}
+        </q-chip>
+      </div>
 
       <div v-if="!crud.form.value.is_global_admin">
         <div class="text-subtitle2 q-mb-sm">Device group permissions</div>
@@ -184,7 +190,13 @@ const crud = useCrud<UserGroup, UserGroupWrite>({
 
 const columns: QTableColumn<UserGroup>[] = [
   { name: 'name', label: 'Name', field: 'name', align: 'left', sortable: true },
-  { name: 'members', label: 'Members', field: (g) => g.members.length, align: 'center', sortable: true },
+  {
+    name: 'members',
+    label: 'Members',
+    field: (g) => g.members.length + g.service_account_names.length,
+    align: 'center',
+    sortable: true,
+  },
   { name: 'grants', label: 'Device groups (S B C D A)', field: (g) => g.grants.length, align: 'left' },
   { name: 'actions', label: 'Actions', field: 'id', align: 'right' },
 ]

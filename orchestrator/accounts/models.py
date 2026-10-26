@@ -178,6 +178,45 @@ class GroupMappingRule(models.Model):
         return f'{self.provider.slug}:{self.external_group} -> {self.user_group.name}'
 
 
+class ApiToken(models.Model):
+    """A bearer token acting as ``user``, narrowed by its scopes (accounts.tokens).
+
+    Only the SHA-256 of the secret is kept; the token itself is shown once. A
+    revoked token keeps its row, so audit entries naming its prefix stay readable.
+    """
+
+    API = 'api'
+    MONITORING = 'monitoring'
+    MONITORING_PLATFORM = 'monitoring_platform'
+    SCOPES = (API, MONITORING, MONITORING_PLATFORM)
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='api_tokens')
+    name = models.CharField(max_length=100)
+    prefix = models.CharField(max_length=8, unique=True, help_text='Shown in lists and audit entries')
+    digest = models.CharField(max_length=64, help_text='SHA-256 of the secret')
+    scopes = models.JSONField(default=list)
+    allowed_networks = models.JSONField(default=list, blank=True, help_text='CIDRs; empty for any address')
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    last_used_address = models.GenericIPAddressField(null=True, blank=True)
+    addresses = models.JSONField(default=list, blank=True, help_text='Addresses the token has been used from')
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'name'], condition=Q(revoked_at__isnull=True), name='accounts_token_name_unique'
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.name} ({self.prefix}) of {self.user.username}'
+
+
 class ExternalIdentity(models.Model):
     """Links a user to a provider by the provider's immutable subject (OIDC ``sub``, an LDAP identity attribute)."""
 
