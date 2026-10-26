@@ -10,10 +10,12 @@ import asyncssh
 
 from devicevault_protocol.logs import get_logger
 
+from . import certificate as tls
 from . import hostkey
 from .config import ReceiverConfig
 from .events import Events
 from .ingest import Ingestor
+from .monitoring import RelayListener
 from .ssh import SshListener
 from .tftp import TftpListener
 
@@ -24,16 +26,32 @@ INGEST_THREADS = 4
 
 
 class Receiver:
-    def __init__(self, *, ingestor: Ingestor, events: Events, host_key: asyncssh.SSHKey, spool_dir: Path):
+    def __init__(
+        self,
+        *,
+        ingestor: Ingestor,
+        events: Events,
+        host_key: asyncssh.SSHKey,
+        spool_dir: Path,
+        certificate: tls.Certificate | None = None,
+    ):
         self.ingestor = ingestor
         self.events = events
         self.host_key = host_key
         self.spool_dir = spool_dir
+        self.certificate = certificate
         self.config = ReceiverConfig()
         self.authorized_keys: asyncssh.SSHAuthorizedKeys | None = None
         self.ssh = SshListener(self)
         self.tftp = TftpListener(self)
+        self.relay = RelayListener(self)
         self._pool = ThreadPoolExecutor(max_workers=INGEST_THREADS, thread_name_prefix='ingest')
+
+    def load_certificate(self) -> tls.Certificate:
+        """The relay's TLS certificate, generated in the state volume the first time it is needed."""
+        if self.certificate is None:
+            self.certificate = tls.load_or_create()
+        return self.certificate
 
     async def apply(self, config: ReceiverConfig) -> None:
         """Switch to ``config``: new logins and uploads use it at once; listeners restart if their address changed."""
@@ -46,6 +64,7 @@ class Receiver:
         self.config = config
         await self.ssh.configure()
         await self.tftp.configure()
+        await self.relay.configure()
 
     async def ingest(self, **kwargs: Any) -> str:
         loop = asyncio.get_running_loop()
@@ -60,9 +79,11 @@ class Receiver:
             'vault_kid': self.config.encryption.kid if self.config.encryption else None,
             'devices': len(self.config.devices),
             'listeners': {'ssh': self.ssh.status(), 'tftp': self.tftp.status()},
+            'monitoring': self.relay.status(),
         }
 
     async def close(self) -> None:
         await self.ssh.stop()
         await self.tftp.stop()
+        await self.relay.stop()
         self._pool.shutdown(wait=True, cancel_futures=False)

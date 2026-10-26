@@ -46,7 +46,8 @@ class EventRejected(Exception):
     pass
 
 
-def _verified(envelope: Any) -> tuple[dict[str, Any], Worker]:
+def receiver_event(envelope: Any, *, max_age: timedelta) -> tuple[dict[str, Any], Worker]:
+    """The payload of an event signed by an approved receiver, and the receiver. Raises EventRejected."""
     try:
         claimed = signing.peek(envelope)
         worker_id = str(uuid.UUID(str(claimed.get('worker_id'))))
@@ -54,13 +55,21 @@ def _verified(envelope: Any) -> tuple[dict[str, Any], Worker]:
             raise EventRejected('signer does not match worker_id')
         worker = Worker.objects.filter(pk=worker_id, status=STATUS_APPROVED, role=ROLE_RECEIVER).first()
         if worker is None:
-            raise EventRejected('push events are only accepted from approved receivers')
-        payload = signing.verify(envelope, signing.public_key_from_b64(worker.signing_key), max_age=EVENT_MAX_AGE)
+            raise EventRejected('receiver events are only accepted from approved receivers')
+        payload = signing.verify(envelope, signing.public_key_from_b64(worker.signing_key), max_age=max_age)
+    except (EventRejected, signing.SignatureError, ValueError, TypeError, AttributeError) as exc:
+        raise EventRejected(str(exc)) from exc
+    return payload, worker
+
+
+def _verified(envelope: Any) -> tuple[dict[str, Any], Worker]:
+    try:
+        payload, worker = receiver_event(envelope, max_age=EVENT_MAX_AGE)
         if payload.get('protocol') not in PROTOCOLS:
             raise EventRejected(f'unknown protocol {payload.get("protocol")!r}')
-    except (EventRejected, signing.SignatureError, ValueError, TypeError, AttributeError) as exc:
+    except EventRejected as exc:
         logger.warning('push_event_rejected', extra={'reason': str(exc)})
-        raise EventRejected(str(exc)) from exc
+        raise
     return payload, worker
 
 

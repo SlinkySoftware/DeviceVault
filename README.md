@@ -120,9 +120,11 @@ make dev-reset     # stop and delete all dev data
 | API (Django runserver) | http://localhost:8000/api/ |
 | Flower | http://localhost:5555 |
 | RabbitMQ management | http://localhost:15672 (devicevault / devicevault) |
+| Receiver monitoring relay (once enabled) | https://localhost:8443/device/ (self-signed) |
 
 Ports can be moved with `DV_DEV_WEB_PORT`, `DV_DEV_API_PORT`, `DV_DEV_FLOWER_PORT`,
-`DV_RABBITMQ_PORT`, `DV_RABBITMQ_MANAGEMENT_PORT`, `DV_REDIS_PORT` and `DV_POSTGRES_PORT`.
+`DV_RABBITMQ_PORT`, `DV_RABBITMQ_MANAGEMENT_PORT`, `DV_REDIS_PORT`, `DV_POSTGRES_PORT`,
+`DV_DEV_SSH_PORT`, `DV_DEV_TFTP_PORT` and `DV_DEV_RELAY_PORT`.
 
 ### Quality checks
 

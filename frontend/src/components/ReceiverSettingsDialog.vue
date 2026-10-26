@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- A push receiver's settings: what it listens on and how devices log in. -->
+<!-- A push receiver's settings: what it listens on, how devices log in, and its monitoring relay. -->
 <template>
   <FormDialog v-model="open" :title="`Receiver settings · ${worker?.name ?? ''}`" :saving="saving" width="640px" @submit="submit">
     <q-inner-loading :showing="loading" />
@@ -78,6 +78,28 @@
           which can be forged on networks that do not filter spoofed traffic.
         </q-banner>
       </template>
+
+      <q-separator />
+      <q-toggle v-model="form.monitoring_enabled" label="Monitoring endpoint (relay for Zabbix proxies)" />
+      <template v-if="form.monitoring_enabled">
+        <q-input
+          v-model.number="form.monitoring_port"
+          type="number"
+          outlined
+          label="HTTPS port"
+          :hint="`Zabbix proxies in this receiver's zone poll ${relayUrl(relayHost, form.monitoring_port)}/device/`"
+          :rules="[(v: number) => (Number.isInteger(v) && v >= 1 && v <= 65535) || 'A port from 1 to 65535']"
+        />
+        <div class="text-caption text-grey">
+          Answers device requests from the published monitoring snapshots, for service-account tokens with the
+          monitoring scope. The certificate is self-signed, so turn <em>Verify peer</em> off in Zabbix.
+        </div>
+        <q-banner v-if="certificate" dense rounded class="bg-subtle">
+          <template #avatar><q-icon name="lock" color="primary" /></template>
+          TLS certificate (SHA-256):
+          <div class="fingerprint q-mt-xs">{{ certificate }}</div>
+        </q-banner>
+      </template>
     </template>
   </FormDialog>
 </template>
@@ -89,6 +111,7 @@ import { workersApi } from '@/api/endpoints'
 import type { ReceiverSettings, ReceiverSettingsWrite, Worker } from '@/api/types'
 import FormDialog from '@/components/FormDialog.vue'
 import { useNotify } from '@/composables/useNotify'
+import { relayUrl } from '@/utils/relay'
 
 const props = defineProps<{ worker: Worker | null }>()
 
@@ -112,6 +135,8 @@ const hostKey = computed(
     props.worker?.capabilities.receiver?.host_key_fingerprint ??
     '',
 )
+const certificate = computed(() => props.worker?.runtime.receiver?.monitoring?.certificate_fingerprint ?? '')
+const relayHost = computed(() => form.value.bind_address || props.worker?.hostname || '<receiver>')
 const maxFileSizeMib = computed({
   get: () => Math.round(form.value.max_file_size / MIB),
   set: (value: number) => (form.value.max_file_size = value * MIB),
@@ -127,6 +152,8 @@ function blank(): ReceiverSettingsWrite {
     ssh_authorized_keys: '',
     tftp_enabled: false,
     tftp_port: 6969,
+    monitoring_enabled: false,
+    monitoring_port: 8443,
   }
 }
 
@@ -147,6 +174,8 @@ watch(open, async (isOpen) => {
       ssh_authorized_keys: current.ssh_authorized_keys,
       tftp_enabled: current.tftp_enabled,
       tftp_port: current.tftp_port,
+      monitoring_enabled: current.monitoring_enabled,
+      monitoring_port: current.monitoring_port,
     }
   } catch (error) {
     notify.error(error, 'Failed to load the receiver settings')

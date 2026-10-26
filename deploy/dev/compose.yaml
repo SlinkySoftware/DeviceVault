@@ -112,6 +112,8 @@ services:
     ports:
       - "${DV_DEV_SSH_PORT:-2222}:2222"
       - "${DV_DEV_TFTP_PORT:-6969}:6969/udp"
+      # The monitoring relay (HTTPS), once enabled in the receiver's settings.
+      - "${DV_DEV_RELAY_PORT:-8443}:8443"
 
   frontend:
     image: node:24-alpine

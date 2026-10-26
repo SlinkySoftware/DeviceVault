@@ -10,6 +10,7 @@ A receiver is a worker with role ``receiver``. Its assignment (see
                 "password": "..." | "password_sealed": {"<worker_id>": "<sealed>"},
                 "authorized_keys": "ssh-ed25519 AAAA... comment\\n..."},
         "tftp": {"enabled": false, "port": 6969},
+        "monitoring": {"enabled": false, "port": 8443, "rate": "600/min", "tokens": [...]},  # see monitoring
         "devices": [{"id": 7, "ip": "192.0.2.1", "push_mode": "ssh", "filename_pattern": "*-confg"}],
         "encryption": {"kid": "...", "public_key": "..."} | null,
     }
@@ -30,7 +31,8 @@ fields ``job_id`` and ``device_id`` before it stages it, so it picks the job
 id; the orchestrator creates the BackupJob with that id.
 
 Heartbeats from a receiver add ``"receiver": {"host_key_fingerprint",
-"vault_kid", "devices", "listeners": {"ssh" | "tftp": {"enabled", "port", "listening", "error"}}}``.
+"vault_kid", "devices", "listeners": {"ssh" | "tftp": {"enabled", "port", "listening", "error"}},
+"monitoring": {...}}`` (the relay's status, see ``devicevault_protocol.monitoring``).
 """
 
 import ipaddress

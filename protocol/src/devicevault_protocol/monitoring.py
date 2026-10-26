@@ -16,12 +16,36 @@ stale rather than as old data that looks fresh. Readers (the orchestrator's own
 orchestrator key and the blob against its hash, then answer with
 ``device_response``, so both paths give the same answer.
 
-Receiver relays learn which tokens to accept from their assignment (``receiver.monitoring``)::
+Receiver relays learn which tokens to accept from their assignment (``receiver.monitoring``;
+the relay listens on the receiver's ``bind_address``, like SSH and TFTP)::
 
-    "monitoring": {"enabled": true, "bind_address": "", "port": 8443, "rate": "600/min",
-                   "tokens": [{"prefix", "digest", "owner", "expires_at", "allowed_networks"}]}
+    "monitoring": {"enabled": true, "port": 8443, "rate": "600/min",
+                   "tokens": [{"prefix": "ab12cd34", "digest": "<sha256 hex of the secret>", "owner": 7,
+                               "expires_at": "<iso>", "allowed_networks": ["192.0.2.0/24"]}]}
 
-and report back with signed ``monitoring.*`` events (see ``receiver`` docs).
+``tokens`` lists every live ``monitoring`` token of every relay owner (never a
+secret), and is empty while the relay is disabled. ``rate`` is
+``DV_API_TOKEN_RATE``, enforced per token by each relay on its own.
+
+Receiver -> orchestrator: Celery task ``MONITORING_EVENT_TASK`` on the
+orchestrator queue, argument an envelope signed with the receiver's key, payload::
+
+    {"event": "monitoring.used", "worker_id", "at",
+     "tokens": [{"prefix", "requests": 12, "addresses": ["192.0.2.5"], "last_used_at": "<iso>"}]}
+    {"event": "monitoring.refused", "worker_id", "at", "source_ip", "prefix": "" | "ab12cd34",
+     "cause": one of REFUSAL_CAUSES}
+    {"event": "monitoring.snapshot_rejected", "worker_id", "at", "owner": 7, "generation", "reason"}
+
+``used`` is sent every ``USAGE_REPORT_SECONDS`` when there was any use,
+``refused`` at most once a ``REFUSAL_WINDOW_SECONDS`` per source address, and
+``snapshot_rejected`` once per bad generation. Heartbeats from a receiver add,
+under ``receiver``::
+
+    "monitoring": {"enabled", "port", "listening", "error", "certificate_fingerprint", "tokens": 2,
+                   "snapshots": {"<owner>": {"generation", "published_at", "devices", "stale"}},
+                   "requests", "refused", "throttled"}
+
+(counts since the receiver started).
 """
 
 import hashlib
@@ -33,6 +57,43 @@ from typing import Any
 from redis import Redis
 
 from devicevault_protocol import blobs, signing
+from devicevault_protocol.push import normalise_address
+
+MONITORING_EVENT_TASK = 'orchestrator.monitoring_event'
+
+EVENT_USED = 'monitoring.used'
+EVENT_REFUSED = 'monitoring.refused'
+EVENT_SNAPSHOT_REJECTED = 'monitoring.snapshot_rejected'
+EVENTS = (EVENT_USED, EVENT_REFUSED, EVENT_SNAPSHOT_REJECTED)
+
+# Why a token was refused (the orchestrator adds revoked and inactive_user; to a relay those are unknown).
+CAUSE_MALFORMED = 'malformed'
+CAUSE_UNKNOWN = 'unknown'
+CAUSE_EXPIRED = 'expired'
+CAUSE_NETWORK = 'network'
+REFUSAL_CAUSES = (CAUSE_MALFORMED, CAUSE_UNKNOWN, CAUSE_EXPIRED, CAUSE_NETWORK)
+
+SNAPSHOT_POLL_SECONDS = 30
+USAGE_REPORT_SECONDS = 60
+REFUSAL_WINDOW_SECONDS = 60
+# Bounds on one usage report, so a busy relay's event stays small.
+MAX_REPORTED_TOKENS = 200
+MAX_REPORTED_ADDRESSES = 20
+
+_RATE_PERIODS = {'sec': 1, 'min': 60, 'hour': 3600}
+
+
+def parse_rate(value: str) -> tuple[int, int]:
+    """``DV_API_TOKEN_RATE`` (``600/min``) as (requests, seconds). Raises ValueError when malformed."""
+    try:
+        count, period = str(value).split('/')
+        requests, seconds = int(count), _RATE_PERIODS[period]
+    except ValueError, KeyError:
+        raise ValueError(f'a rate looks like 600/min, not {value!r}') from None
+    if requests < 1:
+        raise ValueError(f'a rate allows at least one request, not {value!r}')
+    return requests, seconds
+
 
 # --- token strings ------------------------------------------------------------------------
 
@@ -157,7 +218,7 @@ def device_response(snapshot: Snapshot, *, ip: str = '', device_id: str = '', no
     now = now or datetime.now(UTC)
     key = str(device_id).strip()
     if not key and ip:
-        found = snapshot.by_ip.get(ip.strip())
+        found = snapshot.by_ip.get(_address(ip.strip()))
         key = str(found) if found is not None else ''
     row = snapshot.devices.get(key) if key else None
     published = snapshot.published_at.isoformat()
@@ -168,6 +229,14 @@ def device_response(snapshot: Snapshot, *, ip: str = '', device_id: str = '', no
     answer['last_success_age'] = int(now.timestamp() - last) if last else 0
     answer.update(found=1, published_at=published, published_age=_age(snapshot.published_at, now))
     return answer
+
+
+def _address(ip: str) -> str:
+    """Any spelling of an address (IPv4-mapped IPv6, upper-case hex) as devices are indexed; else as given."""
+    try:
+        return normalise_address(ip)
+    except ValueError:
+        return ip
 
 
 def _age(moment: datetime, now: datetime) -> int:

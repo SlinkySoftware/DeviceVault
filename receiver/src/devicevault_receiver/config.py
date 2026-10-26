@@ -1,11 +1,14 @@
 """The ``receiver`` section of an assignment (see devicevault_protocol.push), as the receiver uses it."""
 
+import ipaddress
+from ipaddress import IPv4Network, IPv6Network
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from devicevault_protocol.crypto import unseal
 from devicevault_protocol.identity import Identity
+from devicevault_protocol.monitoring import DEFAULT_RELAY_PORT, parse_rate
 from devicevault_protocol.push import (
     DEFAULT_MAX_FILE_SIZE,
     DEFAULT_SSH_PORT,
@@ -32,6 +35,59 @@ class TftpSettings(_Model):
     port: int = Field(DEFAULT_TFTP_PORT, ge=1, le=65535)
 
 
+class RelayToken(_Model):
+    """A token the monitoring relay accepts: its prefix and secret digest, never the secret."""
+
+    prefix: str
+    digest: str
+    owner: int
+    expires_at: AwareDatetime
+    allowed_networks: tuple[str, ...] = ()
+    _networks: tuple[IPv4Network | IPv6Network, ...] = PrivateAttr(default=())
+
+    def model_post_init(self, _context: Any) -> None:
+        self._networks = tuple(ipaddress.ip_network(n, strict=False) for n in self.allowed_networks)
+
+    def allows(self, address: str) -> bool:
+        """Whether ``address`` (already normalised) may use the token."""
+        if not self._networks:
+            return True
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False
+        return any(ip in network for network in self._networks)
+
+
+class MonitoringSettings(_Model):
+    enabled: bool = False
+    port: int = Field(DEFAULT_RELAY_PORT, ge=1, le=65535)
+    rate: str = '600/min'
+    tokens: tuple[RelayToken, ...] = ()
+    _by_prefix: dict[str, RelayToken] = PrivateAttr(default_factory=dict)
+
+    @field_validator('rate')
+    @classmethod
+    def _valid_rate(cls, value: str) -> str:
+        parse_rate(value)
+        return value
+
+    def model_post_init(self, _context: Any) -> None:
+        self._by_prefix = {token.prefix: token for token in self.tokens}
+
+    @property
+    def limit(self) -> tuple[int, int]:
+        """(requests, seconds) each token may make."""
+        return parse_rate(self.rate)
+
+    def token(self, prefix: str) -> RelayToken | None:
+        return self._by_prefix.get(prefix)
+
+    @property
+    def owners(self) -> frozenset[int]:
+        return frozenset(token.owner for token in self.tokens)
+
+
 class Device(_Model):
     id: int
     ip: str
@@ -51,6 +107,7 @@ class ReceiverConfig(_Model):
     max_file_size: int = Field(DEFAULT_MAX_FILE_SIZE, ge=1)
     ssh: SshSettings = SshSettings()
     tftp: TftpSettings = TftpSettings()
+    monitoring: MonitoringSettings = MonitoringSettings()
     devices: tuple[Device, ...] = ()
     encryption: VaultKey | None = None
     _by_address: dict[str, Device] = PrivateAttr(default_factory=dict)

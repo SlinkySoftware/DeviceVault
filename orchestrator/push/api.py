@@ -70,6 +70,8 @@ class ReceiverSettingsSerializer(serializers.ModelSerializer):
             'ssh_authorized_keys',
             'tftp_enabled',
             'tftp_port',
+            'monitoring_enabled',
+            'monitoring_port',
             'updated_at',
         ]
         read_only_fields = ['updated_at']
@@ -95,6 +97,10 @@ class ReceiverSettingsSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {'ssh_password': 'Set a password or at least one authorised key before enabling SCP/SFTP.'}
                 )
+        # SSH and the monitoring relay are both TCP (TFTP is UDP, so it may share a number).
+        if current('ssh_enabled', False) and current('monitoring_enabled', False):
+            if current('ssh_port') == current('monitoring_port'):
+                raise serializers.ValidationError({'monitoring_port': 'SCP/SFTP already listens on this port.'})
         return attrs
 
     def update(self, instance, validated_data):

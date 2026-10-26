@@ -7,6 +7,7 @@ from django.utils import timezone
 from backups.models import BackupJob
 from backups.tests.conftest import setup  # noqa: F401  (the backed-up device, workers and target)
 from core.models import UserProfile
+from push.tests.conftest import receiver  # noqa: F401  (an approved receiver, as (WorkerKeys, Worker))
 
 
 @pytest.fixture

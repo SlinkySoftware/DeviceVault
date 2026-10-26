@@ -6,7 +6,7 @@ from django.dispatch import receiver
 from devices.models import Device
 from devicevault_protocol.push import PUSH_OFF
 
-from .service import bump_receivers
+from .service import receiver_inputs_changed
 
 # What receivers are told about a device; a change to anything else is no news to them.
 _FIELDS = ('ip_address', 'push_mode', 'push_filename_pattern', 'enabled', 'inactive_at')
@@ -33,10 +33,10 @@ def _device_saved(sender, instance, raw=False, **kwargs):
     if before == after:
         return
     if _pushing(after) or (before is not None and _pushing(before)):
-        bump_receivers()
+        receiver_inputs_changed()
 
 
 @receiver(post_delete, sender=Device)
 def _device_deleted(sender, instance, **kwargs):
     if _pushing({field: getattr(instance, field) for field in _FIELDS}):
-        bump_receivers()
+        receiver_inputs_changed()
