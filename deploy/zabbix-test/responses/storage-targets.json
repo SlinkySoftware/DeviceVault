@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "1",
+      "name": "local",
+      "driver": "local",
+      "workers_online": 0,
+      "last_stored_at": 1792996400,
+      "storage_failures_24h": 0,
+      "backups_held": 1480,
+      "bytes_held": 26954000,
+      "bytes_stored_24h": 728520
+    }
+  ]
+}

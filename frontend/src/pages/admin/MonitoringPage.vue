@@ -37,6 +37,25 @@
       </tbody>
     </q-markup-table>
 
+    <div class="text-h6 q-mt-md">Zabbix templates</div>
+    <div class="text-caption text-grey q-mb-sm">
+      <code>DeviceVault by HTTP</code> for one host standing for DeviceVault, and
+      <code>DeviceVault Device by HTTP</code> for the device hosts Zabbix already has. Import the file for your Zabbix
+      version, then set <code>{$DV.URL}</code> and <code>{$DV.TOKEN}</code> as global macros.
+    </div>
+    <div class="row q-gutter-sm">
+      <q-btn
+        v-for="version in zabbixVersions"
+        :key="version"
+        outline
+        color="primary"
+        icon="download"
+        :label="`Zabbix ${version}`"
+        :loading="downloading === version"
+        @click="downloadTemplate(version)"
+      />
+    </div>
+
     <div class="row items-center q-mt-lg">
       <div class="text-h6 col">Current figures</div>
       <q-btn flat dense icon="refresh" label="Refresh" :loading="loading" @click="load" />
@@ -72,9 +91,10 @@ import type { QTableColumn } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 
 import { monitoringApi } from '@/api/endpoints'
-import type { MonitoringFigures } from '@/api/types'
+import type { MonitoringFigures, ZabbixVersion } from '@/api/types'
 import PageCard from '@/components/PageCard.vue'
 import { useNotify } from '@/composables/useNotify'
+import { saveFile } from '@/utils/download'
 import { formatAge, formatPercent } from '@/utils/monitoring'
 
 const notify = useNotify()
@@ -82,6 +102,19 @@ const origin = window.location.origin
 const figures = ref<MonitoringFigures | null>(null)
 const loading = ref(false)
 const filter = ref('')
+const zabbixVersions: ZabbixVersion[] = ['6.0', '7.0']
+const downloading = ref<ZabbixVersion | null>(null)
+
+async function downloadTemplate(version: ZabbixVersion): Promise<void> {
+  downloading.value = version
+  try {
+    saveFile(await monitoringApi.zabbixTemplate(version), `devicevault_zabbix_${version}.yaml`)
+  } catch (error) {
+    notify.error(error, 'Failed to download the Zabbix templates')
+  } finally {
+    downloading.value = null
+  }
+}
 
 const endpoints = [
   { path: 'summary/', returns: 'Estate outcomes, timing, freshness, change, volume and push (platform health with that scope)' },
@@ -90,6 +123,7 @@ const endpoints = [
   { path: 'workers/', returns: 'Workers: status, heartbeat age, assignment (platform health scope)' },
   { path: 'storage-targets/', returns: 'Storage targets: workers online, last stored, failures, size (platform scope)' },
   { path: 'receivers/', returns: 'Receivers: pushes accepted and refused, last push (platform scope)' },
+  { path: 'zabbix/template/?version=7.0', returns: 'The generated Zabbix templates (6.0 or 7.0), as YAML to import' },
   { path: 'metrics', returns: 'Prometheus text format: the figures above, with no per-device series' },
 ]
 

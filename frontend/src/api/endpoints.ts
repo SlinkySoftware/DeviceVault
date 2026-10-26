@@ -70,6 +70,7 @@ import type {
   ProviderTestResult,
   Worker,
   WorkerAssignment,
+  ZabbixVersion,
 } from './types'
 
 type Params = Record<string, string | number | boolean | undefined>
@@ -265,6 +266,9 @@ export const serviceAccountsApi = {
 
 export const monitoringApi = {
   summary: async () => (await http.get<MonitoringFigures>('/monitoring/summary/')).data,
+  /** The generated Zabbix templates for one Zabbix version, as the YAML file to import. */
+  zabbixTemplate: async (version: ZabbixVersion) =>
+    (await http.get<Blob>('/monitoring/zabbix/template/', { params: { version }, responseType: 'blob' })).data,
 }
 
 const authProviders = resource<AuthProvider, AuthProviderWrite>('/auth-providers/')

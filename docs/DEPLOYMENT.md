@@ -499,6 +499,7 @@ shows the current figures.
 | `device-groups/` | `{"data": [...]}`, the same figures per visible device group (Zabbix low-level discovery) |
 | `device/?ip=<address>` (or `&id=<id>`) | One device: status, last success and its age, failure reason, failures in a row, schedule interval, next due and overdue, the last backup's duration, size and changes, backups held. Answered from the service account's published snapshot; `found` is 0 for an unknown device or one the account cannot see; 503 `stale` when no current snapshot exists |
 | `workers/`, `storage-targets/`, `receivers/` | `{"data": [...]}` platform lists (empty without the platform scope) |
+| `zabbix/template/?version=6.0\|7.0` | The generated Zabbix templates, as a YAML download (see Zabbix below) |
 | `metrics` | Prometheus text format: the estate, group, worker, target and receiver figures (no per-device series) |
 
 Figures are computed from job rows and cached for `DV_MONITORING_CACHE_SECONDS`.
@@ -516,6 +517,127 @@ timeout) or `unknown`; only the reason is exported, never the error text.
 `deploy/prometheus/devicevault-rules.yml`. Device-group series are separate families
 (`devicevault_group_*`, labelled `device_group`), so sums never double-count the
 estate.
+
+### Zabbix
+
+DeviceVault ships two Zabbix templates in one file per Zabbix LTS version:
+`deploy/zabbix/devicevault_zabbix_6.0.yaml` and `devicevault_zabbix_7.0.yaml`. You can
+also download them from **Admin Settings > Monitoring**, or from
+`/api/monitoring/zabbix/template/?version=6.0|7.0` with the token. They are generated
+from the metric catalogue and are the same for every installation, because groups,
+workers, storage targets and receivers are discovered. They need no Zabbix agent.
+
+1. **Import** the file for your version (Data collection > Templates > Import, or
+   `configuration.import` through the API). It creates `DeviceVault by HTTP` and
+   `DeviceVault Device by HTTP` in `Templates/Applications`.
+2. **Global macros** (Administration > Macros):
+   - `{$DV.URL}`: the web address of DeviceVault, without `/api` (for example
+     `https://devicevault.example.com`).
+   - `{$DV.TOKEN}`: the service account's token, as a **Secret text** macro.
+
+   The templates deliberately do not define these two, so a template value cannot
+   shadow the global one. You can also set them on a host or a site template.
+3. **The DeviceVault host.** Create one host (for example `DeviceVault`; it needs no
+   interface) and link `DeviceVault by HTTP`. Monitor it from the Zabbix server, or from
+   a proxy that can reach the web tier. Five HTTP agent items poll `summary/`,
+   `device-groups/`, `workers/`, `storage-targets/` and `receivers/` every
+   `{$DV.INTERVAL}`. A sixth checks the HTTP status. Every figure is a dependent item.
+   Dependent discovery rules create items, triggers and graphs per device group, worker,
+   storage target and receiver, and delete them 7 days after they disappear. The
+   template's dashboard, *DeviceVault overview*, shows the success ratio, duration
+   percentiles, failures by reason, freshness overall and per group, and platform health.
+   Give the token the **Platform health** scope to fill in the worker, scheduler and
+   storage-target parts. Without it those items just stay empty.
+4. **Device hosts.** Link `DeviceVault Device by HTTP` to the hosts Zabbix already
+   monitors, for example across a host group (Data collection > Hosts, select, Mass
+   update > Templates). Each host asks
+   `{$DV.RELAY.URL}/device/?ip={HOST.IP}&id={$DV.DEVICE.ID}` every
+   `{$DV.DEVICE.INTERVAL}`. `{HOST.IP}` is the host's default interface address, so
+   linking is usually the whole setup. Set `{$DV.DEVICE.ID}` (the DeviceVault device id)
+   on a host whose interface address is not the one DeviceVault backs up.
+   - The proxies that monitor devices usually cannot reach the orchestrator. Point them
+     at **the monitoring relay on a receiver** in their own zone instead (see the
+     receiver documentation for enabling it; it listens on 8443, so allow the proxy to
+     reach the receiver on that port).
+   - Zabbix has no host-group or proxy macros. So create one small **site template**
+     per zone (for example `DeviceVault site A`) that links `DeviceVault Device by HTTP`
+     and sets `{$DV.RELAY.URL}` to `https://receiver-site-a:8443`. Then link the site
+     template, not the device template, to that zone's hosts.
+   - Where the proxies can reach the web tier, set `{$DV.RELAY.URL}` to
+     `{$DV.URL}/api/monitoring` instead and skip the relay.
+   - The item does not verify the relay's certificate, because relays use a self-signed
+     one.
+   - The device template can use the same `monitoring` token as the DeviceVault host.
+
+**Macros and thresholds.** Override any of these on a host or site template.
+
+| Macro | Default | Template | Meaning |
+|---|---|---|---|
+| `{$DV.URL}` | (global) | both | DeviceVault's web address |
+| `{$DV.TOKEN}` | (global, secret) | both | Service account token (`monitoring`, plus `monitoring_platform` for platform health) |
+| `{$DV.INTERVAL}` | `1m` | DeviceVault | Poll interval |
+| `{$DV.NODATA}` | `5m` | DeviceVault | No answer for this long: *monitoring API unreachable* |
+| `{$DV.SUCCESS.MIN}` | `95` | DeviceVault | Lowest acceptable success ratio over 24h (%), estate and per group |
+| `{$DV.STALE.MAX}` | `2d` | DeviceVault | Oldest acceptable last success, per group |
+| `{$DV.FAIL.CONSEC}` | `3` | DeviceVault | Consecutive failures that count a device as failing, per group (rounded down to 1, 3 or 5) |
+| `{$DV.DURATION.MAX}` | `10m` | DeviceVault | Longest acceptable p95 request-to-stored time over 24h |
+| `{$DV.WORKER.HEARTBEAT.MAX}` | `3m` | DeviceVault | Longest gap between an approved worker's heartbeats |
+| `{$DV.PENDING.MAX}` | `1h` | DeviceVault | Longest a worker may wait for approval |
+| `{$DV.SKEW.MAX}` | `60` | DeviceVault | Largest clock difference to the Zabbix server, in seconds |
+| `{$DV.PUSH.REFUSED.MAX}` | `10` | DeviceVault | Refused pushes per hour that count as a spike |
+| `{$DV.RELAY.URL}` | `https://receiver-site-a:8443` | Device | The zone's relay, or `{$DV.URL}/api/monitoring` |
+| `{$DV.DEVICE.ID}` | empty | Device | Match on this device id instead of `{HOST.IP}` |
+| `{$DV.DEVICE.INTERVAL}` | `15m` | Device | Poll interval (snapshots are published every 15 minutes, so faster gains nothing) |
+| `{$DV.DEVICE.NODATA}` | `45m` | Device | No answer for this long (three polls): *no data from DeviceVault* |
+| `{$DV.NOTFOUND.ALERT}` | `1` | Device | `0` silences *not backed up by DeviceVault* (an Information problem) |
+| `{$DV.DEVICE.FAIL.CONSEC}` | `2` | Device | Consecutive failures for *backup failing* |
+| `{$DV.DEVICE.STALE.MAX}` | `0` (off) | Device | Flat age limit for the last success, for example `2d` |
+| `{$DV.DEVICE.DATA.MAX}` | `45m` | Device | Oldest acceptable published snapshot |
+
+**Triggers.**
+- **DeviceVault host:**
+  - the API is unreachable or answers 401, 403 or 5xx;
+  - the figures are stale;
+  - the success ratio is low (estate and per group);
+  - per group: the oldest last success is too old, devices are overdue, or devices
+    are failing;
+  - devices have never been backed up;
+  - the p95 duration is too high;
+  - clock skew;
+  - a spike in push refusals;
+  - the scheduler has no leader, or is not ticking;
+  - a worker has no heartbeat, has been pending approval too long, or has been
+    behind its assignment for 10 minutes;
+  - a storage target has no online worker.
+
+  They all depend on the API trigger, so an outage raises one problem.
+- **Device hosts:**
+  - not backed up by DeviceVault (Information);
+  - backup overdue;
+  - backup failing;
+  - backup authentication failing (Average);
+  - no successful backup for `{$DV.DEVICE.STALE.MAX}`;
+  - DeviceVault data is old;
+  - no data from DeviceVault (no answer, a refused token, or the relay's 503 `stale`).
+
+  The backup triggers only fire for a device that is found, enabled and active, so a
+  paused or retired device stays quiet. All of them depend on that host's *no data*
+  trigger.
+
+**Request rate and staleness.** The DeviceVault host makes six requests per
+`{$DV.INTERVAL}` (six a minute by default), and the figures are cached for
+`DV_MONITORING_CACHE_SECONDS`. The device template makes one request per host per
+`{$DV.DEVICE.INTERVAL}`: hosts ÷ 900 s, so 10,000 hosts make about 11 requests a
+second, spread over the zone's receivers. Each answer is a dictionary lookup. Device
+data can be up to one publish interval plus one poll interval old (about 30 minutes
+at the defaults). That is why `{$DV.DEVICE.DATA.MAX}` defaults to 45 minutes.
+
+**Checking the templates.** `make zabbix-validate` imports both files into throwaway
+Zabbix 6.0 and 7.0 servers (`deploy/zabbix-test/`, official `zabbix/*` images). It
+links them to hosts that poll a stub serving recorded answers, and checks that every
+item is supported with the recorded value and that exactly the expected triggers fire.
+After changing the catalogue or `monitoring/zabbix.py`, run `make zabbix-template` and
+commit the regenerated files. A test fails while they are out of date.
 
 ## 7. High availability
 

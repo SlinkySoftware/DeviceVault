@@ -1,0 +1,30 @@
+# Imports the generated Zabbix templates into real Zabbix 6.0 and 7.0 servers and checks items and
+# triggers against recorded responses (`make zabbix-validate`). Slow, so it runs only when the
+# monitoring code or the templates change, and it is not required to merge.
+name: Zabbix
+
+on:
+  pull_request:
+    paths:
+      - 'orchestrator/monitoring/**'
+      - 'deploy/zabbix/**'
+      - 'deploy/zabbix-test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zabbix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: make zabbix-validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: make zabbix-validate

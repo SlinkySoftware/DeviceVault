@@ -524,6 +524,9 @@ export type ServiceAccountWrite = Pick<ServiceAccount, 'username' | 'description
 /** A monitoring section (`/api/monitoring/summary/`): flat fields, named and described in the orchestrator's catalogue. */
 export type MonitoringFigures = Record<string, number | string | null>
 
+/** The Zabbix LTS versions the generated templates (`/api/monitoring/zabbix/template/`) are exported for. */
+export type ZabbixVersion = '6.0' | '7.0'
+
 export type AuditOutcome = 'success' | 'failure' | 'denied'
 
 export interface AuditEntry {

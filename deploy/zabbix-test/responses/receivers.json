@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "id": "5",
+      "name": "receiver-1",
+      "online": 1,
+      "accepted_24h": 5,
+      "refused_24h": 3,
+      "last_push_at": 1792996400
+    }
+  ]
+}

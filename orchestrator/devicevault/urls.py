@@ -68,6 +68,7 @@ urlpatterns = [
     path('api/monitoring/workers/', metrics_api.workers),
     path('api/monitoring/storage-targets/', metrics_api.storage_targets),
     path('api/monitoring/receivers/', metrics_api.receivers),
+    path('api/monitoring/zabbix/template/', metrics_api.zabbix_template),
     path('api/monitoring/metrics', metrics_api.prometheus_metrics),
     path('api/onboarding/', views.onboarding),
     path('api/dashboard/summary/', dashboard.summary),

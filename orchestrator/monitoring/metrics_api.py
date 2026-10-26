@@ -20,7 +20,7 @@ from accounts.login import is_service_account
 from accounts.models import ApiToken
 from accounts.tokens import token_scopes
 from devicevault_protocol import monitoring as protocol
-from monitoring import metrics, prometheus, snapshots
+from monitoring import metrics, prometheus, snapshots, zabbix
 from monitoring.catalogue import PLATFORM, RECEIVER, TARGET, WORKER, keys
 
 SCOPES = (ApiToken.MONITORING, ApiToken.API)
@@ -35,6 +35,13 @@ class TextRenderer(renderers.BaseRenderer):
 
     def render(self, data, accepted_media_type=None, renderer_context=None):
         return data if isinstance(data, bytes | str) else str(data)
+
+
+class YamlRenderer(TextRenderer):
+    """Lets a download asking for YAML (``Accept: application/yaml``) through content negotiation."""
+
+    media_type = 'application/yaml'
+    format = 'yaml'
 
 
 def _scope_key(request) -> str:
@@ -144,6 +151,25 @@ def device(request):
         snapshot, ip=request.query_params.get('ip', ''), device_id=request.query_params.get('id', ''), now=now
     )
     return response.Response(answer)
+
+
+@token_scopes(*SCOPES)
+@decorators.api_view(['GET'])
+@decorators.renderer_classes([renderers.JSONRenderer, YamlRenderer])
+@decorators.permission_classes([CanReadMonitoring])
+def zabbix_template(request):
+    """The generated Zabbix templates (``?version=6.0|7.0``), as the YAML file Zabbix imports.
+
+    The same for every installation and caller, since groups, workers and targets are discovered.
+    """
+    version = request.query_params.get('version', '')
+    if version not in zabbix.VERSIONS:
+        return response.Response(
+            {'version': [f'Choose one of {", ".join(zabbix.VERSIONS)}.']}, status=status.HTTP_400_BAD_REQUEST
+        )
+    answer = HttpResponse(zabbix.render(version), content_type='application/yaml; charset=utf-8')
+    answer['Content-Disposition'] = f'attachment; filename="devicevault_zabbix_{version}.yaml"'
+    return answer
 
 
 @token_scopes(*SCOPES)

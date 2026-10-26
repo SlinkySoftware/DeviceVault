@@ -19,11 +19,12 @@ PY_PACKAGES = protocol worker receiver orchestrator
 
 FRONTEND_DEPS = frontend/node_modules/.package-lock.json
 
-.PHONY: help dev-image lock lint fmt test test-postgres check frontend-install frontend-lint frontend-test frontend-build \
+.PHONY: help dev-image lock lint fmt test test-postgres check zabbix-template zabbix-validate frontend-install frontend-lint frontend-test frontend-build \
 	images version set-version dev-up dev-down dev-start dev-stop dev-status dev-reset dev-ps dev-logs dev-seed dev-approve
 
 help:
 	@echo "Quality:   lint fmt test test-postgres frontend-lint frontend-test check"
+	@echo "Zabbix:    zabbix-template zabbix-validate"
 	@echo "Deps:      lock dev-image frontend-install"
 	@echo "Build:     frontend-build images (IMAGE_TAG=$(IMAGE_TAG))"
 	@echo "Release:   version set-version V=X.Y.Z"
@@ -68,6 +69,26 @@ test-postgres: dev-image
 		status=$$?; docker rm -f $(PG_TEST) >/dev/null; exit $$status
 
 check: lint test test-postgres frontend-lint frontend-test frontend-build
+
+# The generated Zabbix templates (monitoring/zabbix.py), committed under deploy/zabbix/; a test keeps them in step.
+ZABBIX_VERSIONS = 6.0 7.0
+ZABBIX_TEST = DEV_IMAGE=$(DEV_IMAGE) docker compose -f deploy/zabbix-test/compose.yaml
+zabbix-template: dev-image
+	$(DOCKER_RUN) -e DJANGO_SETTINGS_MODULE=devicevault.test_settings -w /workspace/orchestrator $(DEV_IMAGE) \
+		sh -c 'set -e; for v in $(ZABBIX_VERSIONS); do \
+			python manage.py zabbix_template --version $$v --output ../deploy/zabbix/devicevault_zabbix_$$v.yaml; done'
+
+# Import the committed templates into real Zabbix servers (each version in turn, deploy/zabbix-test/) and check
+# them against recorded responses. Slow, so not part of `check`; zabbix.yml runs it on monitoring changes.
+zabbix-validate: dev-image
+	@status=0; for v in $(ZABBIX_VERSIONS); do \
+		echo "== Zabbix $$v"; \
+		$(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env up -d --quiet-pull postgres server web stub \
+			&& $(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env run --rm validate --version $$v \
+			|| status=1; \
+		$(ZABBIX_TEST) --env-file deploy/zabbix-test/zabbix-$$v.env down --volumes --remove-orphans --timeout 5; \
+		[ $$status -eq 0 ] || break; \
+	done; exit $$status
 
 # Reinstall only when the lockfile changes.
 $(FRONTEND_DEPS): frontend/package.json frontend/package-lock.json
