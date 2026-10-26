@@ -57,6 +57,21 @@ def env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     return parsed
 
 
+def env_float(name: str, default: float, *, minimum: float | None = None) -> float:
+    value = env_str(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ConfigError(f'{name} must be a number, got {value!r}') from exc
+    if parsed != parsed or parsed in (float('inf'), float('-inf')):
+        raise ConfigError(f'{name} must be a finite number, got {value!r}')
+    if minimum is not None and parsed < minimum:
+        raise ConfigError(f'{name} must be >= {minimum}, got {parsed}')
+    return parsed
+
+
 def env_list(name: str, default: list[str] | None = None) -> list[str]:
     value = env_str(name)
     if value is None:

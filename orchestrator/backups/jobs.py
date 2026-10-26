@@ -27,6 +27,7 @@ from devicevault_protocol.jobs import (
     EVENT_STARTED,
     EVENT_STORED,
     STAGE_STORE,
+    failure_reason,
 )
 from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, collection_queue_name
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
@@ -222,6 +223,7 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
         job.error = ''
         if job.state in (BackupJob.QUEUED, BackupJob.COLLECTING, BackupJob.TIMED_OUT):
             job.state = BackupJob.COLLECTED
+            job.failure_reason = None  # a timed-out job that turned up after all
         _finish_if_complete(job, now)
     elif event == EVENT_STORED:
         job.stored_sha256 = str(payload.get('sha256') or '')
@@ -232,7 +234,16 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
     elif event == EVENT_FAILED:
         job.state = BackupJob.FAILED
         job.error = str(payload.get('error') or 'failed')
+        job.failure_reason = _reported_reason(payload)
         job.finished_at = now
+
+
+def _reported_reason(payload: dict[str, Any]) -> str:
+    """The failure reason for a ``failed`` event: a storage-step failure is ``storage`` (or ``integrity``)."""
+    reason = failure_reason(payload.get('reason'))
+    if payload.get('stage') == STAGE_STORE and reason != BackupJob.REASON_INTEGRITY:
+        return BackupJob.REASON_STORAGE
+    return reason
 
 
 def _apply_deletion(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
@@ -264,13 +275,16 @@ def _finish_if_complete(job: BackupJob, now) -> None:
     if not (job.collected_sha256 and job.stored_sha256):
         if job.stored_sha256:
             job.state = BackupJob.STORING  # stored, waiting for the collector's report
+            job.failure_reason = None
         return
     if job.collected_sha256 == job.stored_sha256:
         job.state = BackupJob.STORED
         job.error = ''
+        job.failure_reason = None
     else:
         job.state = BackupJob.FAILED
         job.error = 'the stored backup does not match what the collector collected'
+        job.failure_reason = BackupJob.REASON_INTEGRITY
     job.finished_at = now
 
 
@@ -293,7 +307,8 @@ def expire_stale_jobs(now=None) -> int:
     for job in stale:
         job.state = BackupJob.TIMED_OUT
         job.error = f'no result within {settings.DEVICEVAULT_JOB_TIMEOUT_MIN} minutes'
+        job.failure_reason = BackupJob.REASON_ORPHANED
         job.finished_at = now
-        job.save(update_fields=['state', 'error', 'finished_at'])
+        job.save(update_fields=['state', 'error', 'failure_reason', 'finished_at'])
         _record_on_device(job)
     return len(stale)

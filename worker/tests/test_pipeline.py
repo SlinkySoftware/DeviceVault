@@ -20,7 +20,7 @@ from devicevault_protocol.jobs import (
 )
 from devicevault_protocol.names import STORE_TASK
 from devicevault_protocol.tasks import sign_task
-from devicevault_worker.drivers.base import TransientError
+from devicevault_worker.drivers.base import PermanentError, TransientError
 
 ORCHESTRATOR = signing.generate_signing_key()
 
@@ -132,6 +132,46 @@ def test_unknown_drivers_and_bad_params_fail_permanently(pipeline, tmp_path):
     assert 'no "no_such_driver" driver' in failures[0]
     assert 'invalid driver parameters' in failures[1]
     assert sent.stores() == []
+    assert [payload['reason'] for event, payload in sent.events() if event == EVENT_FAILED] == ['unknown', 'unknown']
+
+
+@pytest.mark.parametrize(
+    ('error', 'reason'),
+    [
+        (PermanentError('authentication failed', reason='auth'), 'auth'),
+        (PermanentError('rejected "show running-config"', reason='command'), 'command'),
+        (RuntimeError('driver bug'), 'unknown'),
+    ],
+)
+def test_failed_events_carry_the_failure_reason(pipeline, tmp_path, monkeypatch, error, reason):
+    from devicevault_worker import collect as collect_module
+
+    _, sent = pipeline
+
+    def failing(job, log):
+        raise error
+
+    monkeypatch.setattr(collect_module, '_collect', failing)
+    collect_module.collect.run(collect_job(tmp_path)[1])
+
+    [(event, payload)] = [(e, p) for e, p in sent.events() if e == EVENT_FAILED]
+    assert payload['reason'] == reason and payload['stage'] == 'collect'
+
+
+def test_a_transient_error_that_runs_out_of_retries_keeps_its_reason(pipeline, tmp_path, monkeypatch):
+    from devicevault_worker import collect as collect_module
+
+    _, sent = pipeline
+
+    def unreachable(job, log):
+        raise TransientError('connection refused', reason='connection')
+
+    monkeypatch.setattr(collect_module, '_collect', unreachable)
+    monkeypatch.setattr(collect_module.collect, 'max_retries', 0)
+    collect_module.collect.run(collect_job(tmp_path)[1])
+
+    [(_, payload)] = [(e, p) for e, p in sent.events() if e == EVENT_FAILED]
+    assert payload['reason'] == 'connection' and 'gave up after 1 attempts' in payload['error']
 
 
 def test_transient_errors_are_reported_and_retried(pipeline, tmp_path, monkeypatch):
@@ -233,6 +273,7 @@ def test_tampered_staged_backups_are_not_stored(pipeline, tmp_path):
 
     assert events[-1][0] == EVENT_FAILED
     assert 'does not match' in events[-1][1]['error']
+    assert events[-1][1]['reason'] == 'integrity'
     assert not list((volume_path() / 'store').rglob('*.cfg'))
 
 
@@ -248,6 +289,7 @@ def test_expired_staged_backups_fail(pipeline, tmp_path):
 
     assert events[-1][0] == EVENT_FAILED
     assert 'expired' in events[-1][1]['error']
+    assert events[-1][1]['reason'] == 'storage'
 
 
 # --- payload encryption --------------------------------------------------------------

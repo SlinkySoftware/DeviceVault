@@ -60,6 +60,7 @@ class BackupJobSerializer(serializers.ModelSerializer):
             'summary_error',
             'attempts',
             'error',
+            'failure_reason',
             'created_at',
             'started_at',
             'collected_at',

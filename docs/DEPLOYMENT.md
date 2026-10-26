@@ -539,6 +539,7 @@ secrets). The file takes precedence.
 | `DV_JOB_TIMEOUT_MIN` | `120` | A backup job still unfinished after this long is marked timed out |
 | `DV_SCHEDULER_INTERVAL_SEC` | `30` | How often the scheduler checks for due schedules (and renews its lease) |
 | `DV_RETENTION_INTERVAL_MIN` | `60` | How often the scheduler's leader applies retention policies |
+| `DV_STALE_FACTOR` | `1.5` | A scheduled device is overdue once its latest successful backup is older than its schedule's interval times this (at least `1.0`) |
 | `DV_CONFIG_SEARCH` | `false` | Config search: keeps the latest backup of each device, secrets hashed, in the database (see *Config search*) |
 
 ### Worker

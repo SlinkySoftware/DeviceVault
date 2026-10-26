@@ -284,6 +284,19 @@ export type JobState = 'queued' | 'collecting' | 'collected' | 'storing' | 'stor
 
 export type JobTrigger = 'manual' | 'schedule' | 'push'
 
+/** Why a job failed (`devicevault_protocol.jobs.FAILURE_REASONS`). */
+export type FailureReason =
+  | 'connection'
+  | 'auth'
+  | 'timeout'
+  | 'command'
+  | 'verification'
+  | 'storage'
+  | 'integrity'
+  | 'push'
+  | 'orphaned'
+  | 'unknown'
+
 /** One backup of a device, from request to storage. */
 export interface BackupJob {
   /** UUID. */
@@ -332,6 +345,8 @@ export interface BackupJob {
   summary_error: string
   attempts: number
   error: string
+  /** Set on failed and timed-out jobs; null otherwise (and on jobs from before reasons were recorded). */
+  failure_reason: FailureReason | null
   created_at: IsoDateTime
   started_at: IsoDateTime | null
   collected_at: IsoDateTime | null
