@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "id": "1",
+      "name": "collector-1",
+      "role": "collector",
+      "status_code": 1,
+      "online": 1,
+      "heartbeat_age": 12,
+      "pending_age": 0,
+      "version": "0.1.0",
+      "assignment_behind": 0
+    },
+    {
+      "id": "4",
+      "name": "storage-1",
+      "role": "storage",
+      "status_code": 1,
+      "online": 0,
+      "heartbeat_age": 900,
+      "pending_age": 0,
+      "version": "0.1.0",
+      "assignment_behind": 1
+    },
+    {
+      "id": "7",
+      "name": "collector-new",
+      "role": "collector",
+      "status_code": 0,
+      "online": 0,
+      "heartbeat_age": -1,
+      "pending_age": 7200,
+      "version": "0.1.0",
+      "assignment_behind": 0
+    }
+  ]
+}

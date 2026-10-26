@@ -55,12 +55,12 @@ Small, self-contained, and each one removes a reason for an evaluator to say "no
 | Q1 | [Retention enforcement](#q1-retention-enforcement) | S-M | Complete: PR #58 (`5502de9`), phase 14 | Storage stops growing without bound. |
 | Q2 | [Notifications: webhooks and email](#q2-notifications-webhooks-and-email) | S-M |  | Failures and changes reach people instead of waiting to be noticed. |
 | Q3 | [Change summary on every backup](#q3-change-summary-on-every-backup) | S | Complete: PR #59 (`0930972`), phase 15 | "What changed?" answered at a glance, with added/removed line counts. |
-| Q4 | [Zabbix and Prometheus monitoring](#q4-monitoring-endpoints-zabbix-first-prometheus-alongside) | S-M | Scheduled: phases 22-24 (after Q9) | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
-| Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S |  | The classic silent failure: a device that stopped backing up weeks ago. |
+| Q4 | [Zabbix and Prometheus monitoring](#q4-monitoring-endpoints-zabbix-first-prometheus-alongside) | S-M | Built: PRs #72-#74, phases 22-24 | Backup times, success/failure counts and ratios in the monitoring stack you already run, with ready-made Zabbix templates. |
+| Q5 | [Stale and missing backup detection](#q5-stale-and-missing-backup-detection) | S | Partly built: overdue detection (phase 22, PR #72) | The classic silent failure: a device that stopped backing up weeks ago. |
 | Q6 | [Config search](#q6-config-search) | S-M | Complete: PRs #61, #62 (`2b4435c`, `d6b4250`), phases 16-17 | "Which devices still have SNMP community `public`?" in seconds. |
 | Q7 | [Bulk device import and export](#q7-bulk-device-import-and-export) | S |  | Onboarding hundreds of devices from a CSV instead of a form. |
 | Q8 | [Pin, label and annotate backups](#q8-pin-label-and-annotate-backups) | S | Complete: PR #65 (`159e163`), phase 19 | Mark known-good versions, exempt them from retention, record why. |
-| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S | Scheduled: phase 21 | Automation and scripting without borrowing a browser session. |
+| Q9 | [Personal API tokens](#q9-personal-api-tokens) | S | Built: PR #71, phase 21 | Automation and scripting without borrowing a browser session. |
 | Q10 | [Audit log export and syslog forwarding](#q10-audit-log-export-and-syslog-forwarding) | S |  | Satisfies "send it to the SIEM" without a project. |
 | Q11 | [Add more built-in vendor drivers](#q11-more-built-in-vendor-drivers) | S each |  | Each Netmiko-based driver is a few dozen lines; covers a new customer base. |
 | Q12 | [Backup verification probes](#q12-backup-verification-probes) | S |  | Reject empty, truncated or error-page "backups" before they replace a good one. |

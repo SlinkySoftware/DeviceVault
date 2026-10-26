@@ -1,0 +1,63 @@
+# A throwaway Zabbix (server, web/API, PostgreSQL) for `make zabbix-validate`, which imports the
+# generated templates (deploy/zabbix/) and checks them against a stub serving recorded responses.
+# One version at a time: `make zabbix-validate` sets ZABBIX_TAG and POSTGRES_IMAGE (ZABBIX_IMAGES in the Makefile).
+# Nothing is published on the host; the validator reaches the API over the compose network.
+name: devicevault-zabbix-test
+
+x-db: &db
+  POSTGRES_USER: zabbix
+  POSTGRES_PASSWORD: zabbix-test-only
+  POSTGRES_DB: zabbix
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?set by make zabbix-validate}
+    environment: *db
+    # Lock waits show up in the logs `make zabbix-validate` prints when it fails.
+    command: [postgres, -c, log_lock_waits=on, -c, deadlock_timeout=2s]
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  server:
+    image: zabbix/zabbix-server-pgsql:${ZABBIX_TAG:?set by make zabbix-validate}
+    depends_on: [postgres]
+    environment:
+      <<: *db
+      DB_SERVER_HOST: postgres
+      # Pick up new hosts and items quickly.
+      ZBX_CACHEUPDATEFREQUENCY: '10'
+      ZBX_STARTHTTPPOLLERS: '5'
+      ZBX_LOGSLOWQUERIES: '2000'
+
+  web:
+    image: zabbix/zabbix-web-nginx-pgsql:${ZABBIX_TAG}
+    depends_on: [postgres, server]
+    environment:
+      <<: *db
+      DB_SERVER_HOST: postgres
+      ZBX_SERVER_HOST: server
+      PHP_TZ: UTC
+      # host.create links templates with hundreds of items; give it time on small CI runners (validate.py API_TIMEOUT).
+      ZBX_MAXEXECUTIONTIME: '600'
+
+  # Recorded orchestrator and relay answers (stdlib only), at http://stub:8000.
+  stub:
+    image: ${DEV_IMAGE:-devicevault-dev}
+    user: '${DV_UID:-1000}:${DV_GID:-1000}'
+    volumes:
+      - ../zabbix-test:/zabbix-test:ro
+    command: [python, -I, /zabbix-test/stub.py, /zabbix-test/responses]
+
+  validate:
+    image: ${DEV_IMAGE:-devicevault-dev}
+    profiles: [validate]
+    user: '${DV_UID:-1000}:${DV_GID:-1000}'
+    depends_on: [web, stub]
+    environment:
+      HOME: /tmp
+      ZABBIX_URL: http://web:8080/api_jsonrpc.php
+      STUB_URL: http://stub:8000
+    volumes:
+      - ../zabbix-test:/zabbix-test:ro
+      - ../zabbix:/templates:ro
+    entrypoint: [python, -I, /zabbix-test/validate.py]
