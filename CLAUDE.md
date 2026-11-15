@@ -110,7 +110,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
   fields use `core.fields.EncryptedJSONField`.
 - Backups are `backups.models.BackupJob`s: create them with `backups.jobs.create_job`, and let
   worker events drive their state (`backups.jobs.handle_job_event`). Never trust a worker's
-  claim without checking its signature and approval.
+  claim without checking its signature, its approval and that the job is its own (a collector of the device's
+  collection group, or a storage worker of the job's target).
 - Retention deletes stored content only through `backups.retention` (signed `storage.delete`, confirmed by a
   `deleted` event); a pruned job row stays as the record. Anything that deletes backups must skip pinned ones
   (`BackupJob.pinned`) and keep the newest `min_backups`. Two exceptions (`devices.lifecycle`): past an inactive device's hold, retention

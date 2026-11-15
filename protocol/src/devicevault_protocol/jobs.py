@@ -31,12 +31,17 @@ payload is::
 The orchestrator only accepts a ``stored`` event whose hash matches the one
 the collector reported.
 
+An event is accepted only from a worker the job belongs to: the storing step
+(``stored``, and any event with ``stage`` "store") from a storage worker of
+the job's target, everything else from a collector of the device's collection
+group. Events about a pushed backup's collection are refused, since no worker
+collects it.
+
 SSH host keys are pinned on first use. ``job.collect`` carries the device's
 pinned key as ``device.host_key`` (``"<type> <base64>"``, as in known_hosts, or
 None); a collector refuses a device presenting any other key (reason ``auth``).
 Every ``collected`` event reports the key the device presented, and the
-orchestrator pins it if the device has none yet and the event comes from one
-of the device's own collectors.
+orchestrator pins it if the device has none yet.
 
 Retention: the orchestrator sends ``storage.delete`` (signed) to a storage
 target's queue with ``items`` (``[{"job_id", "storage_ref"}, ...]``); the
