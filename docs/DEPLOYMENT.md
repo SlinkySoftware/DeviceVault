@@ -88,6 +88,17 @@ use and `DV_SESSION_MAX_HOURS` after sign-in. Repeated failed sign-ins lock out 
 username or client address for `DV_LOGIN_LOCKOUT_MIN`; the client address is the
 last `X-Forwarded-For` hop, which the `web` service adds.
 
+The TLS proxy must tell the `web` service that the browser used HTTPS by sending
+`X-Forwarded-Proto: https`, and pass the `Host` header through unchanged (nginx:
+`proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Host $http_host;`;
+HAProxy: `http-request set-header X-Forwarded-Proto https if { ssl_fc }`; Traefik,
+Caddy and cloud load balancers do both by default). The orchestrator builds its own
+URLs from them: the OIDC redirect URI it sends to the identity provider, the origin
+its CSRF check expects, and whether the Flower cookie is `Secure`. Without the
+header it takes the site to be plain HTTP, so OIDC sign-in is sent back to an
+`http://` address, and unsafe requests are refused unless `DV_CSRF_TRUSTED_ORIGINS`
+lists the HTTPS origin.
+
 **API tokens** let scripts and monitoring call the API without a session: send
 `Authorization: Bearer dvt_...`. A token acts as its owner and never beyond their
 grants, narrowed by its scopes: `api` (the whole API, except managing tokens,
