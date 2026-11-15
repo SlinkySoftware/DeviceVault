@@ -210,6 +210,23 @@ log line matches. To automate approval: `manage.py approve_worker <name>
 - **Revoke** stops a worker consuming. **Forget** removes it; if it is still
   running it registers again as pending.
 
+### Device SSH host keys
+
+Collectors pin each device's SSH host key on first use. A device's first backup
+over SSH accepts the key the device presents; the orchestrator records it on the
+device (audited as `device.host_key_pin`, and noted in that backup's log) and sends
+it with every later backup. From then on a collector connects only if the device
+presents exactly that key, before any username or password is sent, so a host
+answering in the device's place cannot collect its credentials. A backup refused
+this way fails at once with the reason `auth` and is not retried.
+
+The device's page shows the pinned key's type and `SHA256:` fingerprint; compare it
+with the device's own (`show crypto key mypubkey` and the like) when the first
+backup is not made over a network you trust. When a device is replaced or its keys
+are regenerated, an administrator of its device group chooses **Forget host key**
+there (audited as `device.host_key_forget`), and the next backup pins the new key.
+Only a collector of the device's own collection group can pin a key.
+
 ### Storage targets
 
 Under **Admin Settings > Storage Targets**, create a target per place backups go:

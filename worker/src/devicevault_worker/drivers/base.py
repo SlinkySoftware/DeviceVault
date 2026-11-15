@@ -57,6 +57,9 @@ class Target:
     address: str
     name: str = ''
     port: int | None = None
+    # The SSH host key pinned for the device (``<type> <base64>``), or '' before its first backup.
+    # A driver that connects over SSH must refuse any other key (``drivers.ssh``).
+    host_key: str = ''
 
 
 @dataclass
@@ -65,6 +68,9 @@ class CollectionLog:
 
     source: str
     entries: list[dict[str, str]] = field(default_factory=list)
+    # The SSH host key the device presented (``<type> <base64>``), set by drivers that connect
+    # over SSH. It is reported with the collected backup, and the orchestrator pins it on first use.
+    host_key: str = ''
 
     def add(self, severity: str, message: str) -> None:
         self.entries.append(

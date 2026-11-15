@@ -1,10 +1,11 @@
+import os
 import re
 import socket
 
 import pytest
 from netmiko import NetmikoAuthenticationException, NetmikoTimeoutException
 from netmiko.exceptions import ReadTimeout
-from paramiko.ssh_exception import SSHException
+from paramiko.ssh_exception import BadHostKeyException, SSHException
 
 from devicevault_worker.drivers import get_driver
 from devicevault_worker.drivers.base import CollectionLog, PermanentError, Target, TransientError
@@ -35,6 +36,11 @@ class FakeConnection:
 
     def __init__(self, outputs, error=None, **kwargs):
         self.kwargs = kwargs
+        # The pinned host key's known_hosts file only exists while the connection is being made.
+        self.known_hosts = None
+        if kwargs.get('alt_key_file'):
+            with open(kwargs['alt_key_file']) as known_hosts:
+                self.known_hosts = known_hosts.read()
         self.outputs = outputs
         self.error = error
         self.commands = []
@@ -259,3 +265,85 @@ def test_mikrotik_secret_lines():
     assert first_secrets('mikrotik_ssh_export', 'set enabled=yes ipsec-secret=l2tp use-ipsec=yes') == [('l2tp', None)]
     assert first_secrets('mikrotik_ssh_export', 'add private-key="abc=" public-key="def="') == [('"abc="', None)]
     assert get_driver('noop').describe()['secret_lines'] == []
+
+
+# --- host keys (pinned on first use) ------------------------------------------------------------
+
+HOST_KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ/5z9AzdT8Dm9DM5cwhVsGr+7YDGjr3iqkJqscQWMlL'
+
+
+class FakeHostKey:
+    def get_name(self):
+        return HOST_KEY.split()[0]
+
+    def get_base64(self):
+        return HOST_KEY.split()[1]
+
+
+class FakeSshClient:
+    def get_transport(self):
+        return self
+
+    def get_remote_server_key(self):
+        return FakeHostKey()
+
+
+def collect(netmiko_made, host_key='', **params):
+    driver = get_driver('cisco_ios')
+    log = CollectionLog(source='cisco_ios')
+    target = Target(address='192.0.2.1', name='edge-01', host_key=host_key)
+    driver().collect(target, CREDS, driver.Params.model_validate(params), timeout=10, log=log)
+    return netmiko_made[0], log
+
+
+def test_a_first_connection_accepts_the_host_key_and_reports_it(netmiko, monkeypatch):
+    monkeypatch.setattr(FakeConnection, 'remote_conn_pre', FakeSshClient(), raising=False)
+
+    connection, log = collect(netmiko({'show running-config': CISCO_OUTPUT}))
+
+    assert connection.kwargs['ssh_strict'] is False and 'alt_key_file' not in connection.kwargs
+    assert connection.kwargs['system_host_keys'] is False
+    assert log.host_key == HOST_KEY
+    assert any('to be pinned' in entry['message'] for entry in log.entries)
+
+
+@pytest.mark.parametrize(('port', 'name'), [(22, '192.0.2.1'), (2222, '[192.0.2.1]:2222')])
+def test_a_pinned_host_key_is_the_only_one_accepted(netmiko, port, name):
+    """Strict checking against a known_hosts file holding just the pinned key, removed afterwards."""
+    connection, _ = collect(netmiko({'show running-config': CISCO_OUTPUT}), host_key=HOST_KEY, port=port)
+
+    assert connection.kwargs['ssh_strict'] is True and connection.kwargs['alt_host_keys'] is True
+    assert connection.known_hosts == f'{name} {HOST_KEY}\n'
+    assert not os.path.exists(connection.kwargs['alt_key_file'])
+
+
+def _as_netmiko_raises(error):
+    """Netmiko reports Paramiko's connection errors as its own timeout, raised while handling the original."""
+    wrapped = NetmikoTimeoutException('A paramiko SSHException occurred during connection creation')
+    wrapped.__context__ = error
+    return wrapped
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        BadHostKeyException('192.0.2.1', FakeHostKey(), FakeHostKey()),
+        SSHException("Server '192.0.2.1' not found in known_hosts"),
+    ],
+)
+def test_a_device_presenting_another_host_key_is_refused_for_good(netmiko, error):
+    netmiko({}, error=_as_netmiko_raises(error))
+
+    with pytest.raises(PermanentError, match='did not present its pinned SSH host key') as raised:
+        collect([], host_key=HOST_KEY)
+
+    assert raised.value.reason == 'auth'
+
+
+def test_without_a_pinned_key_a_host_key_error_is_just_a_failed_connection(netmiko):
+    netmiko({}, error=_as_netmiko_raises(SSHException("Server '192.0.2.1' not found in known_hosts")))
+
+    with pytest.raises(TransientError) as raised:
+        collect([])
+
+    assert raised.value.reason == 'connection'

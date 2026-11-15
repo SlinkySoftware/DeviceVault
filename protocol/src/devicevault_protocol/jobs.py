@@ -22,7 +22,7 @@ payload is::
      "worker_id": "<uuid>", "attempt": 1, "log": [<log entry>, ...], ...}
 
 ``collected`` adds ``sha256``, ``size``, ``is_binary``, ``encrypted``,
-``duration_ms``; ``stored`` adds ``sha256``, ``size``, ``storage_ref``,
+``duration_ms`` and, from SSH drivers, ``host_key`` (see below); ``stored`` adds ``sha256``, ``size``, ``storage_ref``,
 ``duration_ms``; ``retrying`` and ``failed`` add ``error`` and ``stage``
 ("collect" or "store"); ``failed`` also adds ``reason``, one of
 ``FAILURE_REASONS``. The orchestrator stores it as ``BackupJob.failure_reason``
@@ -30,6 +30,13 @@ payload is::
 ``integrity``, ``storage`` and ``orphaned`` itself.
 The orchestrator only accepts a ``stored`` event whose hash matches the one
 the collector reported.
+
+SSH host keys are pinned on first use. ``job.collect`` carries the device's
+pinned key as ``device.host_key`` (``"<type> <base64>"``, as in known_hosts, or
+None); a collector refuses a device presenting any other key (reason ``auth``).
+Every ``collected`` event reports the key the device presented, and the
+orchestrator pins it if the device has none yet and the event comes from one
+of the device's own collectors.
 
 Retention: the orchestrator sends ``storage.delete`` (signed) to a storage
 target's queue with ``items`` (``[{"job_id", "storage_ref"}, ...]``); the
@@ -40,7 +47,27 @@ worker serving that backup's target.
 Log entries: ``{"source", "timestamp", "severity", "message"}``.
 """
 
+import base64
+import binascii
+import hashlib
+import re
+
 JOB_EVENT_TASK = 'orchestrator.job_event'
+
+# An SSH host key as it is pinned and sent: ``<key type> <base64 key>``.
+HOST_KEY_PATTERN = re.compile(r'[a-z0-9][a-z0-9@._-]{2,63} [A-Za-z0-9+/]{16,4096}={0,2}')
+
+
+def host_key_fingerprint(value: object) -> str | None:
+    """``SHA256:...`` of a host key, as ``ssh-keygen -l`` and devices show it; None if it is not a host key."""
+    if not isinstance(value, str) or HOST_KEY_PATTERN.fullmatch(value) is None:
+        return None
+    try:
+        blob = base64.b64decode(value.split(' ')[1], validate=True)
+    except binascii.Error, ValueError:
+        return None
+    return 'SHA256:' + base64.b64encode(hashlib.sha256(blob).digest()).decode('ascii').rstrip('=')
+
 
 EVENT_STARTED = 'started'
 EVENT_RETRYING = 'retrying'

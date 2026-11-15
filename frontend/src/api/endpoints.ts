@@ -164,6 +164,8 @@ export const devicesApi = {
   deactivate: async (id: Id, reason: string) =>
     (await http.post<DeviceDetail>(`/devices/${id}/deactivate/`, { reason })).data,
   reactivate: async (id: Id) => (await http.post<DeviceDetail>(`/devices/${id}/reactivate/`)).data,
+  /** Drop the pinned SSH host key (a replaced or re-keyed device); the next backup pins the new one. */
+  forgetHostKey: async (id: Id) => (await http.post<DeviceDetail>(`/devices/${id}/forget_host_key/`)).data,
   /** Global administrators: unpins and deletes every backup of an inactive device. `confirm` is its name. */
   purge: async (id: Id, confirm: string) =>
     (await http.post<DeviceDetail>(`/devices/${id}/purge/`, { confirm })).data,

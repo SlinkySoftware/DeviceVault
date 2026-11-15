@@ -225,6 +225,11 @@ interface DeviceBase {
   storage_target: string | null
   credential: Id | null
   schedule: Id | null
+  /** The SSH host key pinned at the device's first backup, which collectors then require; '' while none is. */
+  ssh_host_key_type: string
+  /** `SHA256:...`, as the device and `ssh-keygen -l` show it. */
+  ssh_host_key_fingerprint: string
+  ssh_host_key_pinned_at: IsoDateTime | null
   /** What the signed-in user holds on this device's group. */
   user_permissions: GrantFlag[]
   inactive_at: IsoDateTime | null
