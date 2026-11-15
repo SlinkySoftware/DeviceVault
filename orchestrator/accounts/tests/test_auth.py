@@ -137,6 +137,51 @@ def test_the_client_address_comes_from_the_proxy_hop(alice):
     assert AuditLog.objects.get(action='auth.login').ip == '203.0.113.5'
 
 
+def _address(settings, forwarded, proxies=()):
+    import ipaddress
+
+    from django.test import RequestFactory
+
+    from audit.log import client_ip
+
+    settings.DEVICEVAULT_TRUSTED_PROXIES = tuple(ipaddress.ip_network(proxy) for proxy in proxies)
+    return client_ip(RequestFactory().get('/', REMOTE_ADDR='172.18.0.5', HTTP_X_FORWARDED_FOR=forwarded))
+
+
+@pytest.mark.parametrize(
+    ('forwarded', 'proxies', 'expected'),
+    [
+        # A TLS proxy in front of nginx: the client is the hop the proxy added, not the proxy.
+        ('198.51.100.7, 10.0.0.2', ['10.0.0.0/24'], '198.51.100.7'),
+        # What the client sent itself (left of the proxy's hop) is never believed.
+        ('192.0.2.99, 198.51.100.7, 10.0.0.2', ['10.0.0.0/24'], '198.51.100.7'),
+        # Two proxies in a row, IPv4 and IPv6.
+        ('198.51.100.7, 2001:db8::1, 10.0.0.2', ['10.0.0.2/32', '2001:db8::/64'], '198.51.100.7'),
+        ('198.51.100.7, ::ffff:10.0.0.2', ['10.0.0.0/24'], '198.51.100.7'),
+        # A request from the proxy itself (a health check).
+        ('10.0.0.2', ['10.0.0.0/24'], '10.0.0.2'),
+        # A client pretending to be a proxy gains nothing: its own hop is still what the proxy wrote.
+        ('10.0.0.9, 198.51.100.7, 10.0.0.2', ['10.0.0.0/24'], '198.51.100.7'),
+        ('junk, 10.0.0.2', ['10.0.0.0/24'], None),
+        ('198.51.100.7, 10.0.0.2', [], '10.0.0.2'),
+    ],
+)
+def test_trusted_proxies_are_skipped_to_find_the_client(settings, forwarded, proxies, expected):
+    assert _address(settings, forwarded, proxies) == expected
+
+
+def test_behind_a_trusted_proxy_one_client_cannot_lock_everyone_out(alice, settings):
+    import ipaddress
+
+    settings.DEVICEVAULT_LOGIN_MAX_FAILURES = 2
+    settings.DEVICEVAULT_TRUSTED_PROXIES = (ipaddress.ip_network('10.0.0.2/32'),)
+    for n in range(3):
+        sign_in(APIClient(HTTP_X_FORWARDED_FOR='198.51.100.7, 10.0.0.2'), username=f'guess-{n}', password='nope')
+
+    assert sign_in(APIClient(HTTP_X_FORWARDED_FOR='198.51.100.7, 10.0.0.2')).status_code == 429
+    assert sign_in(APIClient(HTTP_X_FORWARDED_FOR='203.0.113.5, 10.0.0.2')).status_code == 200
+
+
 def test_disabled_users_cannot_sign_in_and_lose_their_session(alice, admin_client):
     client = APIClient()
     sign_in(client)

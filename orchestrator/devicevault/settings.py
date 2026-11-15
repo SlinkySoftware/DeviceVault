@@ -17,6 +17,7 @@
 # All configuration comes from DV_* environment variables; each also accepts
 # <NAME>_FILE for Docker secrets. See deploy/orchestrator/orchestrator.env.example.
 
+import ipaddress
 from pathlib import Path
 
 from devicevault_protocol.bus import BusSettings
@@ -133,6 +134,15 @@ STORAGES = {
 # Behind nginx, which terminates TLS.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
+
+# Proxies in front of the web tier (addresses or networks). The client address is the last
+# X-Forwarded-For hop that is not one of them; with none, it is the hop the web tier added.
+try:
+    DEVICEVAULT_TRUSTED_PROXIES = tuple(
+        ipaddress.ip_network(entry, strict=False) for entry in env_list('DV_TRUSTED_PROXIES')
+    )
+except ValueError as exc:
+    raise ConfigError(f'DV_TRUSTED_PROXIES must list addresses or networks: {exc}') from exc
 
 # Server-side sessions in the database (shared by every orchestrator node), used
 # by the UI and the API alike. See accounts.sessions for the timeouts.

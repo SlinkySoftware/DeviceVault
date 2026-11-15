@@ -3,19 +3,34 @@
 import ipaddress
 import logging
 
+from django.conf import settings
+
 from audit.models import AuditLog
 
 logger = logging.getLogger('devicevault.audit')
 
 
 def client_ip(request) -> str | None:
-    """The client's address: the last X-Forwarded-For hop (added by our nginx), else the peer."""
+    """The client's address, from X-Forwarded-For (our nginx appends the peer it saw), else the peer.
+
+    Read from the right, skipping ``DV_TRUSTED_PROXIES`` (a TLS proxy or load balancer in front of
+    nginx): the first hop that is not one of them is the client, since everything to its left is
+    whatever the client chose to send. With no trusted proxies that is the hop nginx added.
+    """
     forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    address = forwarded.split(',')[-1].strip() if forwarded else request.META.get('REMOTE_ADDR', '')
-    try:
-        return str(ipaddress.ip_address(address))
-    except ValueError:
-        return None
+    hops = [hop.strip() for hop in forwarded.split(',')] if forwarded else [request.META.get('REMOTE_ADDR', '')]
+    address = None
+    for hop in reversed(hops):
+        try:
+            address = ipaddress.ip_address(hop)
+        except ValueError:
+            return None  # a hop a trusted proxy would never write: nothing left of here can be believed
+        if address.version == 6 and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        if not any(address in network for network in settings.DEVICEVAULT_TRUSTED_PROXIES):
+            break
+    # Every hop a trusted proxy: the request came from the outermost one itself.
+    return str(address) if address is not None else None
 
 
 def _token_prefix(request) -> str:
