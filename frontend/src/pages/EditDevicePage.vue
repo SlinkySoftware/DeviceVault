@@ -28,6 +28,33 @@
             {{ device.last_backup_time ? formatDateTime(device.last_backup_time) : 'Never' }}
           </q-badge>
         </div>
+        <div v-if="device.backup_method" class="col-12">
+          <div class="text-subtitle2">SSH host key</div>
+          <template v-if="device.ssh_host_key_fingerprint">
+            <div class="host-key">{{ device.ssh_host_key_type }} {{ device.ssh_host_key_fingerprint }}</div>
+            <div class="text-caption text-grey-7">
+              Pinned
+              {{ device.ssh_host_key_pinned_at ? formatDateTime(device.ssh_host_key_pinned_at) : '' }}
+              at the first backup. Backups fail if the device presents any other key.
+            </div>
+            <q-btn
+              v-if="isAdmin"
+              flat
+              dense
+              no-caps
+              color="negative"
+              icon="key_off"
+              label="Forget host key"
+              class="q-mt-xs"
+              :loading="forgetting"
+              @click="forgetHostKey"
+            />
+          </template>
+          <div v-else class="text-caption text-grey-7">
+            None pinned yet. The key the device presents at its first backup over SSH is pinned and required from
+            then on.
+          </div>
+        </div>
       </q-card-section>
     </q-card>
 
@@ -211,6 +238,7 @@
 </template>
 
 <script setup lang="ts">
+import { useQuasar } from 'quasar'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -252,6 +280,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const notify = useNotify()
+const $q = useQuasar()
 
 const deviceId = computed(() => (route.name === 'device-edit' ? Number(route.params.id) : null))
 const isEdit = computed(() => deviceId.value !== null)
@@ -360,6 +389,31 @@ function toForm(detail: DeviceDetail): DeviceWrite {
   }
 }
 
+const forgetting = ref(false)
+
+function forgetHostKey(): void {
+  const current = device.value
+  if (!current) return
+  $q.dialog({
+    title: 'Forget the SSH host key?',
+    message:
+      `The next backup of ${current.name} will trust and pin whatever key the device at ` +
+      `${current.ip_address} presents. Do this only if the device was replaced or re-keyed.`,
+    cancel: true,
+    ok: { label: 'Forget host key', color: 'negative', flat: true },
+  }).onOk(async () => {
+    forgetting.value = true
+    try {
+      device.value = await devicesApi.forgetHostKey(current.id)
+      notify.success('Host key forgotten')
+    } catch (error) {
+      notify.error(error, 'Failed to forget the host key')
+    } finally {
+      forgetting.value = false
+    }
+  })
+}
+
 async function save(): Promise<void> {
   saving.value = true
   try {
@@ -418,5 +472,9 @@ onMounted(async () => {
 <style scoped>
 .device-form > * {
   max-width: 60ch;
+}
+.host-key {
+  font-family: monospace;
+  overflow-wrap: anywhere;
 }
 </style>

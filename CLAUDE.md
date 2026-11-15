@@ -99,7 +99,8 @@ phased delivery plan; new work should move the code toward it, not entrench the 
 - Collector drivers subclass `CollectorDriver` (`worker/src/devicevault_worker/drivers/base.py`)
   with a pydantic `Params` model, and raise `TransientError` (retried) or `PermanentError`.
   SSH CLI platforms subclass `drivers.ssh.NetmikoDriver` (a Netmiko `device_type`, the
-  commands, and regexes for volatile lines); see `drivers/cisco.py`. Built-ins are listed in
+  commands, and regexes for volatile lines); see `drivers/cisco.py`. A driver that connects over SSH must
+  require `target.host_key` when it is set and report the key it saw in `log.host_key` (pinned on first use). Built-ins are listed in
   `drivers/__init__.py`; third-party drivers register under the
   `devicevault.collectors` entry point. Storage drivers subclass `storage.drivers.base.StorageDriver` (see `storage/drivers/local.py`, `s3.py`), stream
   content (`store` reads a binary file, `read` writes one; backups can be hundreds of MB) and register under

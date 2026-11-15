@@ -101,6 +101,8 @@ Message formats are in `protocol/src/devicevault_protocol/registration.py`.
 
 **Trust on first use:** the worker pins the orchestrator key from the first *approved* assignment that verifies against it, so the trust decision coincides with the admin's approval. After that, assignments signed with any other key are rejected, and so is every task (`device.collect`, `storage.store`, `storage.read`) not signed by the pinned key. Tasks rejected this way fail immediately and are not retried. The Workers page shows the orchestrator's fingerprint and flags a worker that pinned a different one. Changing `DV_SIGNING_KEY` means resetting every worker's state.
 
+**Device host keys** follow the same model. A device's SSH host key is pinned at its first collected backup: the collector reports the key the device presented in its signed `collected` event, and the orchestrator stores it on the device if it has none, accepting it only from a collector of the device's own collection group. Every later `job.collect` task carries the pinned key in its signed payload, and the collector refuses any other key before authenticating (a permanent failure, reason `auth`). An administrator of the device's group forgets the key when the device is replaced or re-keyed. Collectors keep no known-hosts state of their own.
+
 **Limitations:**
 - Broker credentials are shared per role, so revocation is enforced cryptographically (signatures and keys), not at the broker. Per-worker broker users can be added later.
 - Celery remote control stays enabled because Flower needs it, so anyone holding broker credentials can still send Celery control commands (for example, to stop a worker consuming). They cannot forge assignments or tasks.

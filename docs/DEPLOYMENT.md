@@ -79,6 +79,16 @@ not exist, the bootstrap admin from `DV_ADMIN_USERNAME` / `DV_ADMIN_PASSWORD` as
 a member of it. Put a TLS-terminating proxy or load balancer in front of `web`,
 and set `DV_ALLOWED_HOSTS` and `DV_CSRF_TRUSTED_ORIGINS` to match.
 
+Set `DV_TRUSTED_PROXIES` to that proxy's address (or its network, comma separated
+for several). The `web` service records the address that connected to it, which
+is then the proxy rather than the user; with the proxy listed, the orchestrator
+takes the address the proxy reports instead. Without it every user appears to come
+from the proxy: sign-in lockout by address then locks everyone out together, an API
+token's allowed networks are compared with the proxy, and the audit log shows only
+the proxy. The proxy must append to (or replace) `X-Forwarded-For`, as nginx,
+HAProxy (`option forwardfor`), Traefik and cloud load balancers do. Never list an
+address that clients could connect from themselves.
+
 ### Users and access
 
 Sign-in uses a server-side session: an HttpOnly cookie (`Secure` unless
@@ -86,7 +96,8 @@ Sign-in uses a server-side session: an HttpOnly cookie (`Secure` unless
 orchestrator node shares it. Sessions end after `DV_SESSION_IDLE_MIN` without
 use and `DV_SESSION_MAX_HOURS` after sign-in. Repeated failed sign-ins lock out a
 username or client address for `DV_LOGIN_LOCKOUT_MIN`; the client address is the
-last `X-Forwarded-For` hop, which the `web` service adds.
+last `X-Forwarded-For` hop that is not one of `DV_TRUSTED_PROXIES` (with none set,
+the hop the `web` service adds).
 
 **API tokens** let scripts and monitoring call the API without a session: send
 `Authorization: Bearer dvt_...`. A token acts as its owner and never beyond their
@@ -198,6 +209,23 @@ log line matches. To automate approval: `manage.py approve_worker <name>
   it registers as a new, pending worker.
 - **Revoke** stops a worker consuming. **Forget** removes it; if it is still
   running it registers again as pending.
+
+### Device SSH host keys
+
+Collectors pin each device's SSH host key on first use. A device's first backup
+over SSH accepts the key the device presents; the orchestrator records it on the
+device (audited as `device.host_key_pin`, and noted in that backup's log) and sends
+it with every later backup. From then on a collector connects only if the device
+presents exactly that key, before any username or password is sent, so a host
+answering in the device's place cannot collect its credentials. A backup refused
+this way fails at once with the reason `auth` and is not retried.
+
+The device's page shows the pinned key's type and `SHA256:` fingerprint; compare it
+with the device's own (`show crypto key mypubkey` and the like) when the first
+backup is not made over a network you trust. When a device is replaced or its keys
+are regenerated, an administrator of its device group chooses **Forget host key**
+there (audited as `device.host_key_forget`), and the next backup pins the new key.
+Only a collector of the device's own collection group can pin a key.
 
 ### Storage targets
 
@@ -722,6 +750,7 @@ secrets). The file takes precedence.
 | `DV_DEBUG` | `false` | Development mode; never in production |
 | `DV_ALLOWED_HOSTS` | none (`*` in debug) | Hostnames the UI is served on |
 | `DV_CSRF_TRUSTED_ORIGINS` | none | Full origins (`https://host`) behind HTTPS |
+| `DV_TRUSTED_PROXIES` | none | Addresses or networks of the proxies in front of `web`; the client address is the last `X-Forwarded-For` hop that is not one of them |
 | `DV_TIMEZONE` | `UTC` | Display timezone (storage is always UTC) |
 | `DV_LOG_LEVEL` | `INFO` | |
 | `DV_DB_ENGINE` | `sqlite` | `sqlite` or `postgres` |

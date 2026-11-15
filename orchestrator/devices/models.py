@@ -222,6 +222,10 @@ class Device(models.Model):
         blank=True,
         help_text='SSH/Telnet credentials for device access',
     )
+    # Pinned on first use: the key the device presented at its first SSH backup, which collectors
+    # then require (backups.jobs). Cleared with the forget_host_key action when a device is replaced.
+    ssh_host_key = models.TextField(blank=True, help_text='Pinned SSH host key, as "<type> <base64>"')
+    ssh_host_key_pinned_at = models.DateTimeField(null=True, blank=True, help_text='When the host key was pinned')
     inactive_at = models.DateTimeField(null=True, blank=True, help_text='When the device was marked inactive')
     inactive_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     inactive_reason = models.CharField(max_length=200, blank=True, help_text='Why the device was retired')
@@ -246,6 +250,17 @@ class Device(models.Model):
     @property
     def is_active(self) -> bool:
         return self.inactive_at is None
+
+    @property
+    def ssh_host_key_type(self) -> str:
+        return self.ssh_host_key.split(' ')[0] if self.ssh_host_key else ''
+
+    @property
+    def ssh_host_key_fingerprint(self) -> str:
+        """``SHA256:...`` of the pinned host key, to compare with what the device shows ('' when none is pinned)."""
+        from devicevault_protocol.jobs import host_key_fingerprint
+
+        return host_key_fingerprint(self.ssh_host_key) or ''
 
 
 # ===== Device groups =====

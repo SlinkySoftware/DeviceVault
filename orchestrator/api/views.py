@@ -135,6 +135,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
     ``POST {id}/backup_now/`` needs ``backup_now``. Retiring a device
     (``deactivate/``, ``reactivate/``, and ``DELETE`` once it is deletable) needs
     ``admin``; ``purge/`` is for global administrators (devices.lifecycle).
+    ``POST {id}/forget_host_key/`` (``admin``) drops the SSH host key pinned at the device's first backup.
     ``?lifecycle=active|inactive|deletable`` filters the list.
     """
 
@@ -234,6 +235,27 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device_group=device.device_group_id,
             details={'device': device.pk, 'device_name': device.name},
         )
+        return self._detail()
+
+    @decorators.action(detail=True, methods=['post'], permission_classes=[HasDeviceGroupPermission('admin')])
+    def forget_host_key(self, request, pk=None):
+        """Drop the pinned SSH host key (the device was replaced or re-keyed): its next backup pins the new one."""
+        device = self.get_object()
+        if device.ssh_host_key:
+            details = {
+                'device': device.pk,
+                'device_name': device.name,
+                'key_type': device.ssh_host_key_type,
+                'fingerprint': device.ssh_host_key_fingerprint,
+            }
+            Device.objects.filter(pk=device.pk).update(ssh_host_key='', ssh_host_key_pinned_at=None)
+            record(
+                request,
+                'device.host_key_forget',
+                resource=str(device.pk),
+                device_group=device.device_group_id,
+                details=details,
+            )
         return self._detail()
 
     @decorators.action(detail=True, methods=['post'], permission_classes=[IsGlobalAdmin])

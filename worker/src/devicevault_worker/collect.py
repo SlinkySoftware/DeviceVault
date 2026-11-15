@@ -119,6 +119,7 @@ def collect(self, envelope: dict) -> None:
             encrypted=encrypted,
             duration_ms=int((time.monotonic() - started) * 1000),
             log=log.entries,
+            **({'host_key': log.host_key} if log.host_key else {}),
         )
         store = job['store']
         app.send_task(STORE_TASK, args=[store['envelope'], blob], queue=store['queue'])
@@ -149,7 +150,7 @@ def _collect(job: dict[str, Any], log: CollectionLog) -> tuple[bytes, bool]:
     except ValueError as exc:
         raise PermanentError(f'invalid driver parameters: {exc}') from exc
     device = job['device']
-    target = Target(address=device['address'], name=device.get('name', ''))
+    target = Target(address=device['address'], name=device.get('name', ''), host_key=device.get('host_key') or '')
     credentials = secret(job, 'credentials') or {}
     content = driver_cls().collect(target, credentials, params, timeout=int(job.get('timeout', 120)), log=log)
     if isinstance(content, str):

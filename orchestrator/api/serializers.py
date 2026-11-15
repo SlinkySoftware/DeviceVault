@@ -275,6 +275,9 @@ class DeviceSerializer(LifecycleFieldsMixin, serializers.ModelSerializer):
             'storage_target',
             'schedule',
             'credential',
+            'ssh_host_key_type',
+            'ssh_host_key_fingerprint',
+            'ssh_host_key_pinned_at',
             'user_permissions',
             *LIFECYCLE_FIELDS,
         ]
@@ -353,6 +356,9 @@ class DeviceDetailedSerializer(LifecycleFieldsMixin, serializers.ModelSerializer
             'storage_target',
             'schedule',
             'credential',
+            'ssh_host_key_type',
+            'ssh_host_key_fingerprint',
+            'ssh_host_key_pinned_at',
             'user_permissions',
             *LIFECYCLE_FIELDS,
         ]

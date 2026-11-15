@@ -28,6 +28,7 @@ from devicevault_protocol.jobs import (
     EVENT_STORED,
     STAGE_STORE,
     failure_reason,
+    host_key_fingerprint,
 )
 from devicevault_protocol.names import COLLECT_TASK, STORE_TASK, collection_queue_name
 from devicevault_protocol.registration import ROLE_COLLECTOR, ROLE_STORAGE, STATUS_APPROVED
@@ -127,7 +128,13 @@ def collect_payload(job: BackupJob) -> dict[str, Any]:
     store = store_spec(job)
     collect = {
         'job_id': str(job.id),
-        'device': {'id': device.pk, 'name': device.name, 'address': device.ip_address},
+        'device': {
+            'id': device.pk,
+            'name': device.name,
+            'address': device.ip_address,
+            # Pinned at the device's first SSH backup; the collector refuses any other key.
+            'host_key': device.ssh_host_key or None,
+        },
         'driver': job.driver,
         'driver_params': device.driver_params or {},
         'timeout': settings.DEVICEVAULT_COLLECT_TIMEOUT_SEC,
@@ -221,6 +228,7 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
         job.collect_duration_ms = int(payload.get('duration_ms') or 0)
         job.collected_at = now
         job.error = ''
+        _pin_host_key(job, payload, worker)
         if job.state in (BackupJob.QUEUED, BackupJob.COLLECTING, BackupJob.TIMED_OUT):
             job.state = BackupJob.COLLECTED
             job.failure_reason = None  # a timed-out job that turned up after all
@@ -236,6 +244,56 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
         job.error = str(payload.get('error') or 'failed')
         job.failure_reason = _reported_reason(payload)
         job.finished_at = now
+
+
+def _pin_host_key(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
+    """Pin the SSH host key a device presented at its first collected backup (trust on first use).
+
+    Only one of the device's own collectors can pin it: an approved worker with no business
+    with the device must not be able to choose the key its collectors will then trust.
+    """
+    from audit.log import record
+    from devices.models import Device
+
+    key, device = payload.get('host_key'), job.device
+    if not key or job.trigger == BackupJob.TRIGGER_PUSH:
+        return
+    fingerprint = host_key_fingerprint(key)
+    if fingerprint is None:
+        logger.warning('host_key_ignored', extra={'job_id': str(job.id), 'reason': 'not a host key'})
+        return
+    if device.ssh_host_key:
+        if device.ssh_host_key != key:
+            # Its collectors enforce the pin, so this is an old job or a collector that does not.
+            logger.warning('host_key_ignored', extra={'job_id': str(job.id), 'reason': 'another key is pinned'})
+        return
+    serves = worker.role == ROLE_COLLECTOR and worker.collection_groups.filter(pk=device.collection_group_id).exists()
+    if not serves:
+        logger.warning('host_key_ignored', extra={'job_id': str(job.id), 'reason': "not the device's collector"})
+        return
+    pinned = Device.objects.filter(pk=device.pk, ssh_host_key='').update(
+        ssh_host_key=key, ssh_host_key_pinned_at=timezone.now()
+    )
+    if not pinned:
+        return  # another job pinned one meanwhile
+    device.ssh_host_key = key
+    message = f'pinned SSH host key {key.split(" ")[0]} {fingerprint} (first connection)'
+    job.log = (job.log + [_log_entry('WARNING', message, source='orchestrator')])[-MAX_LOG_ENTRIES:]
+    record(
+        None,
+        'device.host_key_pin',
+        resource=str(device.pk),
+        device_group=device.device_group_id,
+        details={
+            'device': device.pk,
+            'device_name': device.name,
+            'key_type': key.split(' ')[0],
+            'fingerprint': fingerprint,
+            'collector': worker.name,
+            'job': str(job.id),
+        },
+        actor_name=worker.name,
+    )
 
 
 def _reported_reason(payload: dict[str, Any]) -> str:
@@ -266,8 +324,8 @@ def _apply_deletion(job: BackupJob, payload: dict[str, Any], worker: Worker) -> 
     job.log = (job.log + entries)[-MAX_LOG_ENTRIES:]
 
 
-def _log_entry(severity: str, message: str) -> dict[str, str]:
-    return {'source': 'retention', 'timestamp': timezone.now().isoformat(), 'severity': severity, 'message': message}
+def _log_entry(severity: str, message: str, *, source: str = 'retention') -> dict[str, str]:
+    return {'source': source, 'timestamp': timezone.now().isoformat(), 'severity': severity, 'message': message}
 
 
 def _finish_if_complete(job: BackupJob, now) -> None:

@@ -30,7 +30,7 @@ def test_a_job_is_dispatched_as_signed_tasks_for_collector_and_storage(
     assert (name, queue) == ('job.collect', 'collector.group.dmz')
     task = verify_task(envelope, ORCHESTRATOR())
     assert task['job_id'] == str(job.id)
-    assert task['device'] == {'id': setup['device'].id, 'name': 'Edge 01', 'address': '192.0.2.10'}
+    assert task['device'] == {'id': setup['device'].id, 'name': 'Edge 01', 'address': '192.0.2.10', 'host_key': None}
     assert task['store']['queue'] == f'storage.target.{setup["target"].id}'
     store = verify_task(task['store']['envelope'], ORCHESTRATOR())
     assert store['config'] == {'path': 'fs'} and store['target']['driver'] == 'filesystem'
@@ -231,3 +231,77 @@ def test_failure_reason_is_read_only_in_the_api():
 
     assert 'failure_reason' in BackupJobSerializer.Meta.fields
     assert 'failure_reason' in BackupJobSerializer.Meta.read_only_fields
+
+
+# --- SSH host keys (pinned on first use) ----------------------------------------------------------
+
+HOST_KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ/5z9AzdT8Dm9DM5cwhVsGr+7YDGjr3iqkJqscQWMlL'
+OTHER_KEY = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDOn0OvFfw6p/WXBHAsaPNJxLtOnAjNRemDF7b3iKed'
+
+
+def collected_with_key(setup, job, key, keys=None):
+    event = job_event(keys or setup['collector'], job, EVENT_COLLECTED, sha256=SHA, size=10, host_key=key)
+    return handle_job_event(event)
+
+
+def test_the_first_collected_backup_pins_the_devices_host_key(setup, broker):
+    from audit.models import AuditLog
+
+    job, _ = create_job(setup['device'])
+
+    job = collected_with_key(setup, job, HOST_KEY)
+
+    device = setup['device']
+    device.refresh_from_db()
+    assert device.ssh_host_key == HOST_KEY and device.ssh_host_key_pinned_at is not None
+    assert device.ssh_host_key_fingerprint.startswith('SHA256:') and device.ssh_host_key_type == 'ssh-ed25519'
+    assert device.ssh_host_key_fingerprint in job.log[-1]['message']
+    entry = AuditLog.objects.get(action='device.host_key_pin')
+    assert entry.actor_name == 'collector-1' and entry.details['fingerprint'] == device.ssh_host_key_fingerprint
+
+
+def test_the_pinned_host_key_travels_in_the_signed_collect_task(setup, broker, django_capture_on_commit_callbacks):
+    setup['device'].ssh_host_key = HOST_KEY
+    setup['device'].save()
+
+    queue_job(setup, django_capture_on_commit_callbacks)
+
+    [(_, [envelope], _)] = broker.sent
+    assert verify_task(envelope, ORCHESTRATOR())['device']['host_key'] == HOST_KEY
+
+
+def test_a_pinned_host_key_is_never_replaced_by_an_event(setup, broker):
+    setup['device'].ssh_host_key = HOST_KEY
+    setup['device'].save()
+    job, _ = create_job(setup['device'])
+
+    collected_with_key(setup, job, OTHER_KEY)
+
+    setup['device'].refresh_from_db()
+    assert setup['device'].ssh_host_key == HOST_KEY
+
+
+def test_only_the_devices_own_collectors_can_pin_its_host_key(setup, broker, worker_keys):
+    from core import workers
+    from devices.models import CollectionGroup
+
+    elsewhere = worker_keys('collector-2')
+    other_group = CollectionGroup.objects.create(name='Lab', rabbitmq_queue_id='lab')
+    workers.approve(workers.handle_event(elsewhere.event()), role='collector', collection_groups=[other_group])
+    job, _ = create_job(setup['device'])
+
+    collected_with_key(setup, job, HOST_KEY, keys=elsewhere)
+    collected_with_key(setup, job, HOST_KEY, keys=setup['storage'])
+
+    setup['device'].refresh_from_db()
+    assert setup['device'].ssh_host_key == ''
+
+
+@pytest.mark.parametrize('key', ['ssh-ed25519', 'ssh-ed25519 not base64!', 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI', 7])
+def test_malformed_host_keys_are_not_pinned(setup, broker, key):
+    job, _ = create_job(setup['device'])
+
+    assert collected_with_key(setup, job, key).state == BackupJob.COLLECTED
+
+    setup['device'].refresh_from_db()
+    assert setup['device'].ssh_host_key == ''
