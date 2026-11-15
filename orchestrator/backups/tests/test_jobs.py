@@ -305,3 +305,105 @@ def test_malformed_host_keys_are_not_pinned(setup, broker, key):
 
     setup['device'].refresh_from_db()
     assert setup['device'].ssh_host_key == ''
+
+
+# --- events are accepted only from the job's own workers -----------------------------------------
+
+
+@pytest.fixture
+def outsiders(setup, worker_keys):
+    """Approved workers with no part in the device's backups: a collector of another group, a storage
+    worker of another target, and a receiver."""
+    from core import workers
+    from devices.models import CollectionGroup
+    from storage.models import StorageTarget
+
+    collector, storage, receiver = (worker_keys(name) for name in ('collector-lab', 'storage-lab', 'receiver-1'))
+    lab = CollectionGroup.objects.create(name='Lab', rabbitmq_queue_id='lab')
+    workers.approve(workers.handle_event(collector.event()), role='collector', collection_groups=[lab])
+    target = StorageTarget.objects.create(name='Lab store', driver='filesystem', config={'path': 'lab'})
+    workers.approve(workers.handle_event(storage.event()), role='storage', storage_targets=[target])
+    workers.approve(workers.handle_event(receiver.event()), role='receiver')
+    return {'collector': collector, 'storage': storage, 'receiver': receiver}
+
+
+def unchanged(job):
+    fresh = BackupJob.objects.get(pk=job.pk)
+    return (fresh.state, fresh.log, fresh.error, fresh.collected_sha256, fresh.stored_sha256, fresh.storage_ref)
+
+
+@pytest.mark.parametrize('who', ['collector', 'storage', 'receiver'])
+@pytest.mark.parametrize(
+    'event',
+    [
+        {'event': EVENT_STARTED, 'attempt': 1},
+        {'event': EVENT_COLLECTED, 'sha256': SHA, 'size': 10},
+        {'event': EVENT_STORED, 'sha256': SHA, 'storage_ref': 'elsewhere'},
+        {'event': EVENT_STARTED, 'stage': STAGE_STORE},
+        {'event': EVENT_FAILED, 'error': 'forged'},
+        {'event': EVENT_FAILED, 'stage': STAGE_STORE, 'error': 'forged'},
+        {'event': 'made-up'},
+    ],
+)
+def test_workers_with_no_part_in_a_job_cannot_report_on_it(setup, broker, outsiders, who, event):
+    job, _ = create_job(setup['device'])
+    before = unchanged(job)
+    details = {key: value for key, value in event.items() if key != 'event'}
+
+    handle_job_event(job_event(outsiders[who], job, event['event'], log=[{'message': 'forged'}], **details))
+
+    assert unchanged(job) == before
+    setup['device'].refresh_from_db()
+    assert setup['device'].last_backup_status == ''
+
+
+def test_each_of_a_jobs_workers_reports_only_its_own_step(setup, broker):
+    job, _ = create_job(setup['device'])
+    before = unchanged(job)
+
+    # The collector cannot report the storing step, nor the storage worker the collecting one.
+    handle_job_event(job_event(setup['collector'], job, EVENT_STORED, sha256=SHA, storage_ref='ref'))
+    handle_job_event(job_event(setup['collector'], job, EVENT_FAILED, stage=STAGE_STORE, error='forged'))
+    handle_job_event(job_event(setup['storage'], job, EVENT_COLLECTED, sha256=SHA, size=10))
+    handle_job_event(job_event(setup['storage'], job, EVENT_FAILED, error='forged'))
+
+    assert unchanged(job) == before
+
+
+def test_a_finished_jobs_log_is_closed_to_other_workers(setup, broker, outsiders):
+    job, _ = create_job(setup['device'])
+    collected(setup, job)
+    job = stored(setup, job)
+    before = unchanged(job)
+
+    handle_job_event(job_event(outsiders['collector'], job, EVENT_STARTED, log=[{'message': 'forged'}]))
+
+    assert unchanged(job) == before
+
+
+def test_a_worker_taken_off_the_job_loses_its_say(setup, broker):
+    job, _ = create_job(setup['device'])
+    setup['group'].workers.clear()
+    setup['target'].workers.clear()
+
+    collected(setup, job)
+    stored(setup, job)
+
+    assert BackupJob.objects.get(pk=job.pk).state == BackupJob.QUEUED
+
+
+def test_no_worker_reports_the_collection_of_a_pushed_backup(setup, broker):
+    job = BackupJob.objects.create(
+        device=setup['device'],
+        state=BackupJob.COLLECTED,
+        trigger=BackupJob.TRIGGER_PUSH,
+        storage_target=setup['target'],
+        collected_sha256=SHA,
+    )
+
+    handle_job_event(job_event(setup['collector'], job, EVENT_COLLECTED, sha256='b' * 64, size=10))
+    handle_job_event(job_event(setup['collector'], job, EVENT_FAILED, error='forged'))
+    assert BackupJob.objects.get(pk=job.pk).collected_sha256 == SHA
+
+    # Its storage step is still the storage worker's to report.
+    assert stored(setup, job).state == BackupJob.STORED

@@ -186,6 +186,14 @@ def handle_job_event(envelope: Any) -> BackupJob | None:
             _apply_deletion(job, payload, worker)
             job.save()
             return job
+        refusal = _not_its_worker(job, payload, worker)
+        if refusal:
+            # Signed by an approved worker, but about a job that is none of its business.
+            logger.warning(
+                'job_event_refused',
+                extra={'job_id': str(job.id), 'worker': worker.name, 'event': payload.get('event'), 'reason': refusal},
+            )
+            return job
         was = job.state
         _apply(job, payload, worker)
         job.save()
@@ -194,6 +202,26 @@ def handle_job_event(envelope: Any) -> BackupJob | None:
         if job.state == BackupJob.STORED and was != BackupJob.STORED:
             transaction.on_commit(lambda: request_summary(job))
     return job
+
+
+def _not_its_worker(job: BackupJob, payload: dict[str, Any], worker: Worker) -> str | None:
+    """Why ``worker`` may not report on ``job`` (None if it may).
+
+    A signature says who sent an event, not that the job is theirs. The storing step belongs to the
+    storage workers of the job's target; everything else to the collectors of the device's collection
+    group. A pushed backup has no collecting step to report on: the orchestrator created it collected.
+    Membership is read now, so a worker taken off a group or target mid-job loses its say in it.
+    """
+    if payload.get('event') == EVENT_STORED or payload.get('stage') == STAGE_STORE:
+        if worker.role == ROLE_STORAGE and worker.storage_targets.filter(pk=job.storage_target_id).exists():
+            return None
+        return "not a storage worker of the job's target"
+    if job.trigger == BackupJob.TRIGGER_PUSH:
+        return 'a pushed backup is not collected by a worker'
+    group_id = job.device.collection_group_id
+    if worker.role == ROLE_COLLECTOR and group_id and worker.collection_groups.filter(pk=group_id).exists():
+        return None
+    return "not a collector of the device's collection group"
 
 
 def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
@@ -249,14 +277,14 @@ def _apply(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
 def _pin_host_key(job: BackupJob, payload: dict[str, Any], worker: Worker) -> None:
     """Pin the SSH host key a device presented at its first collected backup (trust on first use).
 
-    Only one of the device's own collectors can pin it: an approved worker with no business
-    with the device must not be able to choose the key its collectors will then trust.
+    The event comes from one of the device's own collectors (``_not_its_worker``), so no other
+    approved worker can choose the key they will then trust.
     """
     from audit.log import record
     from devices.models import Device
 
     key, device = payload.get('host_key'), job.device
-    if not key or job.trigger == BackupJob.TRIGGER_PUSH:
+    if not key:
         return
     fingerprint = host_key_fingerprint(key)
     if fingerprint is None:
@@ -266,10 +294,6 @@ def _pin_host_key(job: BackupJob, payload: dict[str, Any], worker: Worker) -> No
         if device.ssh_host_key != key:
             # Its collectors enforce the pin, so this is an old job or a collector that does not.
             logger.warning('host_key_ignored', extra={'job_id': str(job.id), 'reason': 'another key is pinned'})
-        return
-    serves = worker.role == ROLE_COLLECTOR and worker.collection_groups.filter(pk=device.collection_group_id).exists()
-    if not serves:
-        logger.warning('host_key_ignored', extra={'job_id': str(job.id), 'reason': "not the device's collector"})
         return
     pinned = Device.objects.filter(pk=device.pk, ssh_host_key='').update(
         ssh_host_key=key, ssh_host_key_pinned_at=timezone.now()
