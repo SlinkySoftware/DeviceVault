@@ -7,6 +7,15 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
+# The scheme the browser used. This server speaks plain HTTP behind a TLS proxy or load
+# balancer, which says so in X-Forwarded-Proto; without one, it is this server's own scheme.
+# The API builds its absolute URLs (OIDC redirects), its CSRF origin check and Secure cookies
+# from it. A client that sends the header itself only changes how its own request is seen.
+map $http_x_forwarded_proto $dv_forwarded_proto {
+    default         $scheme;
+    "~*^https(,|$)" https;
+}
+
 server {
     listen 8080;
     server_name _;
@@ -26,7 +35,7 @@ server {
         proxy_pass $devicevault_api;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $dv_forwarded_proto;
         proxy_set_header X-Forwarded-Host $http_host;
         proxy_read_timeout 120s;
     }
@@ -45,7 +54,7 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $dv_forwarded_proto;
         # Flower must not see the session cookie or any API credentials.
         proxy_set_header Cookie "";
         proxy_set_header Authorization "";
@@ -64,7 +73,7 @@ server {
         proxy_set_header X-Original-URI $request_uri;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $dv_forwarded_proto;
         proxy_set_header X-Forwarded-Host $http_host;
     }
 

@@ -55,6 +55,28 @@ def test_signing_out_ends_the_session(alice):
     assert AuditLog.objects.filter(action='auth.logout', actor=alice).exists()
 
 
+def test_behind_an_https_proxy_the_site_is_https(alice):
+    """What the web tier passes on from the TLS proxy (X-Forwarded-Proto) decides the origin and URLs."""
+    from django.test import RequestFactory
+
+    proxied = {'HTTP_X_FORWARDED_PROTO': 'https', 'HTTP_X_FORWARDED_HOST': 'vault.example.com'}
+    client = APIClient(enforce_csrf_checks=True, **proxied)
+    client.get('/api/auth/csrf/')
+    token = client.cookies[settings.CSRF_COOKIE_NAME].value
+    body = {'username': 'alice', 'password': PASSWORD}
+
+    def post(origin):
+        return client.post('/api/auth/login/', body, format='json', HTTP_X_CSRFTOKEN=token, HTTP_ORIGIN=origin)
+
+    assert post('http://vault.example.com').status_code == 403
+    assert post('https://vault.example.com').status_code == 200
+
+    request = RequestFactory().get('/', **proxied)
+    assert request.build_absolute_uri('/api/auth/oidc/entra/callback/') == (
+        'https://vault.example.com/api/auth/oidc/entra/callback/'
+    )
+
+
 def test_csrf_is_enforced_on_sign_in_and_unsafe_requests(alice):
     client = APIClient(enforce_csrf_checks=True)
 
